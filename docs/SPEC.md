@@ -78,6 +78,23 @@ A catalog is a named local root directory that may contain git projects.
    - During `bb init`, initializing git in an existing non-empty project directory is allowed.
    - Path conflicts are marked unsyncable and require manual resolution.
 
+## Implementation Stack
+
+Implementation language for v1 is Go.
+
+Rationale:
+
+- Fast iteration for CLI and process orchestration (`git` and `gh`).
+- Easy static single-binary distribution.
+- Strong standard library support for filesystem/process/concurrency.
+- Cross-platform option preserved even though initial target is macOS.
+
+Implementation constraints:
+
+- Single compiled binary `bb`.
+- Primary external dependencies are local `git` and `gh` CLIs.
+- Core logic must be testable without network access by abstracting command execution, clock, and filesystem touchpoints.
+
 ## Terminology
 
 - `repo_id`: canonical repository identifier derived from normalized `origin` URL.
@@ -399,6 +416,171 @@ release lock
 - `bb catalog rm <name>`
 - `bb catalog default <name>`
 - `bb catalog list`
+
+## Testing Strategy and Harness
+
+Testing layers:
+
+1. Unit tests (pure logic)
+   - `repo_id` normalization.
+   - syncable/unsyncable evaluator.
+   - state hash and `observed_at` update rules.
+   - winner selection and tie-break behavior.
+   - catalog selection (`default_catalog`, `--include-catalog`).
+
+2. Integration tests (multi-machine simulation)
+   - Run real git commands in temp directories.
+   - Replace GitHub interactions with a local fake backend.
+   - Simulate external state sync deterministically between machine state folders.
+
+3. End-to-end CLI tests
+   - Build `bb` once per test package.
+   - Execute `bb` CLI commands with isolated env and temp HOME and mock `gh` and real `git` (described below).
+   - Assert filesystem, git, and state-file outcomes.
+
+Harness shape:
+
+1. Temporary sandbox per test case:
+   - `sandbox/machines/<machine-id>/home`
+   - `sandbox/machines/<machine-id>/catalogs/<catalog-name>`
+   - `sandbox/remotes` (bare git repos as remote origins)
+   - `sandbox/shared-state` (externally synchronized config/state view)
+
+2. Machine runner:
+   - Executes `bb` with machine-specific `HOME`.
+   - Provides helpers for local git mutations (checkout, commit, dirty file, untracked file).
+   - Injects deterministic clock values into `bb` for reproducible `observed_at`.
+
+3. Fake `gh` adapter:
+   - Test mode wires `gh repo create` to a local adapter that creates a bare repo in `sandbox/remotes`.
+   - Returns deterministic clone URLs that map to local remotes.
+   - Avoids network and GitHub credentials in CI.
+
+4. External sync simulator:
+   - Copies/merges `~/.config/bb-project` shared files between machine homes.
+   - Deterministic order to avoid flaky outcomes.
+   - Optional conflict-injection mode for robustness tests.
+
+5. Scenario driver:
+   - Table-driven Go tests define steps and assertions.
+   - Step examples:
+     - run `bb init` or `bb sync` on machine A/B
+     - mutate repo state on specific machine
+     - run external state sync
+   - Assertion examples:
+     - current branch/head per machine
+     - unsyncable reasons present/absent
+     - whether clone occurred
+     - policy files and observed timestamps
+
+Suggested scenario matrix:
+
+1. Idempotent init:
+   - empty directory init
+   - non-empty non-git directory init
+   - already-git directory with matching origin
+   - existing conflicting origin (must fail safely)
+
+2. Multi-machine convergence:
+   - A branch change propagates to clean B.
+   - B dirty/untracked blocks switch, then resolves and converges.
+   - winner tie resolved by `machine_id`.
+
+3. Path conflict safety:
+   - target exists non-empty non-repo -> `target_path_nonempty_not_repo`.
+   - target repo origin mismatch -> `target_path_repo_mismatch`.
+   - duplicate same `repo_id` on one machine -> `duplicate_local_repo_id`.
+
+4. Push policy:
+   - private repo auto-push succeeds by default.
+   - public repo ahead state blocked without `--push`.
+   - public repo with `--push` proceeds.
+
+5. Catalog behavior:
+   - init default catalog vs `--catalog`.
+   - sync all catalogs by default.
+   - sync with repeated `--include-catalog` scopes correctly.
+
+6. First-run adoption:
+   - same repo already cloned on multiple machines, no unnecessary clone.
+   - different local paths/catalogs still converge by `repo_id`.
+
+7. Observed state monotonicity:
+   - repeated no-op sync does not bump `observed_at`.
+   - only state_hash changes advance `observed_at`.
+
+Test implementation notes:
+
+- Use `go test` with table-driven tests and helper package `internal/testharness`.
+- Keep fixtures minimal; generate repos on the fly for speed and clarity.
+- Ensure tests are hermetic:
+  - no network
+  - no global HOME writes
+  - no dependency on user git config.
+
+### Explicit Test Case List (v1)
+
+Test IDs are normative for coverage tracking.
+
+1. `TC-INIT-001`: init in empty directory creates git repo, creates remote via `gh`, sets `origin`, writes repo metadata.
+2. `TC-INIT-002`: init in existing non-empty non-git directory is allowed and initializes git.
+3. `TC-INIT-003`: init in existing git repo with matching `origin` is idempotent (no destructive changes).
+4. `TC-INIT-004`: init in existing git repo with conflicting `origin` fails safely with clear error.
+5. `TC-INIT-005`: init with `--public` creates public repo and defaults `auto_push=false`.
+6. `TC-INIT-006`: init without `--public` creates private repo and defaults `auto_push=true`.
+7. `TC-INIT-007`: init in existing repo with commits and no upstream auto-pushes when policy allows.
+8. `TC-INIT-008`: init in public repo with commits and no upstream does not push unless `--push`.
+9. `TC-INIT-009`: init with omitted project infers project root from cwd under catalog subtree.
+10. `TC-INIT-010`: init with omitted project outside configured catalogs fails with explicit message.
+
+11. `TC-SCAN-001`: scan auto-discovers new git repo in selected catalog and records it.
+12. `TC-SCAN-002`: scan ignores non-git directories in catalog roots.
+13. `TC-SCAN-003`: scan with `--include-catalog` only processes selected catalogs.
+
+14. `TC-SYNC-001`: clean branch change on machine A propagates to clean machine B.
+15. `TC-SYNC-002`: dirty tracked files on B prevent branch switch from A.
+16. `TC-SYNC-003`: untracked files on B prevent branch switch from A.
+17. `TC-SYNC-004`: once B becomes clean/syncable, next sync applies winner branch.
+18. `TC-SYNC-005`: repeated no-op sync does not change `observed_at`.
+19. `TC-SYNC-006`: real state change updates `state_hash` and advances `observed_at`.
+20. `TC-SYNC-007`: winner tie on equal `observed_at` uses lexicographically smallest `machine_id`.
+21. `TC-SYNC-008`: repo with no winner (no syncable records) is left unchanged.
+22. `TC-SYNC-009`: diverged branch is marked unsyncable and not auto-resolved.
+23. `TC-SYNC-010`: merge/rebase/cherry-pick/bisect in progress is marked unsyncable.
+24. `TC-SYNC-011`: missing upstream is marked unsyncable.
+25. `TC-SYNC-012`: behind-only branch performs `pull --ff-only` when syncable.
+26. `TC-SYNC-013`: ahead-only private repo auto-pushes when syncable.
+27. `TC-SYNC-014`: ahead-only public repo blocks with `push_policy_blocked` unless `--push`.
+28. `TC-SYNC-015`: ahead-only public repo with `--push` pushes successfully.
+29. `TC-SYNC-016`: fetch/pull/push failure maps to correct unsyncable reason (`pull_failed`/`push_failed`).
+30. `TC-SYNC-017`: lock prevents concurrent sync runs from mutating state simultaneously.
+
+31. `TC-PATH-001`: target clone path exists and is empty directory -> clone allowed.
+32. `TC-PATH-002`: target path exists non-empty and not git repo -> `target_path_nonempty_not_repo`.
+33. `TC-PATH-003`: target path is git repo with mismatched origin -> `target_path_repo_mismatch`.
+34. `TC-PATH-004`: target path is git repo with matching origin -> adopt existing repo, no reclone.
+35. `TC-PATH-005`: same `repo_id` found at multiple local paths on one machine -> `duplicate_local_repo_id`.
+36. `TC-PATH-006`: when path conflict reason is active, sync makes no project changes for that repo.
+
+37. `TC-CATALOG-001`: `bb init` without `--catalog` uses `default_catalog`.
+38. `TC-CATALOG-002`: `bb init --catalog <name>` uses specified catalog root.
+39. `TC-CATALOG-003`: sync without filters processes all catalogs.
+40. `TC-CATALOG-004`: sync with repeated `--include-catalog` processes union of specified catalogs.
+41. `TC-CATALOG-005`: repo with `preferred_catalog` absent on machine falls back to `default_catalog`.
+42. `TC-CATALOG-006`: invalid catalog name in include/init returns clear validation error.
+
+43. `TC-ADOPT-001`: first-run on two machines with same existing repo adopts both copies and converges by `repo_id`.
+44. `TC-ADOPT-002`: first-run with different local paths for same repo still converges branch state correctly.
+45. `TC-ADOPT-003`: first-run with pre-existing non-empty conflicting target path marks unsyncable and skips.
+
+46. `TC-NOTIFY-001`: notification emitted when repo first becomes unsyncable.
+47. `TC-NOTIFY-002`: repeated sync with same unsyncable fingerprint emits no duplicate notification.
+48. `TC-NOTIFY-003`: notification emitted when unsyncable reason fingerprint changes.
+49. `TC-NOTIFY-004`: no notification emitted for repos that remain syncable.
+
+50. `TC-CONFIG-001`: unsupported `state_transport.mode` fails with explicit config error in v1.
+51. `TC-CONFIG-002`: missing machine file bootstraps defaults and persists machine identity.
+52. `TC-CONFIG-003`: malformed YAML in shared state returns non-zero and clear parse error.
 
 ## Initial Adoption and Pre-existing Repositories
 
