@@ -1,0 +1,32 @@
+## bb
+
+Keep Git repositories consistent across machines.
+
+### Synopsis
+
+bb is a local-first CLI for repository bootstrap and safe cross-machine convergence.
+
+```
+bb [flags]
+```
+
+### Options
+
+```
+  -h, --help    help for bb
+  -q, --quiet   Suppress verbose bb logs.
+```
+
+### SEE ALSO
+
+* [bb catalog](bb_catalog.md)	 - Manage machine catalogs and default catalog selection.
+* [bb completion](bb_completion.md)	 - Generate shell completion scripts.
+* [bb config](bb_config.md)	 - Launch interactive configuration wizard.
+* [bb doctor](bb_doctor.md)	 - Report unsyncable repositories and reasons.
+* [bb ensure](bb_ensure.md)	 - Alias for sync convergence over selected catalogs.
+* [bb init](bb_init.md)	 - Initialize or adopt a repository and register metadata.
+* [bb repo](bb_repo.md)	 - Manage repository metadata and policy settings.
+* [bb scan](bb_scan.md)	 - Discover repositories under catalogs and publish machine state.
+* [bb status](bb_status.md)	 - Show last recorded machine repository state.
+* [bb sync](bb_sync.md)	 - Run observe, publish, and reconcile flow.
+

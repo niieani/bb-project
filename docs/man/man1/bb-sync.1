@@ -1,0 +1,43 @@
+.nh
+.TH "BB" "1" "Feb 2026" "bb" ""
+
+.SH NAME
+bb-sync - Run observe, publish, and reconcile flow.
+
+
+.SH SYNOPSIS
+\fBbb sync [flags]\fP
+
+
+.SH DESCRIPTION
+Run observe, publish, and reconcile flow.
+
+
+.SH OPTIONS
+\fB--dry-run\fP[=false]
+	Show reconcile decisions without write-side sync actions.
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for sync
+
+.PP
+\fB--include-catalog\fP=[]
+	Limit scope to selected catalogs (repeatable).
+
+.PP
+\fB--notify\fP[=false]
+	Emit notifications for unsyncable repositories.
+
+.PP
+\fB--push\fP[=false]
+	Allow pushing ahead commits when policy blocks by default.
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB-q\fP, \fB--quiet\fP[=false]
+	Suppress verbose bb logs.
+
+
+.SH SEE ALSO
+\fBbb(1)\fP

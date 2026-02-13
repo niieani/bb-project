@@ -83,6 +83,7 @@ Top-level commands:
 - `repo`
 - `catalog`
 - `config`
+- `completion`
 
 ### `bb init [project] [flags]`
 
@@ -170,6 +171,15 @@ Launches an interactive Bubble Tea wizard for onboarding and reconfiguration.
 - edits this machine's catalogs and default catalog
 - can be rerun to change existing values
 - requires an interactive terminal
+
+### `bb completion [bash|zsh|fish|powershell]`
+
+Prints shell completion scripts to stdout.
+
+Examples:
+
+- `bb completion zsh > "${fpath[1]}/_bb"`
+- `bb completion bash > ~/.local/share/bash-completion/completions/bb`
 
 ## Exit Codes
 
@@ -306,6 +316,12 @@ Run tests:
 just test
 ```
 
+Regenerate CLI docs/manpages:
+
+```bash
+just docs-cli
+```
+
 Run focused e2e suites:
 
 ```bash
@@ -317,6 +333,7 @@ go test ./internal/e2e -run TestSyncEdgeCases -count=1
 Repository structure:
 
 - `cmd/bb`: CLI entrypoint
+- `cmd/bb-docs`: CLI docs/manpage generator
 - `internal/cli`: argument parsing and dispatch
 - `internal/app`: orchestration and command behavior
 - `internal/domain`: core rules and types

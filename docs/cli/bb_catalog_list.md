@@ -1,0 +1,24 @@
+## bb catalog list
+
+List configured catalogs and mark default.
+
+```
+bb catalog list [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for list
+```
+
+### Options inherited from parent commands
+
+```
+  -q, --quiet   Suppress verbose bb logs.
+```
+
+### SEE ALSO
+
+* [bb catalog](bb_catalog.md)	 - Manage machine catalogs and default catalog selection.
+

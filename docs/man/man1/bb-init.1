@@ -1,0 +1,43 @@
+.nh
+.TH "BB" "1" "Feb 2026" "bb" ""
+
+.SH NAME
+bb-init - Initialize or adopt a repository and register metadata.
+
+
+.SH SYNOPSIS
+\fBbb init [project] [flags]\fP
+
+
+.SH DESCRIPTION
+Initialize or adopt a repository and register metadata.
+
+
+.SH OPTIONS
+\fB--catalog\fP=""
+	Select catalog instead of using the machine default.
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for init
+
+.PP
+\fB--https\fP[=false]
+	Use HTTPS remote protocol instead of SSH.
+
+.PP
+\fB--public\fP[=false]
+	Create or register repository as public.
+
+.PP
+\fB--push\fP[=false]
+	Allow initial push/upstream setup when local commits exist.
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB-q\fP, \fB--quiet\fP[=false]
+	Suppress verbose bb logs.
+
+
+.SH SEE ALSO
+\fBbb(1)\fP

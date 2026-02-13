@@ -6,617 +6,494 @@ import (
 	"io"
 	"os"
 	"strconv"
-	"strings"
 
 	"bb-project/internal/app"
 	"bb-project/internal/state"
+	"github.com/spf13/cobra"
 )
 
-type helpItem struct {
-	Name        string
-	Summary     string
-	Usage       []string
-	Details     []string
-	Flags       []helpField
-	Subcommands []helpField
-	Examples    []string
+type appRunner interface {
+	SetVerbose(verbose bool)
+	RunInit(opts app.InitOptions) error
+	RunScan(opts app.ScanOptions) (int, error)
+	RunSync(opts app.SyncOptions) (int, error)
+	RunStatus(jsonOut bool, include []string) (int, error)
+	RunDoctor(include []string) (int, error)
+	RunEnsure(include []string) (int, error)
+	RunRepoPolicy(repoSelector string, autoPush bool) (int, error)
+	RunCatalogAdd(name, root string) (int, error)
+	RunCatalogRM(name string) (int, error)
+	RunCatalogDefault(name string) (int, error)
+	RunCatalogList() (int, error)
+	RunConfig() error
 }
 
-type helpField struct {
-	Name        string
-	Description string
+type runDeps struct {
+	userHomeDir func() (string, error)
+	newApp      func(paths state.Paths, stdout io.Writer, stderr io.Writer) appRunner
 }
 
-var topLevelHelpOrder = []string{
-	"init",
-	"scan",
-	"sync",
-	"status",
-	"doctor",
-	"ensure",
-	"repo",
-	"catalog",
-	"config",
-	"help",
+type runtimeState struct {
+	stdout io.Writer
+	stderr io.Writer
+	quiet  bool
+
+	deps runDeps
+	app  appRunner
 }
 
-var helpTopics = map[string]helpItem{
-	"init": {
-		Name:    "init",
-		Summary: "Initialize or adopt a repository in a catalog and register metadata.",
-		Usage: []string{
-			"bb init [project] [--catalog <name>] [--public] [--push] [--https]",
+type exitError struct {
+	code int
+	err  error
+}
+
+func (e *exitError) Error() string {
+	if e.err != nil {
+		return e.err.Error()
+	}
+	return fmt.Sprintf("exit code %d", e.code)
+}
+
+func (e *exitError) Unwrap() error {
+	return e.err
+}
+
+func defaultRunDeps() runDeps {
+	return runDeps{
+		userHomeDir: os.UserHomeDir,
+		newApp: func(paths state.Paths, stdout io.Writer, stderr io.Writer) appRunner {
+			return app.New(paths, stdout, stderr)
 		},
-		Details: []string{
-			"If project is omitted, bb infers it from the current directory when possible.",
-		},
-		Flags: []helpField{
-			{Name: "--catalog <name>", Description: "Select catalog instead of using the machine default."},
-			{Name: "--public", Description: "Create or register repository as public (default is private)."},
-			{Name: "--push", Description: "Allow initial push/upstream setup when local commits exist."},
-			{Name: "--https", Description: "Use HTTPS remote protocol instead of SSH."},
-		},
-		Examples: []string{
-			"bb init api",
-			"bb init api --catalog software --public",
-		},
-	},
-	"scan": {
-		Name:    "scan",
-		Summary: "Discover repositories under catalogs and publish observed machine state.",
-		Usage: []string{
-			"bb scan [--include-catalog <name> ...]",
-		},
-		Flags: []helpField{
-			{Name: "--include-catalog <name>", Description: "Limit scan scope to selected catalogs (repeatable)."},
-		},
-		Examples: []string{
-			"bb scan",
-			"bb scan --include-catalog software",
-		},
-	},
-	"sync": {
-		Name:    "sync",
-		Summary: "Run observe, publish, and reconcile flow to converge repositories safely.",
-		Usage: []string{
-			"bb sync [--include-catalog <name> ...] [--push] [--notify] [--dry-run]",
-		},
-		Flags: []helpField{
-			{Name: "--include-catalog <name>", Description: "Limit sync scope to selected catalogs (repeatable)."},
-			{Name: "--push", Description: "Allow pushing ahead commits when repo policy blocks by default."},
-			{Name: "--notify", Description: "Emit notifications for unsyncable repositories."},
-			{Name: "--dry-run", Description: "Show reconcile decisions without write-side sync actions."},
-		},
-		Examples: []string{
-			"bb sync --notify",
-			"bb sync --include-catalog software --dry-run",
-		},
-	},
-	"status": {
-		Name:    "status",
-		Summary: "Show last recorded machine repository state.",
-		Usage: []string{
-			"bb status [--json] [--include-catalog <name> ...]",
-		},
-		Flags: []helpField{
-			{Name: "--json", Description: "Print machine and repository state as JSON."},
-			{Name: "--include-catalog <name>", Description: "Limit output to selected catalogs (repeatable)."},
-		},
-		Examples: []string{
-			"bb status",
-			"bb status --json --include-catalog software",
-		},
-	},
-	"doctor": {
-		Name:    "doctor",
-		Summary: "Report unsyncable repositories and reasons.",
-		Usage: []string{
-			"bb doctor [--include-catalog <name> ...]",
-		},
-		Flags: []helpField{
-			{Name: "--include-catalog <name>", Description: "Limit checks to selected catalogs (repeatable)."},
-		},
-		Examples: []string{
-			"bb doctor",
-			"bb doctor --include-catalog software",
-		},
-	},
-	"ensure": {
-		Name:    "ensure",
-		Summary: "Alias for sync convergence over selected catalogs.",
-		Usage: []string{
-			"bb ensure [--include-catalog <name> ...]",
-		},
-		Flags: []helpField{
-			{Name: "--include-catalog <name>", Description: "Limit convergence to selected catalogs (repeatable)."},
-		},
-		Examples: []string{
-			"bb ensure",
-			"bb ensure --include-catalog software",
-		},
-	},
-	"repo": {
-		Name:    "repo",
-		Summary: "Manage repository metadata and policy settings.",
-		Usage: []string{
-			"bb repo policy <repo> --auto-push=<true|false>",
-		},
-		Subcommands: []helpField{
-			{Name: "policy <repo> --auto-push=<true|false>", Description: "Set auto_push policy by repo_id or unique repo name."},
-		},
-		Examples: []string{
-			"bb repo policy github.com/you/service --auto-push=false",
-			"bb repo policy service --auto-push=true",
-		},
-	},
-	"catalog": {
-		Name:    "catalog",
-		Summary: "Manage machine catalogs and default catalog selection.",
-		Usage: []string{
-			"bb catalog add <name> <root>",
-			"bb catalog rm <name>",
-			"bb catalog default <name>",
-			"bb catalog list",
-		},
-		Subcommands: []helpField{
-			{Name: "add <name> <root>", Description: "Add catalog root to current machine."},
-			{Name: "rm <name>", Description: "Remove catalog from current machine."},
-			{Name: "default <name>", Description: "Set machine default catalog."},
-			{Name: "list", Description: "List configured catalogs and mark default."},
-		},
-		Examples: []string{
-			"bb catalog add software /Volumes/Projects/Software",
-			"bb catalog default software",
-		},
-	},
-	"config": {
-		Name:    "config",
-		Summary: "Launch interactive configuration wizard.",
-		Usage: []string{
-			"bb config",
-		},
-		Details: []string{
-			"Requires an interactive terminal.",
-		},
-	},
-	"help": {
-		Name:    "help",
-		Summary: "Show general help or command-specific help.",
-		Usage: []string{
-			"bb help",
-			"bb help <command>",
-		},
-		Examples: []string{
-			"bb help",
-			"bb help sync",
-		},
-	},
-	"repo policy": {
-		Name:    "repo policy",
-		Summary: "Set repository auto_push policy.",
-		Usage: []string{
-			"bb repo policy <repo> --auto-push=<true|false>",
-		},
-		Examples: []string{
-			"bb repo policy service --auto-push=true",
-		},
-	},
-	"catalog add": {
-		Name:    "catalog add",
-		Summary: "Add a machine catalog root.",
-		Usage: []string{
-			"bb catalog add <name> <root>",
-		},
-	},
-	"catalog rm": {
-		Name:    "catalog rm",
-		Summary: "Remove a machine catalog.",
-		Usage: []string{
-			"bb catalog rm <name>",
-		},
-	},
-	"catalog default": {
-		Name:    "catalog default",
-		Summary: "Set machine default catalog.",
-		Usage: []string{
-			"bb catalog default <name>",
-		},
-	},
-	"catalog list": {
-		Name:    "catalog list",
-		Summary: "List machine catalogs.",
-		Usage: []string{
-			"bb catalog list",
-		},
-	},
+	}
 }
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
-	parsedArgs, quiet, helpRequested := stripGlobalFlags(args)
-	args = parsedArgs
-
-	if helpRequested {
-		if len(args) > 0 && args[0] == "help" {
-			return runHelp(args[1:], stdout, stderr)
-		}
-		if len(args) > 0 {
-			return runHelp(args[:1], stdout, stderr)
-		}
-		return runHelp(nil, stdout, stderr)
-	}
-
-	if len(args) == 0 {
-		printUsage(stderr)
-		return 2
-	}
-
-	cmd := args[0]
-	rest := args[1:]
-	if cmd == "help" {
-		return runHelp(rest, stdout, stderr)
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintf(stderr, "resolve home: %v\n", err)
-		return 2
-	}
-	a := app.New(state.NewPaths(home), stdout, stderr)
-	a.SetVerbose(!quiet)
-	var code int
-	switch cmd {
-	case "init":
-		opts, err := parseInitArgs(rest)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		err = a.RunInit(opts)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		return 0
-	case "scan":
-		include, err := parseIncludeCatalogs(rest)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		code, err = a.RunScan(app.ScanOptions{IncludeCatalogs: include})
-	case "sync":
-		opts, err := parseSyncArgs(rest)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		code, err = a.RunSync(opts)
-	case "status":
-		jsonOut := false
-		include := []string{}
-		for i := 0; i < len(rest); i++ {
-			switch rest[i] {
-			case "--json":
-				jsonOut = true
-			case "--include-catalog":
-				i++
-				if i >= len(rest) {
-					fmt.Fprintln(stderr, "--include-catalog requires a value")
-					return 2
-				}
-				include = append(include, rest[i])
-			default:
-				fmt.Fprintf(stderr, "unknown status arg %q\n", rest[i])
-				return 2
-			}
-		}
-		code, err = a.RunStatus(jsonOut, include)
-	case "doctor":
-		include, err := parseIncludeCatalogs(rest)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		code, err = a.RunDoctor(include)
-	case "ensure":
-		include, err := parseIncludeCatalogs(rest)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		code, err = a.RunEnsure(include)
-	case "repo":
-		code, err = runRepoSubcommand(a, rest)
-	case "catalog":
-		code, err = runCatalogSubcommand(a, rest)
-	case "config":
-		if err := parseConfigArgs(rest); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		if err := a.RunConfig(); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		return 0
-	default:
-		fmt.Fprintf(stderr, "unknown command %q\n", cmd)
-		printUsage(stderr)
-		return 2
-	}
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		if code == 0 {
-			return 2
-		}
-		return code
-	}
-	return code
+	return runWithDeps(args, stdout, stderr, defaultRunDeps())
 }
 
-func runHelp(args []string, stdout io.Writer, stderr io.Writer) int {
-	if len(args) == 0 {
-		printUsage(stdout)
+func NewRootCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+	runtime := &runtimeState{
+		stdout: stdout,
+		stderr: stderr,
+		deps:   defaultRunDeps(),
+	}
+	cmd := newRootCommand(runtime)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	return cmd
+}
+
+func runWithDeps(args []string, stdout io.Writer, stderr io.Writer, deps runDeps) int {
+	runtime := &runtimeState{
+		stdout: stdout,
+		stderr: stderr,
+		deps:   deps,
+	}
+
+	cmd := newRootCommand(runtime)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs(args)
+
+	err := cmd.Execute()
+	if err == nil {
 		return 0
 	}
-	topic := strings.Join(args, " ")
-	if printTopicHelp(stdout, topic) {
-		return 0
+
+	var codedErr *exitError
+	if errors.As(err, &codedErr) {
+		if codedErr.err != nil {
+			fmt.Fprintln(stderr, codedErr.err)
+		}
+		if codedErr.code == 0 {
+			return 2
+		}
+		return codedErr.code
 	}
-	fmt.Fprintf(stderr, "unknown help topic %q\n", topic)
-	printUsage(stderr)
+
+	fmt.Fprintln(stderr, err)
 	return 2
 }
 
-func runRepoSubcommand(a *app.App, args []string) (int, error) {
-	if len(args) < 1 {
-		return 2, errors.New("repo subcommand required")
+func (r *runtimeState) appRunner() (appRunner, error) {
+	if r.app != nil {
+		return r.app, nil
 	}
-	if args[0] != "policy" {
-		return 2, fmt.Errorf("unknown repo command %q", args[0])
+
+	home, err := r.deps.userHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve home: %w", err)
 	}
-	if len(args) < 3 {
-		return 2, errors.New("usage: bb repo policy <repo> --auto-push=<true|false>")
+
+	a := r.deps.newApp(state.NewPaths(home), r.stdout, r.stderr)
+	a.SetVerbose(!r.quiet)
+	r.app = a
+	return r.app, nil
+}
+
+func newRootCommand(runtime *runtimeState) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           "bb",
+		Short:         "Keep Git repositories consistent across machines.",
+		Long:          "bb is a local-first CLI for repository bootstrap and safe cross-machine convergence.",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := cmd.Help(); err != nil {
+				return withExitCode(2, err)
+			}
+			return withExitCode(2, errors.New("a command is required"))
+		},
 	}
-	repo := args[1]
-	autoPush := false
-	found := false
-	for _, arg := range args[2:] {
-		if strings.HasPrefix(arg, "--auto-push=") {
-			v := strings.TrimPrefix(arg, "--auto-push=")
-			b, err := strconv.ParseBool(v)
+
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return withExitCode(2, err)
+	})
+
+	cmd.PersistentFlags().BoolVarP(&runtime.quiet, "quiet", "q", false, "Suppress verbose bb logs.")
+
+	cmd.AddCommand(
+		newInitCommand(runtime),
+		newScanCommand(runtime),
+		newSyncCommand(runtime),
+		newStatusCommand(runtime),
+		newDoctorCommand(runtime),
+		newEnsureCommand(runtime),
+		newRepoCommand(runtime),
+		newCatalogCommand(runtime),
+		newConfigCommand(runtime),
+	)
+	cmd.AddCommand(newCompletionCommand(runtime, cmd))
+
+	return cmd
+}
+
+func withExitCode(code int, err error) error {
+	if err == nil {
+		if code == 0 {
+			return nil
+		}
+		return &exitError{code: code}
+	}
+	if code == 0 {
+		code = 2
+	}
+	return &exitError{code: code, err: err}
+}
+
+func newInitCommand(runtime *runtimeState) *cobra.Command {
+	var catalog string
+	var public bool
+	var push bool
+	var https bool
+
+	cmd := &cobra.Command{
+		Use:   "init [project]",
+		Short: "Initialize or adopt a repository and register metadata.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			runner, err := runtime.appRunner()
 			if err != nil {
-				return 2, fmt.Errorf("invalid --auto-push value %q", v)
+				return withExitCode(2, err)
 			}
-			autoPush = b
-			found = true
-			continue
-		}
-		return 2, fmt.Errorf("unknown argument %q", arg)
-	}
-	if !found {
-		return 2, errors.New("--auto-push is required")
-	}
-	return a.RunRepoPolicy(repo, autoPush)
-}
-
-func runCatalogSubcommand(a *app.App, args []string) (int, error) {
-	if len(args) < 1 {
-		return 2, errors.New("catalog subcommand required")
-	}
-	switch args[0] {
-	case "add":
-		if len(args) != 3 {
-			return 2, errors.New("usage: bb catalog add <name> <root>")
-		}
-		return a.RunCatalogAdd(args[1], args[2])
-	case "rm":
-		if len(args) != 2 {
-			return 2, errors.New("usage: bb catalog rm <name>")
-		}
-		return a.RunCatalogRM(args[1])
-	case "default":
-		if len(args) != 2 {
-			return 2, errors.New("usage: bb catalog default <name>")
-		}
-		return a.RunCatalogDefault(args[1])
-	case "list":
-		if len(args) != 1 {
-			return 2, errors.New("usage: bb catalog list")
-		}
-		return a.RunCatalogList()
-	default:
-		return 2, fmt.Errorf("unknown catalog command %q", args[0])
-	}
-}
-
-func parseInitArgs(args []string) (app.InitOptions, error) {
-	var out app.InitOptions
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--public":
-			out.Public = true
-		case arg == "--push":
-			out.Push = true
-		case arg == "--https":
-			out.HTTPS = true
-		case arg == "--catalog":
-			i++
-			if i >= len(args) {
-				return app.InitOptions{}, errors.New("--catalog requires value")
+			project := ""
+			if len(args) == 1 {
+				project = args[0]
 			}
-			out.Catalog = args[i]
-		case strings.HasPrefix(arg, "--catalog="):
-			out.Catalog = strings.TrimPrefix(arg, "--catalog=")
-		case strings.HasPrefix(arg, "-"):
-			return app.InitOptions{}, fmt.Errorf("unknown init flag %q", arg)
-		default:
-			if out.Project != "" {
-				return app.InitOptions{}, errors.New("init accepts at most one project argument")
+			err = runner.RunInit(app.InitOptions{
+				Project: project,
+				Catalog: catalog,
+				Public:  public,
+				Push:    push,
+				HTTPS:   https,
+			})
+			return withExitCode(0, err)
+		},
+	}
+
+	cmd.Flags().StringVar(&catalog, "catalog", "", "Select catalog instead of using the machine default.")
+	cmd.Flags().BoolVar(&public, "public", false, "Create or register repository as public.")
+	cmd.Flags().BoolVar(&push, "push", false, "Allow initial push/upstream setup when local commits exist.")
+	cmd.Flags().BoolVar(&https, "https", false, "Use HTTPS remote protocol instead of SSH.")
+
+	return cmd
+}
+
+func newScanCommand(runtime *runtimeState) *cobra.Command {
+	var includeCatalogs []string
+
+	cmd := &cobra.Command{
+		Use:   "scan",
+		Short: "Discover repositories under catalogs and publish machine state.",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
 			}
-			out.Project = arg
-		}
+			code, err := runner.RunScan(app.ScanOptions{IncludeCatalogs: includeCatalogs})
+			return withExitCode(code, err)
+		},
 	}
-	return out, nil
+
+	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
+
+	return cmd
 }
 
-func parseIncludeCatalogs(args []string) ([]string, error) {
-	out := []string{}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--include-catalog":
-			i++
-			if i >= len(args) {
-				return nil, errors.New("--include-catalog requires value")
+func newSyncCommand(runtime *runtimeState) *cobra.Command {
+	var includeCatalogs []string
+	var push bool
+	var notify bool
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Run observe, publish, and reconcile flow.",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
 			}
-			out = append(out, args[i])
-		case strings.HasPrefix(arg, "--include-catalog="):
-			out = append(out, strings.TrimPrefix(arg, "--include-catalog="))
-		case arg == "":
-			continue
-		default:
-			return nil, fmt.Errorf("unknown argument %q", arg)
-		}
+			code, err := runner.RunSync(app.SyncOptions{
+				IncludeCatalogs: includeCatalogs,
+				Push:            push,
+				Notify:          notify,
+				DryRun:          dryRun,
+			})
+			return withExitCode(code, err)
+		},
 	}
-	return out, nil
+
+	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
+	cmd.Flags().BoolVar(&push, "push", false, "Allow pushing ahead commits when policy blocks by default.")
+	cmd.Flags().BoolVar(&notify, "notify", false, "Emit notifications for unsyncable repositories.")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show reconcile decisions without write-side sync actions.")
+
+	return cmd
 }
 
-func parseSyncArgs(args []string) (app.SyncOptions, error) {
-	var out app.SyncOptions
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--push":
-			out.Push = true
-		case arg == "--notify":
-			out.Notify = true
-		case arg == "--dry-run":
-			out.DryRun = true
-		case arg == "--include-catalog":
-			i++
-			if i >= len(args) {
-				return app.SyncOptions{}, errors.New("--include-catalog requires value")
+func newStatusCommand(runtime *runtimeState) *cobra.Command {
+	var includeCatalogs []string
+	var jsonOut bool
+
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show last recorded machine repository state.",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
 			}
-			out.IncludeCatalogs = append(out.IncludeCatalogs, args[i])
-		case strings.HasPrefix(arg, "--include-catalog="):
-			out.IncludeCatalogs = append(out.IncludeCatalogs, strings.TrimPrefix(arg, "--include-catalog="))
-		default:
-			return app.SyncOptions{}, fmt.Errorf("unknown sync arg %q", arg)
-		}
+			code, err := runner.RunStatus(jsonOut, includeCatalogs)
+			return withExitCode(code, err)
+		},
 	}
-	return out, nil
+
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Print machine and repository state as JSON.")
+	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
+
+	return cmd
 }
 
-func parseConfigArgs(args []string) error {
-	if len(args) == 0 {
-		return nil
+func newDoctorCommand(runtime *runtimeState) *cobra.Command {
+	var includeCatalogs []string
+
+	cmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "Report unsyncable repositories and reasons.",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunDoctor(includeCatalogs)
+			return withExitCode(code, err)
+		},
 	}
-	return fmt.Errorf("unknown config arg %q", args[0])
+
+	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
+
+	return cmd
 }
 
-func printUsage(w io.Writer) {
-	fmt.Fprintln(w, "bb keeps Git repositories consistent across machines.")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  bb [global flags] <command> [args]")
-	fmt.Fprintln(w, "  bb help [command]")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Global flags:")
-	fmt.Fprintln(w, "  -q, --quiet  Suppress verbose bb logs.")
-	fmt.Fprintln(w, "  -h, --help   Show help (general or command-specific).")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Commands:")
-	rows := make([]helpField, 0, len(topLevelHelpOrder))
-	for _, name := range topLevelHelpOrder {
-		topic, ok := helpTopics[name]
-		if !ok {
-			continue
-		}
-		rows = append(rows, helpField{Name: name, Description: topic.Summary})
+func newEnsureCommand(runtime *runtimeState) *cobra.Command {
+	var includeCatalogs []string
+
+	cmd := &cobra.Command{
+		Use:   "ensure",
+		Short: "Alias for sync convergence over selected catalogs.",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunEnsure(includeCatalogs)
+			return withExitCode(code, err)
+		},
 	}
-	printAlignedHelpFields(w, rows)
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Examples:")
-	fmt.Fprintln(w, "  bb init api --catalog software")
-	fmt.Fprintln(w, "  bb sync --notify --include-catalog software")
-	fmt.Fprintln(w, "  bb status --json")
-	fmt.Fprintln(w, "  bb help sync")
+
+	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
+
+	return cmd
 }
 
-func printTopicHelp(w io.Writer, topic string) bool {
-	doc, ok := helpTopics[topic]
-	if !ok {
-		return false
+func newRepoCommand(runtime *runtimeState) *cobra.Command {
+	repoCmd := &cobra.Command{
+		Use:           "repo",
+		Short:         "Manage repository metadata and policy settings.",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := cmd.Help(); err != nil {
+				return withExitCode(2, err)
+			}
+			return withExitCode(2, errors.New("repo subcommand is required"))
+		},
 	}
-	fmt.Fprintf(w, "Command: %s\n", doc.Name)
-	fmt.Fprintln(w)
-	if len(doc.Usage) == 1 {
-		fmt.Fprintf(w, "Usage: %s\n", doc.Usage[0])
-	} else {
-		fmt.Fprintln(w, "Usage:")
-		for _, usage := range doc.Usage {
-			fmt.Fprintf(w, "  %s\n", usage)
-		}
+
+	var autoPushRaw string
+	policyCmd := &cobra.Command{
+		Use:   "policy <repo>",
+		Short: "Set repository auto-push policy.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+
+			autoPush, err := strconv.ParseBool(autoPushRaw)
+			if err != nil {
+				return withExitCode(2, fmt.Errorf("invalid --auto-push value %q", autoPushRaw))
+			}
+
+			code, err := runner.RunRepoPolicy(args[0], autoPush)
+			return withExitCode(code, err)
+		},
 	}
-	if doc.Summary != "" {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Summary:")
-		fmt.Fprintf(w, "  %s\n", doc.Summary)
-	}
-	if len(doc.Details) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Details:")
-		for _, detail := range doc.Details {
-			fmt.Fprintf(w, "  %s\n", detail)
-		}
-	}
-	if len(doc.Flags) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Flags:")
-		printAlignedHelpFields(w, doc.Flags)
-	}
-	if len(doc.Subcommands) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Subcommands:")
-		printAlignedHelpFields(w, doc.Subcommands)
-	}
-	if len(doc.Examples) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Examples:")
-		for _, example := range doc.Examples {
-			fmt.Fprintf(w, "  %s\n", example)
-		}
-	}
-	return true
+
+	policyCmd.Flags().StringVar(&autoPushRaw, "auto-push", "", "Set auto-push policy (true|false).")
+	_ = policyCmd.MarkFlagRequired("auto-push")
+
+	repoCmd.AddCommand(policyCmd)
+	return repoCmd
 }
 
-func printAlignedHelpFields(w io.Writer, fields []helpField) {
-	width := 0
-	for _, field := range fields {
-		if len(field.Name) > width {
-			width = len(field.Name)
-		}
+func newCatalogCommand(runtime *runtimeState) *cobra.Command {
+	catalogCmd := &cobra.Command{
+		Use:           "catalog",
+		Short:         "Manage machine catalogs and default catalog selection.",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := cmd.Help(); err != nil {
+				return withExitCode(2, err)
+			}
+			return withExitCode(2, errors.New("catalog subcommand is required"))
+		},
 	}
-	for _, field := range fields {
-		fmt.Fprintf(w, "  %-*s  %s\n", width, field.Name, field.Description)
+
+	addCmd := &cobra.Command{
+		Use:   "add <name> <root>",
+		Short: "Add catalog root to current machine.",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunCatalogAdd(args[0], args[1])
+			return withExitCode(code, err)
+		},
+	}
+
+	rmCmd := &cobra.Command{
+		Use:   "rm <name>",
+		Short: "Remove catalog from current machine.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunCatalogRM(args[0])
+			return withExitCode(code, err)
+		},
+	}
+
+	defaultCmd := &cobra.Command{
+		Use:   "default <name>",
+		Short: "Set machine default catalog.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunCatalogDefault(args[0])
+			return withExitCode(code, err)
+		},
+	}
+
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List configured catalogs and mark default.",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunCatalogList()
+			return withExitCode(code, err)
+		},
+	}
+
+	catalogCmd.AddCommand(addCmd, rmCmd, defaultCmd, listCmd)
+	return catalogCmd
+}
+
+func newConfigCommand(runtime *runtimeState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "config",
+		Short: "Launch interactive configuration wizard.",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			return withExitCode(0, runner.RunConfig())
+		},
 	}
 }
 
-func stripGlobalFlags(args []string) ([]string, bool, bool) {
-	out := make([]string, 0, len(args))
-	quiet := false
-	help := false
-	for _, arg := range args {
-		switch arg {
-		case "--quiet", "-q":
-			quiet = true
-		case "--help", "-h":
-			help = true
-		default:
-			out = append(out, arg)
-		}
+func newCompletionCommand(runtime *runtimeState, root *cobra.Command) *cobra.Command {
+	return &cobra.Command{
+		Use:       "completion [bash|zsh|fish|powershell]",
+		Short:     "Generate shell completion scripts.",
+		Args:      cobra.ExactValidArgs(1),
+		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
+		RunE: func(_ *cobra.Command, args []string) error {
+			var err error
+			switch args[0] {
+			case "bash":
+				err = root.GenBashCompletionV2(runtime.stdout, true)
+			case "zsh":
+				err = root.GenZshCompletion(runtime.stdout)
+			case "fish":
+				err = root.GenFishCompletion(runtime.stdout, true)
+			case "powershell":
+				err = root.GenPowerShellCompletionWithDesc(runtime.stdout)
+			default:
+				err = fmt.Errorf("unsupported shell %q", args[0])
+			}
+			return withExitCode(0, err)
+		},
 	}
-	return out, quiet, help
 }
