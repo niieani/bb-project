@@ -34,16 +34,20 @@ A catalog is a named local root directory that may contain git projects.
 - Example catalog `references` -> `/Volumes/Projects/SoftwareReferences`
 - Each machine defines its own catalog root paths in its own machine file.
 - One catalog is marked as `default_catalog`.
-- `bb init <project>` uses `default_catalog` unless overridden with `--catalog <name>`.
+- `bb init [project]` uses `default_catalog` unless overridden with `--catalog <name>`.
 - `bb sync` operates on all catalogs by default, or filtered with `--include-catalog <name>` (repeatable).
 
 ### High-level behaviors
 
-1. `bb init <project>`
-   - Creates `<catalog_root>/<project>`.
+1. `bb init [project]`
+   - Resolves a target project directory:
+     - with `project`: `<catalog_root>/<project>`
+     - without `project`: inferred from current working directory when it is inside a catalog project subtree
    - Uses `git` CLI to initialize the repository.
-   - Uses `gh` CLI to create a GitHub repo (private by default, personal owner).
+   - Uses `gh` CLI to create a GitHub repo (private by default, personal owner, `--public` supported).
    - Uses `git` CLI to set `origin`.
+   - May auto-push current branch when push policy allows (or `--push` is provided).
+   - Is idempotent: existing git/GitHub setup is detected and skipped when already correct.
    - Registers repo metadata and observed machine state.
 
 2. Automatic discovery
@@ -68,6 +72,12 @@ A catalog is a named local root directory that may contain git projects.
    - macOS `launchd` runs `bb sync --notify` periodically.
    - Notifications are deduplicated by fingerprint until state changes.
 
+6. Safe path handling
+   - During `bb sync`/`bb ensure`, `bb` never writes into a non-empty folder unless it is the expected git repository.
+   - Empty existing target folder is allowed for clone.
+   - During `bb init`, initializing git in an existing non-empty project directory is allowed.
+   - Path conflicts are marked unsyncable and require manual resolution.
+
 ## Terminology
 
 - `repo_id`: canonical repository identifier derived from normalized `origin` URL.
@@ -81,6 +91,7 @@ A catalog is a named local root directory that may contain git projects.
 - `newest syncable observed state`: syncable record with greatest `observed_at` (tie-break by `machine_id`).
 - `winner`: newest syncable observed state selected for a repo.
 - `machine_id`: stable per-machine identity.
+- `target path conflict`: local filesystem path exists but cannot be safely used for this repo.
 
 ## Goals
 
@@ -223,6 +234,9 @@ Unsyncable reasons include:
 - `push_failed`
 - `pull_failed`
 - `checkout_failed`
+- `target_path_nonempty_not_repo`
+- `target_path_repo_mismatch`
+- `duplicate_local_repo_id`
 
 ## Definition: Newest Syncable Observed State
 
@@ -305,7 +319,25 @@ for each repo_id with shared metadata:
   if no winner:
     continue
 
-  if local repo copy exists:
+  target_catalog =
+    repo preferred_catalog if present on this machine
+    else default_catalog
+  target_path = <target_catalog root>/<repo name>
+  if target_path exists and is not empty:
+    if target_path is not git repository:
+      mark repo unsyncable target_path_nonempty_not_repo
+      continue
+    if target_path git origin does not match repo_id:
+      mark repo unsyncable target_path_repo_mismatch
+      continue
+
+  local_matches = local repos with same repo_id in selected catalogs
+  if count(local_matches) > 1:
+    mark repo unsyncable duplicate_local_repo_id
+    continue
+
+  if count(local_matches) == 1:
+    local_path = local_matches[0]
     if local repo is syncable:
       if local branch != winner.branch:
         checkout winner.branch (create local tracking branch if required)
@@ -313,11 +345,14 @@ for each repo_id with shared metadata:
     else:
       leave unchanged
   else:
-    target_catalog =
-      repo preferred_catalog if present on this machine
-      else default_catalog
-    clone winner.origin_url into target_catalog root
-    checkout winner.branch
+    if target_path does not exist:
+      clone winner.origin_url into target_path
+      checkout winner.branch
+    else if target_path exists and is empty directory:
+      clone winner.origin_url into target_path
+      checkout winner.branch
+    else:
+      adopt existing local repo at target_path
 
 refresh local observations and rewrite this machine file
 if --notify:
@@ -327,20 +362,33 @@ release lock
 
 ## Bootstrap Flow
 
-`bb init <project> [--catalog <name>]`:
+`bb init [project] [--catalog <name>] [--public] [--push]`:
 
 1. Resolve target catalog (`--catalog` or `default_catalog`).
-2. Validate destination does not already contain a git repo.
-3. Create project directory under catalog root.
-4. Run `git init -b main`.
-5. Run `gh repo create` (personal owner, private by default unless overridden).
-6. Run `git remote add origin ...`.
-7. Create/update `repos/<repo-id>.yaml` with policy defaults.
-8. Scan and publish machine state.
+2. Resolve target project directory:
+   - if `project` provided: `<catalog root>/<project>`
+   - else infer from cwd by walking upward to the first directory directly under a catalog root.
+3. Ensure target directory exists.
+4. If target has no git repo, run `git init -b main`; else keep existing repo.
+5. Determine remote state:
+   - if `origin` already points to expected GitHub repo, skip creation
+   - if `origin` missing, run `gh repo create` and set `origin`
+   - if `origin` exists but conflicts with requested repo identity, fail with clear error
+6. Visibility behavior:
+   - default: create private repo
+   - `--public`: create public repo
+7. Create/update `repos/<repo-id>.yaml` with policy defaults from visibility:
+   - private -> `auto_push: true`
+   - public -> `auto_push: false`
+8. If current branch has commits and no upstream:
+   - push with `-u origin <branch>` when `auto_push == true` or `--push` provided
+   - otherwise leave unpushed (for example public repo without `--push`)
+9. Scan and publish machine state.
+10. Re-running `bb init` must be safe and produce no destructive changes.
 
 ## Commands (v1)
 
-- `bb init <project> [--catalog <name>] [--public] [--https]`
+- `bb init [project] [--catalog <name>] [--public] [--push] [--https]`
 - `bb sync [--push] [--notify] [--dry-run] [--include-catalog <name> ...]`
 - `bb status [--json] [--include-catalog <name> ...]`
 - `bb doctor [--include-catalog <name> ...]`
@@ -351,6 +399,18 @@ release lock
 - `bb catalog rm <name>`
 - `bb catalog default <name>`
 - `bb catalog list`
+
+## Initial Adoption and Pre-existing Repositories
+
+This section defines behavior when `bb` is first enabled on machines that already contain repositories.
+
+1. First sync on each machine performs discovery first, then publishes observed state.
+2. If the same repo already exists on multiple machines, no clone is attempted; each machine adopts its local copy via `repo_id` matching.
+3. If a machine has the repo at a different local path/catalog than other machines, that is allowed unless target path conflict rules apply.
+4. If clone/ensure target path exists and is empty, clone is allowed.
+5. If target path exists and has files but is not a git repo, mark `target_path_nonempty_not_repo` and skip all sync changes for that repo on that machine.
+6. If target path is a git repo but not the expected `repo_id`, mark `target_path_repo_mismatch` and skip all sync changes for that repo on that machine.
+7. If more than one local path on the same machine maps to the same `repo_id`, mark `duplicate_local_repo_id` and skip changes for that repo until user resolves duplicates.
 
 ## Failure Handling
 
@@ -391,7 +451,6 @@ Notification payload:
 
 ## Open Questions (implementation phase)
 
-1. Path conflict strategy when cloning into catalog root and target directory already exists but is not a git repo.
-2. Whether nested git repos under a catalog root are allowed or ignored.
-3. Whether `bb init` should create an initial commit by default.
-4. How visibility should be refreshed (periodic `gh` check vs cached metadata).
+1. Whether nested git repos under a catalog root are allowed or ignored.
+2. Whether `bb init` should create an initial commit by default.
+3. How visibility should be refreshed (periodic `gh` check vs cached metadata).
