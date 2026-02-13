@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"bb-project/internal/domain"
 )
@@ -41,20 +41,20 @@ func TestFixTUICycleSelectionPerRow(t *testing.T) {
 	}
 
 	m := newFixTUIModelForTest(repos)
-	m.table.SetCursor(0)
+	m.setCursor(0)
 	m.cycleCurrentAction(1)
-	firstRepoAction := m.table.Rows()[0][4]
+	firstRepoAction := actionForVisibleRepo(m, 0)
 
-	m.table.SetCursor(1)
+	m.setCursor(1)
 	m.cycleCurrentAction(0)
-	secondRepoAction := m.table.Rows()[1][4]
+	secondRepoAction := actionForVisibleRepo(m, 1)
 
-	m.table.SetCursor(0)
+	m.setCursor(0)
 	m.cycleCurrentAction(0)
-	if got := m.table.Rows()[0][4]; got != firstRepoAction {
+	if got := actionForVisibleRepo(m, 0); got != firstRepoAction {
 		t.Fatalf("row 0 action changed unexpectedly: got %q want %q", got, firstRepoAction)
 	}
-	if got := m.table.Rows()[1][4]; got != secondRepoAction {
+	if got := actionForVisibleRepo(m, 1); got != secondRepoAction {
 		t.Fatalf("row 1 action changed unexpectedly: got %q want %q", got, secondRepoAction)
 	}
 }
@@ -77,10 +77,10 @@ func TestFixTUISelectionFallbackAfterEligibilityChange(t *testing.T) {
 	}
 
 	m := newFixTUIModelForTest(repos)
-	m.table.SetCursor(0)
+	m.setCursor(0)
 	m.cycleCurrentAction(1)
 	m.cycleCurrentAction(1)
-	before := m.table.Rows()[0][4]
+	before := actionForVisibleRepo(m, 0)
 	if !strings.Contains(before, FixActionEnableAutoPush) {
 		t.Fatalf("expected second cycle to pick %q, got %q", FixActionEnableAutoPush, before)
 	}
@@ -94,37 +94,30 @@ func TestFixTUISelectionFallbackAfterEligibilityChange(t *testing.T) {
 		Ahead:     1,
 	}
 	m.repos[0].Meta = &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: true}
-	m.rebuildTable("/repos/api")
+	m.rebuildList("/repos/api")
 
-	if got := m.table.Rows()[0][4]; !strings.Contains(got, "-") {
+	if got := actionForVisibleRepo(m, 0); !strings.Contains(got, fixNoAction) {
 		t.Fatalf("fallback action = %q, want default no-op", got)
 	}
 }
 
 func newFixTUIModelForTest(repos []fixRepoState) *fixTUIModel {
-	columns := []table.Column{
-		{Title: "Repo", Width: 24},
-		{Title: "Branch", Width: 20},
-		{Title: "State", Width: 12},
-		{Title: "Reasons", Width: 32},
-		{Title: "Selected Fix", Width: 22},
-	}
-	tbl := table.New(
-		table.WithColumns(columns),
-		table.WithRows([]table.Row{}),
-		table.WithFocused(true),
-		table.WithHeight(12),
-	)
 	m := &fixTUIModel{
 		repos:          append([]fixRepoState(nil), repos...),
 		ignored:        map[string]bool{},
 		selectedAction: map[string]int{},
-		table:          tbl,
+		repoList:       newFixRepoListModel(),
 		keys:           defaultFixTUIKeyMap(),
 		help:           help.New(),
 	}
-	m.rebuildTable("")
+	m.rebuildList("")
 	return m
+}
+
+func actionForVisibleRepo(m *fixTUIModel, idx int) string {
+	repo := m.visible[idx]
+	actions := eligibleFixActions(repo.Record, repo.Meta)
+	return m.currentActionForRepo(repo.Record.Path, actions)
 }
 
 func TestFixTUIViewUsesCanonicalChromeWithoutInlineKeyLegend(t *testing.T) {
@@ -172,7 +165,7 @@ func TestFixTUIDefaultSelectionIsNoAction(t *testing.T) {
 	}
 	m := newFixTUIModelForTest(repos)
 
-	if got := m.table.Rows()[0][4]; !strings.Contains(got, "-") {
+	if got := actionForVisibleRepo(m, 0); !strings.Contains(got, fixNoAction) {
 		t.Fatalf("selected fix = %q, want no-op '-'", got)
 	}
 }
@@ -194,15 +187,15 @@ func TestFixTUIActionCycleIncludesNoAction(t *testing.T) {
 		},
 	}
 	m := newFixTUIModelForTest(repos)
-	m.table.SetCursor(0)
+	m.setCursor(0)
 
 	m.cycleCurrentAction(1)
-	if got := m.table.Rows()[0][4]; strings.Contains(got, "-") {
+	if got := actionForVisibleRepo(m, 0); strings.Contains(got, fixNoAction) {
 		t.Fatalf("expected first cycle to move off no-op, got %q", got)
 	}
 
 	m.cycleCurrentAction(-1)
-	if got := m.table.Rows()[0][4]; !strings.Contains(got, "-") {
+	if got := actionForVisibleRepo(m, 0); !strings.Contains(got, fixNoAction) {
 		t.Fatalf("expected cycle back to no-op, got %q", got)
 	}
 }
@@ -228,7 +221,7 @@ func TestFixTUIViewportTracksCursor(t *testing.T) {
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 26})
 	m.setCursor(35)
 
-	view := m.table.View()
+	view := m.repoList.View()
 	if !strings.Contains(view, "repo-35") {
 		t.Fatalf("expected viewport to include selected cursor row, got %q", view)
 	}
@@ -258,7 +251,7 @@ func TestFixTUIApplyAllSkipsNoOpSelections(t *testing.T) {
 	}
 }
 
-func TestFixTUIRowsUsePlainTextCells(t *testing.T) {
+func TestFixTUIRowsRenderWithoutReplacementRuneAndWithoutDoubleSpacing(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
@@ -275,46 +268,107 @@ func TestFixTUIRowsUsePlainTextCells(t *testing.T) {
 			},
 			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: false},
 		},
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "web",
+				Path:      "/repos/web",
+				RepoID:    "github.com/you/web",
+				OriginURL: "git@github.com:you/web.git",
+				Upstream:  "origin/main",
+				Behind:    1,
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/web", AutoPush: true},
+		},
 	}
 	m := newFixTUIModelForTest(repos)
-	m.table.SetCursor(0)
-	m.cycleCurrentAction(1)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 26})
 
-	rows := m.table.Rows()
-	if len(rows) != 1 {
-		t.Fatalf("rows = %d, want 1", len(rows))
+	view := m.repoList.View()
+	if strings.Contains(view, "�") {
+		t.Fatalf("list view contains replacement rune: %q", view)
 	}
-	for idx, cell := range rows[0] {
-		if strings.Contains(cell, "\x1b") {
-			t.Fatalf("cell %d includes ANSI escape sequence: %q", idx, cell)
+
+	apiLine := lineIndexContaining(view, "api")
+	webLine := lineIndexContaining(view, "web")
+	if apiLine < 0 || webLine < 0 {
+		t.Fatalf("expected both rows in view, got %q", view)
+	}
+	if webLine != apiLine+1 {
+		t.Fatalf("rows should be adjacent lines, got api at %d and web at %d", apiLine, webLine)
+	}
+}
+
+func lineIndexContaining(view, needle string) int {
+	lines := strings.Split(view, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, needle) {
+			return i
 		}
 	}
+	return -1
 }
 
 func TestFixTUIResizeExpandsWideColumns(t *testing.T) {
 	t.Parallel()
 
+	layout := fixListColumnsForWidth(180)
+	if layout.Reasons <= 32 {
+		t.Fatalf("reasons width = %d, want > 32 in wide viewport", layout.Reasons)
+	}
+	if layout.Action <= 22 {
+		t.Fatalf("selected-fix width = %d, want > 22 in wide viewport", layout.Action)
+	}
+}
+
+func TestFixTUIViewDoesNotRenderNestedNormalBorderAroundList(t *testing.T) {
+	t.Parallel()
+
 	repos := []fixRepoState{
 		{
 			Record: domain.MachineRepoRecord{
-				Name:      "condu",
-				Path:      "/repos/condu",
-				RepoID:    "github.com/you/condu",
-				OriginURL: "git@github.com:you/condu.git",
+				Name:      "api",
+				Path:      "/repos/api",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/condu", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: false},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
-	_, _ = m.Update(tea.WindowSizeMsg{Width: 200, Height: 26})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+	view := m.View()
 
-	cols := m.table.Columns()
-	if cols[3].Width <= 32 {
-		t.Fatalf("reasons width = %d, want > 32 in wide viewport", cols[3].Width)
+	if strings.Contains(view, "┘") {
+		t.Fatalf("unexpected nested normal-border corner glyph in view: %q", view)
 	}
-	if cols[4].Width <= 22 {
-		t.Fatalf("selected-fix width = %d, want > 22 in wide viewport", cols[4].Width)
+}
+
+func TestFixRepoDelegateLeavesWrapGuardColumn(t *testing.T) {
+	t.Parallel()
+
+	repoList := newFixRepoListModel()
+	repoList.SetSize(80, 10)
+	repoList.Select(0)
+
+	item := fixListItem{
+		Name:     "phomemo_m02s",
+		Branch:   "main",
+		State:    "unsyncable",
+		Reasons:  "dirty_tracked, dirty_untracked, missing_origin",
+		Action:   FixActionEnableAutoPush,
+		Syncable: false,
+	}
+
+	var b strings.Builder
+	fixRepoDelegate{}.Render(&b, repoList, 0, item)
+	row := b.String()
+
+	if strings.Contains(row, "\n") {
+		t.Fatalf("delegate row should be single-line, got %q", row)
+	}
+	if width := ansi.StringWidth(row); width >= repoList.Width() {
+		t.Fatalf("delegate row width %d must stay below list width %d to avoid hard wrap", width, repoList.Width())
 	}
 }

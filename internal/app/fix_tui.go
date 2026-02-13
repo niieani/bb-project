@@ -2,14 +2,16 @@ package app
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type fixTUIKeyMap struct {
@@ -103,31 +105,171 @@ type fixTUIModel struct {
 	keys fixTUIKeyMap
 	help help.Model
 
-	table table.Model
+	repoList list.Model
 
 	width  int
 	height int
 
-	showHelp bool
-	status   string
-	errText  string
+	status  string
+	errText string
 
 	messagePrompt bool
 	messageInput  textinput.Model
 	pendingPath   string
 }
 
+type fixListItem struct {
+	Path     string
+	Name     string
+	Branch   string
+	State    string
+	Reasons  string
+	Action   string
+	Syncable bool
+}
+
+func (i fixListItem) FilterValue() string {
+	return i.Name + " " + i.Path + " " + i.Branch + " " + i.Reasons + " " + i.Action
+}
+
+type fixColumnLayout struct {
+	Repo    int
+	Branch  int
+	State   int
+	Reasons int
+	Action  int
+}
+
+type fixRepoDelegate struct{}
+
+func (d fixRepoDelegate) Height() int {
+	return 1
+}
+
+func (d fixRepoDelegate) Spacing() int {
+	return 0
+}
+
+func (d fixRepoDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd {
+	return nil
+}
+
+func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	row, ok := item.(fixListItem)
+	if !ok {
+		return
+	}
+
+	// Leave one guard column to avoid terminal auto-wrap when the rendered row
+	// exactly matches viewport width.
+	contentWidth := m.Width() - 3 // indicator + wrap guard
+	if contentWidth < 50 {
+		contentWidth = 50
+	}
+	layout := fixListColumnsForWidth(contentWidth)
+
+	selected := index == m.Index()
+
+	repoCell := renderFixColumnCell(row.Name, layout.Repo, fixRepoNameStyle.Copy().Bold(selected))
+	branchCell := renderFixColumnCell(row.Branch, layout.Branch, fixBranchStyle)
+	stateStyle := fixStateUnsyncableStyle
+	if row.Syncable {
+		stateStyle = fixStateSyncableStyle
+	}
+	if selected {
+		stateStyle = stateStyle.Copy().Bold(true)
+	}
+	stateCell := renderFixColumnCell(row.State, layout.State, stateStyle)
+	reasonsCell := renderFixColumnCell(row.Reasons, layout.Reasons, fixReasonsStyle)
+	actionStyle := fixActionStyleFor(row.Action)
+	if selected {
+		actionStyle = actionStyle.Copy().Bold(true)
+	}
+	actionCell := renderFixColumnCell(row.Action, layout.Action, actionStyle)
+
+	line := lipgloss.JoinHorizontal(lipgloss.Top,
+		repoCell,
+		fixListColumnGap,
+		branchCell,
+		fixListColumnGap,
+		stateCell,
+		fixListColumnGap,
+		reasonsCell,
+		fixListColumnGap,
+		actionCell,
+	)
+
+	indicatorStyle := fixIndicatorStyle
+	indicator := "  "
+	if selected {
+		indicatorStyle = fixIndicatorSelectedStyle
+		indicator = "▸ "
+		line = fixSelectedRowStyle.Render(line)
+	}
+
+	fmt.Fprint(w, indicatorStyle.Render(indicator)+line)
+}
+
 const fixNoAction = "-"
 
 const (
-	fixTableDefaultWidth = 120
-	fixTableReservedCols = 12
+	fixListDefaultWidth = 120
+	fixListReservedCols = 8
 )
 
 var (
 	fixNoActionStyle = lipgloss.NewStyle().
-		Foreground(mutedTextColor)
+				Foreground(mutedTextColor)
+
+	fixRepoNameStyle = lipgloss.NewStyle().
+				Foreground(textColor)
+
+	fixBranchStyle = lipgloss.NewStyle().
+			Foreground(mutedTextColor)
+
+	fixReasonsStyle = lipgloss.NewStyle().
+			Foreground(mutedTextColor)
+
+	fixStateSyncableStyle = lipgloss.NewStyle().
+				Foreground(successColor)
+
+	fixStateUnsyncableStyle = lipgloss.NewStyle().
+				Foreground(errorFgColor)
+
+	fixIndicatorStyle = lipgloss.NewStyle().
+				Foreground(borderColor)
+
+	fixIndicatorSelectedStyle = lipgloss.NewStyle().
+					Foreground(accentColor).
+					Bold(true)
+
+	fixSelectedRowStyle = lipgloss.NewStyle().
+				Background(accentBgColor)
+
+	fixHeaderCellStyle = lipgloss.NewStyle().
+				Foreground(textColor).
+				Bold(true)
+
+	fixActionPushStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("45"))
+
+	fixActionStageStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("214"))
+
+	fixActionPullStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("81"))
+
+	fixActionUpstreamStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("177"))
+
+	fixActionAutoPushStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("70"))
+
+	fixActionAbortStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("203"))
 )
+
+const fixListColumnGap = "  "
 
 func (a *App) runFixInteractive(includeCatalogs []string) (int, error) {
 	model, err := newFixTUIModel(a, includeCatalogs)
@@ -142,26 +284,7 @@ func (a *App) runFixInteractive(includeCatalogs []string) (int, error) {
 }
 
 func newFixTUIModel(app *App, includeCatalogs []string) (*fixTUIModel, error) {
-	t := table.New(
-		table.WithColumns(fixTableColumnsForWidth(fixTableDefaultWidth)),
-		table.WithRows([]table.Row{}),
-		table.WithFocused(true),
-		table.WithHeight(12),
-	)
-	styles := table.DefaultStyles()
-	styles.Header = styles.Header.
-		Foreground(textColor).
-		Background(panelBgColor).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(borderColor).
-		BorderBottom(true).
-		Bold(true)
-	styles.Cell = styles.Cell.Foreground(textColor)
-	styles.Selected = styles.Selected.
-		Foreground(lipgloss.Color("230")).
-		Background(lipgloss.Color("33")).
-		Bold(true)
-	t.SetStyles(styles)
+	repoList := newFixRepoListModel()
 
 	m := &fixTUIModel{
 		app:             app,
@@ -170,13 +293,38 @@ func newFixTUIModel(app *App, includeCatalogs []string) (*fixTUIModel, error) {
 		selectedAction:  map[string]int{},
 		keys:            defaultFixTUIKeyMap(),
 		help:            help.New(),
-		table:           t,
+		repoList:        repoList,
 	}
 	m.help.ShowAll = false
 	if err := m.refreshRepos(); err != nil {
 		return nil, err
 	}
 	return m, nil
+}
+
+func newFixRepoListModel() list.Model {
+	delegate := fixRepoDelegate{}
+	m := list.New([]list.Item{}, delegate, fixListDefaultWidth, 12)
+	m.SetFilteringEnabled(false)
+	m.SetShowFilter(false)
+	m.SetShowTitle(false)
+	m.SetShowStatusBar(false)
+	m.SetShowPagination(false)
+	m.SetShowHelp(false)
+	m.DisableQuitKeybindings()
+	m.KeyMap.PrevPage.SetEnabled(false)
+	m.KeyMap.NextPage.SetEnabled(false)
+	m.KeyMap.Filter.SetEnabled(false)
+	m.KeyMap.ClearFilter.SetEnabled(false)
+	m.KeyMap.ShowFullHelp.SetEnabled(false)
+	m.KeyMap.CloseFullHelp.SetEnabled(false)
+	m.KeyMap.GoToStart.SetEnabled(false)
+	m.KeyMap.GoToEnd.SetEnabled(false)
+
+	styles := list.DefaultStyles()
+	styles.NoItems = hintStyle
+	m.Styles = styles
+	return m
 }
 
 func (m *fixTUIModel) Init() tea.Cmd {
@@ -189,7 +337,7 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.help.Width = msg.Width
-		m.resizeTable()
+		m.resizeRepoList()
 		return m, nil
 	case tea.KeyMsg:
 		if key.Matches(msg, m.keys.Quit) {
@@ -230,8 +378,7 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	m.table, cmd = m.table.Update(msg)
-	m.syncCursorViewport()
+	m.repoList, cmd = m.repoList.Update(msg)
 	return m, cmd
 }
 
@@ -294,21 +441,16 @@ func (m *fixTUIModel) viewMainContent() string {
 	b.WriteString("\n\n")
 	b.WriteString(m.viewFixSummary())
 	b.WriteString("\n\n")
-	if len(m.table.Rows()) == 0 {
+
+	if len(m.visible) == 0 {
 		b.WriteString(fieldStyle.Render("No repositories available for interactive fix right now."))
 	} else {
-		tablePanel := panelStyle.
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(borderColor).
-			Background(panelBgColor).
-			Padding(0, 1)
-		if w := m.viewContentWidth(); w > 0 {
-			tablePanel = tablePanel.Width(w - 4)
-		}
-		b.WriteString(tablePanel.Render(m.table.View()))
-		if repo, ok := m.currentRepo(); ok {
+		// Render list directly inside the main panel to avoid nested border/frame
+		// width interactions that can trigger hard wrapping artifacts.
+		b.WriteString(m.viewRepoList())
+		if details := m.viewSelectedRepoDetails(); details != "" {
 			b.WriteString("\n\n")
-			b.WriteString(fieldStyle.Render(fmt.Sprintf("Selected: %s  (%s)", repo.Record.Name, repo.Record.Path)))
+			b.WriteString(details)
 		}
 	}
 
@@ -322,6 +464,88 @@ func (m *fixTUIModel) viewMainContent() string {
 			"",
 		))
 	}
+	return b.String()
+}
+
+func (m *fixTUIModel) viewRepoList() string {
+	if len(m.visible) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(m.viewRepoHeader())
+	b.WriteString("\n")
+	b.WriteString(m.repoList.View())
+	return b.String()
+}
+
+func (m *fixTUIModel) viewRepoHeader() string {
+	listWidth := m.repoList.Width()
+	if listWidth <= 0 {
+		listWidth = fixListDefaultWidth
+	}
+	layout := fixListColumnsForWidth(max(50, listWidth-3))
+
+	header := lipgloss.JoinHorizontal(lipgloss.Top,
+		renderFixColumnCell("Repo", layout.Repo, fixHeaderCellStyle),
+		fixListColumnGap,
+		renderFixColumnCell("Branch", layout.Branch, fixHeaderCellStyle),
+		fixListColumnGap,
+		renderFixColumnCell("State", layout.State, fixHeaderCellStyle),
+		fixListColumnGap,
+		renderFixColumnCell("Reasons", layout.Reasons, fixHeaderCellStyle),
+		fixListColumnGap,
+		renderFixColumnCell("Selected Fix", layout.Action, fixHeaderCellStyle),
+	)
+	// Match row rendering width: two-char indicator plus one guard column.
+	return "  " + header
+}
+
+func (m *fixTUIModel) viewSelectedRepoDetails() string {
+	repo, ok := m.currentRepo()
+	if !ok {
+		return ""
+	}
+	actions := eligibleFixActions(repo.Record, repo.Meta)
+	action := m.currentActionForRepo(repo.Record.Path, actions)
+
+	reasonText := "none"
+	if len(repo.Record.UnsyncableReasons) > 0 {
+		parts := make([]string, 0, len(repo.Record.UnsyncableReasons))
+		for _, r := range repo.Record.UnsyncableReasons {
+			parts = append(parts, string(r))
+		}
+		sortStrings(parts)
+		reasonText = strings.Join(parts, ", ")
+	}
+
+	state := "syncable"
+	stateStyle := fixStateSyncableStyle
+	if !repo.Record.Syncable {
+		state = "unsyncable"
+		stateStyle = fixStateUnsyncableStyle
+	}
+
+	var b strings.Builder
+	b.WriteString(fieldStyle.Render(fmt.Sprintf("Selected: %s (%s)", repo.Record.Name, repo.Record.Path)))
+	b.WriteString("\n")
+	stateLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("State:")
+	actionLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Action:")
+	branchLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Branch:")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top,
+		stateLabel,
+		" ",
+		stateStyle.Render(state),
+		"   ",
+		actionLabel,
+		" ",
+		fixActionStyleFor(action).Render(action),
+		"   ",
+		branchLabel,
+		" ",
+		fixBranchStyle.Render(repo.Record.Branch),
+	))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Reasons: ") + fixReasonsStyle.Render(reasonText))
 	return b.String()
 }
 
@@ -350,7 +574,7 @@ func (m *fixTUIModel) viewContentWidth() int {
 	return contentWidth
 }
 
-func (m *fixTUIModel) resizeTable() {
+func (m *fixTUIModel) resizeRepoList() {
 	if m.height <= 0 {
 		return
 	}
@@ -362,55 +586,15 @@ func (m *fixTUIModel) resizeTable() {
 	if height < 6 {
 		height = 6
 	}
-	m.table.SetHeight(height)
+
+	listWidth := fixListDefaultWidth
 	if w := m.viewContentWidth(); w > 0 {
-		tableWidth := w - 8
-		if tableWidth < 60 {
-			tableWidth = 60
-		}
-		m.table.SetWidth(tableWidth)
-		m.table.SetColumns(fixTableColumnsForWidth(tableWidth))
+		listWidth = w - 10
 	}
-	m.syncCursorViewport()
-}
-
-func (m *fixTUIModel) syncCursorViewport() {
-	if len(m.table.Rows()) == 0 {
-		return
+	if listWidth < 52 {
+		listWidth = 52
 	}
-	m.setCursor(m.table.Cursor())
-}
-
-func (m *fixTUIModel) setCursor(target int) {
-	if len(m.table.Rows()) == 0 {
-		m.table.SetCursor(0)
-		return
-	}
-	if target < 0 {
-		target = 0
-	}
-	if target > len(m.table.Rows())-1 {
-		target = len(m.table.Rows()) - 1
-	}
-	current := m.table.Cursor()
-	if target > current {
-		m.table.MoveDown(target - current)
-		return
-	}
-	if target < current {
-		m.table.MoveUp(current - target)
-		return
-	}
-	// SetCursor keeps position but may not adjust viewport in all cases; nudge with move methods.
-	if target > 0 {
-		m.table.MoveUp(1)
-		m.table.MoveDown(1)
-		return
-	}
-	if len(m.table.Rows()) > 1 {
-		m.table.MoveDown(1)
-		m.table.MoveUp(1)
-	}
+	m.repoList.SetSize(listWidth, height)
 }
 
 func (m *fixTUIModel) updateMessagePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -419,7 +603,7 @@ func (m *fixTUIModel) updateMessagePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingPath = ""
 		m.status = "stage-commit-push cancelled"
 		m.errText = ""
-		m.resizeTable()
+		m.resizeRepoList()
 		return m, nil
 	}
 	if key.Matches(msg, m.keys.Apply) {
@@ -439,7 +623,7 @@ func (m *fixTUIModel) updateMessagePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err := m.refreshRepos(); err != nil {
 			m.errText = err.Error()
 		}
-		m.resizeTable()
+		m.resizeRepoList()
 		return m, nil
 	}
 
@@ -459,25 +643,26 @@ func (m *fixTUIModel) refreshRepos() error {
 		return err
 	}
 	m.repos = repos
-	m.rebuildTable(selectedPath)
+	m.rebuildList(selectedPath)
 	m.errText = ""
 	return nil
 }
 
-func (m *fixTUIModel) rebuildTable(preferredPath string) {
+func (m *fixTUIModel) rebuildList(preferredPath string) {
 	m.visible = m.visible[:0]
-	rows := make([]table.Row, 0, len(m.repos))
+	items := make([]list.Item, 0, len(m.repos))
+
 	for _, repo := range m.repos {
-		key := repo.Record.Path
-		if m.ignored[key] {
+		path := repo.Record.Path
+		if m.ignored[path] {
 			continue
 		}
+
 		actions := eligibleFixActions(repo.Record, repo.Meta)
-		if idx, ok := m.selectedAction[key]; !ok || idx < -1 || idx >= len(actions) {
-			m.selectedAction[key] = -1
+		if idx, ok := m.selectedAction[path]; !ok || idx < -1 || idx >= len(actions) {
+			m.selectedAction[path] = -1
 		}
 
-		selectedFix := m.currentActionForRepo(key, actions)
 		reasons := "none"
 		if len(repo.Record.UnsyncableReasons) > 0 {
 			parts := make([]string, 0, len(repo.Record.UnsyncableReasons))
@@ -492,20 +677,24 @@ func (m *fixTUIModel) rebuildTable(preferredPath string) {
 			state = "unsyncable"
 		}
 
-		rows = append(rows, table.Row{
-			repo.Record.Name,
-			repo.Record.Branch,
-			state,
-			reasons,
-			selectedFix,
+		items = append(items, fixListItem{
+			Path:     path,
+			Name:     repo.Record.Name,
+			Branch:   repo.Record.Branch,
+			State:    state,
+			Reasons:  reasons,
+			Action:   m.currentActionForRepo(path, actions),
+			Syncable: repo.Record.Syncable,
 		})
 		m.visible = append(m.visible, repo)
 	}
-	m.table.SetRows(rows)
-	if len(rows) == 0 {
-		m.table.SetCursor(0)
+
+	_ = m.repoList.SetItems(items)
+	if len(items) == 0 {
+		m.repoList.ResetSelected()
 		return
 	}
+
 	cursor := 0
 	if preferredPath != "" {
 		for i, repo := range m.visible {
@@ -518,15 +707,29 @@ func (m *fixTUIModel) rebuildTable(preferredPath string) {
 	m.setCursor(cursor)
 }
 
+func (m *fixTUIModel) setCursor(target int) {
+	if len(m.visible) == 0 {
+		m.repoList.ResetSelected()
+		return
+	}
+	if target < 0 {
+		target = 0
+	}
+	if target > len(m.visible)-1 {
+		target = len(m.visible) - 1
+	}
+	m.repoList.Select(target)
+}
+
 func (m *fixTUIModel) currentRepo() (fixRepoState, bool) {
 	if len(m.visible) == 0 {
 		return fixRepoState{}, false
 	}
-	cursor := m.table.Cursor()
-	if cursor < 0 || cursor >= len(m.visible) {
+	idx := m.repoList.Index()
+	if idx < 0 || idx >= len(m.visible) {
 		return fixRepoState{}, false
 	}
-	return m.visible[cursor], true
+	return m.visible[idx], true
 }
 
 func (m *fixTUIModel) cycleCurrentAction(delta int) {
@@ -549,7 +752,7 @@ func (m *fixTUIModel) cycleCurrentAction(delta int) {
 	} else {
 		m.status = fmt.Sprintf("%s selected for %s", selected, repo.Record.Name)
 	}
-	m.rebuildTable(repo.Record.Path)
+	m.rebuildList(repo.Record.Path)
 }
 
 func (m *fixTUIModel) applyCurrentSelection() {
@@ -567,7 +770,7 @@ func (m *fixTUIModel) applyCurrentSelection() {
 	if idx >= len(actions) {
 		m.selectedAction[repo.Record.Path] = -1
 		m.status = fmt.Sprintf("selection reset for %s; pick an eligible action", repo.Record.Name)
-		m.rebuildTable(repo.Record.Path)
+		m.rebuildList(repo.Record.Path)
 		return
 	}
 	action := actions[idx]
@@ -582,7 +785,7 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		m.pendingPath = repo.Record.Path
 		m.status = ""
 		m.errText = ""
-		m.resizeTable()
+		m.resizeRepoList()
 		return
 	}
 
@@ -657,7 +860,7 @@ func (m *fixTUIModel) ignoreCurrentRepo() {
 	}
 	m.ignored[repo.Record.Path] = true
 	m.status = fmt.Sprintf("ignored %s for this session", repo.Record.Name)
-	m.rebuildTable("")
+	m.rebuildList("")
 }
 
 func (m *fixTUIModel) unignoreCurrentRepo() {
@@ -673,7 +876,7 @@ func (m *fixTUIModel) unignoreCurrentRepo() {
 		delete(m.ignored, path)
 	}
 	m.status = "cleared ignored repositories"
-	m.rebuildTable("")
+	m.rebuildList("")
 }
 
 func (m *fixTUIModel) currentActionForRepo(path string, actions []string) string {
@@ -684,39 +887,69 @@ func (m *fixTUIModel) currentActionForRepo(path string, actions []string) string
 	return actions[idx]
 }
 
-func fixTableColumnsForWidth(tableWidth int) []table.Column {
+func fixListColumnsForWidth(listWidth int) fixColumnLayout {
 	const (
-		repoMin    = 18
-		branchMin  = 16
-		stateMin   = 10
-		reasonsMin = 30
-		actionMin  = 22
+		repoMin    = 7
+		branchMin  = 7
+		stateMin   = 6
+		reasonsMin = 12
+		actionMin  = 10
 	)
-	widths := []int{repoMin, branchMin, stateMin, reasonsMin, actionMin}
-	minTotal := repoMin + branchMin + stateMin + reasonsMin + actionMin
 
-	budget := tableWidth - fixTableReservedCols
+	layout := fixColumnLayout{
+		Repo:    repoMin,
+		Branch:  branchMin,
+		State:   stateMin,
+		Reasons: reasonsMin,
+		Action:  actionMin,
+	}
+
+	minTotal := repoMin + branchMin + stateMin + reasonsMin + actionMin
+	budget := listWidth - fixListReservedCols
 	if budget < minTotal {
 		budget = minTotal
 	}
 	extra := budget - minTotal
 	if extra > 0 {
-		reasonsExtra := extra * 45 / 100
-		actionExtra := extra * 35 / 100
-		repoExtra := extra * 15 / 100
-		branchExtra := extra - reasonsExtra - actionExtra - repoExtra
-		widths[0] += repoExtra
-		widths[1] += branchExtra
-		widths[3] += reasonsExtra
-		widths[4] += actionExtra
+		repoExtra := extra * 18 / 100
+		branchExtra := extra * 16 / 100
+		stateExtra := extra * 10 / 100
+		reasonsExtra := extra * 32 / 100
+		actionExtra := extra - repoExtra - branchExtra - stateExtra - reasonsExtra
+		layout.Repo += repoExtra
+		layout.Branch += branchExtra
+		layout.State += stateExtra
+		layout.Reasons += reasonsExtra
+		layout.Action += actionExtra
 	}
+	return layout
+}
 
-	return []table.Column{
-		{Title: "Repo", Width: widths[0]},
-		{Title: "Branch", Width: widths[1]},
-		{Title: "State", Width: widths[2]},
-		{Title: "Reasons", Width: widths[3]},
-		{Title: "Selected Fix", Width: widths[4]},
+func renderFixColumnCell(value string, width int, style lipgloss.Style) string {
+	if width <= 0 {
+		return ""
+	}
+	return style.Width(width).MaxWidth(width).Render(ansi.Truncate(value, width, "…"))
+}
+
+func fixActionStyleFor(action string) lipgloss.Style {
+	switch action {
+	case fixNoAction:
+		return fixNoActionStyle
+	case FixActionPush:
+		return fixActionPushStyle
+	case FixActionStageCommitPush:
+		return fixActionStageStyle
+	case FixActionPullFFOnly:
+		return fixActionPullStyle
+	case FixActionSetUpstreamPush:
+		return fixActionUpstreamStyle
+	case FixActionEnableAutoPush:
+		return fixActionAutoPushStyle
+	case FixActionAbortOperation:
+		return fixActionAbortStyle
+	default:
+		return lipgloss.NewStyle().Foreground(textColor)
 	}
 }
 
