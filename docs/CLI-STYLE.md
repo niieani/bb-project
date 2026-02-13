@@ -136,6 +136,7 @@ Use a reusable field block for all form rows:
 - For custom row delegates, reserve at least one wrap-guard column so rendered row width stays strictly below viewport width.
 - Keep tiering internal for sort/grouping; in the table itself communicate fixability via state wording and color, not a dedicated `Tier` column.
 - Order rows by fixability tier: autofixable unsyncable first, unsyncable manual/blocked second, syncable last.
+- In selected-row details, always render a concise `Action help` line that explains what the currently selected fix action will do.
 
 ## Interaction + Focus Standards
 

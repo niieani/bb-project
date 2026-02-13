@@ -303,6 +303,7 @@ func newStatusCommand(runtime *runtimeState) *cobra.Command {
 func newFixCommand(runtime *runtimeState) *cobra.Command {
 	var includeCatalogs []string
 	var message string
+	var noRefresh bool
 
 	cmd := &cobra.Command{
 		Use:   "fix [project] [action]",
@@ -316,6 +317,7 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 			opts := app.FixOptions{
 				IncludeCatalogs: includeCatalogs,
 				CommitMessage:   message,
+				NoRefresh:       noRefresh,
 			}
 			if len(args) > 0 {
 				opts.Project = args[0]
@@ -330,6 +332,7 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 
 	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
 	cmd.Flags().StringVar(&message, "message", "", "Commit message for stage-commit-push action (or 'auto').")
+	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Use current machine snapshot without running a refresh scan first.")
 
 	return cmd
 }

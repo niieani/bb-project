@@ -447,8 +447,67 @@ func TestFixTUIFooterDoesNotLeaveExtraTrailingBlankRows(t *testing.T) {
 	view := m.View()
 
 	trailing := trailingEmptyLineCount(view)
-	if trailing > 1 {
-		t.Fatalf("expected at most one trailing empty line after footer, got %d", trailing)
+	if trailing != 0 {
+		t.Fatalf("expected zero trailing empty lines after footer, got %d", trailing)
+	}
+}
+
+func TestFixTUIViewShowsMainPanelTopBorderBeforeContent(t *testing.T) {
+	t.Parallel()
+
+	m := newFixTUIModelForTest([]fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: false},
+		},
+	})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 26})
+	view := m.View()
+
+	lines := strings.Split(view, "\n")
+	idx := lineIndexContaining(view, "Repository Fixes")
+	if idx <= 0 || idx >= len(lines) {
+		t.Fatalf("could not locate repository fixes title in view: %q", view)
+	}
+	previous := previousNonEmptyLine(lines, idx-1)
+	if !strings.Contains(previous, "╭") {
+		t.Fatalf("expected panel top border before content, got %q", previous)
+	}
+}
+
+func TestFixTUISelectedDetailsRenderActionHelp(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: false},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	m.cycleCurrentAction(1) // push
+
+	details := m.viewSelectedRepoDetails()
+	if !strings.Contains(details, "Action help:") {
+		t.Fatalf("expected action help in selected details, got %q", details)
+	}
+	if !strings.Contains(details, "Push local ahead commits") {
+		t.Fatalf("expected push action description, got %q", details)
 	}
 }
 
@@ -463,4 +522,13 @@ func trailingEmptyLineCount(s string) int {
 		break
 	}
 	return n
+}
+
+func previousNonEmptyLine(lines []string, start int) string {
+	for i := start; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			return lines[i]
+		}
+	}
+	return ""
 }

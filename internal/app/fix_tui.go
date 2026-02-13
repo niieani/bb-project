@@ -282,12 +282,14 @@ var (
 
 	fixActionAbortStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("203"))
+
+	fixPageStyle = lipgloss.NewStyle().Padding(0, 2)
 )
 
 const fixListColumnGap = "  "
 
-func (a *App) runFixInteractive(includeCatalogs []string) (int, error) {
-	model, err := newFixTUIModel(a, includeCatalogs)
+func (a *App) runFixInteractive(includeCatalogs []string, noRefresh bool) (int, error) {
+	model, err := newFixTUIModel(a, includeCatalogs, noRefresh)
 	if err != nil {
 		return 2, err
 	}
@@ -298,7 +300,7 @@ func (a *App) runFixInteractive(includeCatalogs []string) (int, error) {
 	return 0, nil
 }
 
-func newFixTUIModel(app *App, includeCatalogs []string) (*fixTUIModel, error) {
+func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUIModel, error) {
 	repoList := newFixRepoListModel()
 
 	m := &fixTUIModel{
@@ -311,7 +313,7 @@ func newFixTUIModel(app *App, includeCatalogs []string) (*fixTUIModel, error) {
 		repoList:        repoList,
 	}
 	m.help.ShowAll = false
-	if err := m.refreshRepos(); err != nil {
+	if err := m.refreshRepos(!noRefresh); err != nil {
 		return nil, err
 	}
 	return m, nil
@@ -379,7 +381,7 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyAllSelections()
 			return m, nil
 		case key.Matches(msg, m.keys.Refresh):
-			if err := m.refreshRepos(); err != nil {
+			if err := m.refreshRepos(true); err != nil {
 				m.errText = err.Error()
 			}
 			return m, nil
@@ -398,6 +400,8 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *fixTUIModel) View() string {
+	m.resizeRepoList()
+
 	var b strings.Builder
 	title := lipgloss.JoinHorizontal(lipgloss.Center,
 		titleBadgeStyle.Render("bb"),
@@ -434,19 +438,19 @@ func (m *fixTUIModel) View() string {
 	body := b.String()
 	spacer := ""
 	if m.height > 0 {
-		available := m.height - pageStyle.GetVerticalFrameSize()
+		available := m.height - fixPageStyle.GetVerticalFrameSize()
 		if available < 0 {
 			available = 0
 		}
-		const separatorLines = 2
+		const separatorLines = 1
 		used := lipgloss.Height(body) + separatorLines + lipgloss.Height(helpBlock)
 		if gap := available - used; gap > 0 {
 			spacer = strings.Repeat("\n", gap)
 		}
 	}
 
-	doc := body + "\n\n" + spacer + helpBlock
-	return pageStyle.Render(doc)
+	doc := body + "\n" + spacer + helpBlock
+	return fixPageStyle.Render(doc)
 }
 
 func (m *fixTUIModel) viewMainContent() string {
@@ -569,6 +573,8 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Reasons: ") + fixReasonsStyle.Render(reasonText))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Action help: ") + hintStyle.Render(fixActionDescription(action)))
 	return b.String()
 }
 
@@ -615,9 +621,33 @@ func (m *fixTUIModel) resizeRepoList() {
 	if m.height <= 0 {
 		return
 	}
-	reserved := 18
+	helpPanel := helpPanelStyle
+	if w := m.viewContentWidth(); w > 0 {
+		helpPanel = helpPanel.Width(w)
+	}
+	helpHeight := lipgloss.Height(helpPanel.Render(m.help.View(m.keys)))
+
+	reserved := 0
+	reserved += fixPageStyle.GetVerticalFrameSize()
+	reserved += 3  // title + subtitle + one spacer line
+	reserved += 14 // main panel border and non-list content
+	reserved += 1  // single spacer line between body and footer help
+	reserved += helpHeight
+	if m.status != "" {
+		reserved++
+	}
+	if m.errText != "" {
+		reserved++
+	}
 	if m.messagePrompt {
-		reserved += 5
+		prompt := renderFieldBlock(
+			true,
+			"Commit message",
+			"Used for stage-commit-push. Leave default value to auto-generate.",
+			renderInputContainer(m.messageInput.View(), true),
+			"",
+		)
+		reserved += 2 + lipgloss.Height(prompt)
 	}
 	height := m.height - reserved
 	if height < 6 {
@@ -657,7 +687,7 @@ func (m *fixTUIModel) updateMessagePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.messagePrompt = false
 		m.pendingPath = ""
-		if err := m.refreshRepos(); err != nil {
+		if err := m.refreshRepos(true); err != nil {
 			m.errText = err.Error()
 		}
 		m.resizeRepoList()
@@ -669,13 +699,13 @@ func (m *fixTUIModel) updateMessagePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *fixTUIModel) refreshRepos() error {
+func (m *fixTUIModel) refreshRepos(refresh bool) error {
 	selectedPath := ""
 	if current, ok := m.currentRepo(); ok {
 		selectedPath = current.Record.Path
 	}
 
-	repos, err := m.app.loadFixRepos(m.includeCatalogs)
+	repos, err := m.app.loadFixRepos(m.includeCatalogs, refresh)
 	if err != nil {
 		return err
 	}
@@ -818,7 +848,7 @@ func (m *fixTUIModel) cycleCurrentAction(delta int) {
 	if selected == fixNoAction {
 		m.status = fmt.Sprintf("no action selected for %s", repo.Record.Name)
 	} else {
-		m.status = fmt.Sprintf("%s selected for %s", selected, repo.Record.Name)
+		m.status = fmt.Sprintf("%s selected for %s (%s)", selected, repo.Record.Name, fixActionDescription(selected))
 	}
 	m.rebuildList(repo.Record.Path)
 }
@@ -863,7 +893,7 @@ func (m *fixTUIModel) applyCurrentSelection() {
 	}
 	m.status = fmt.Sprintf("applied %s to %s", action, repo.Record.Name)
 	m.errText = ""
-	if err := m.refreshRepos(); err != nil {
+	if err := m.refreshRepos(true); err != nil {
 		m.errText = err.Error()
 	}
 }
@@ -904,7 +934,7 @@ func (m *fixTUIModel) applyAllSelections() {
 	}
 
 	if m.app != nil {
-		if err := m.refreshRepos(); err != nil {
+		if err := m.refreshRepos(true); err != nil {
 			m.errText = err.Error()
 			return
 		}
@@ -1029,6 +1059,27 @@ func fixActionStyleFor(action string) lipgloss.Style {
 		return fixActionAbortStyle
 	default:
 		return lipgloss.NewStyle().Foreground(textColor)
+	}
+}
+
+func fixActionDescription(action string) string {
+	switch action {
+	case fixNoAction:
+		return "No action. Use Left/Right to select and preview a fix."
+	case FixActionAbortOperation:
+		return "Abort the active git operation (merge, rebase, cherry-pick, or bisect)."
+	case FixActionPush:
+		return "Push local ahead commits to the configured upstream branch."
+	case FixActionStageCommitPush:
+		return "Stage all tracked and untracked changes, commit, and push."
+	case FixActionPullFFOnly:
+		return "Pull upstream changes with fast-forward only."
+	case FixActionSetUpstreamPush:
+		return "Set upstream tracking for the current branch by pushing with --set-upstream."
+	case FixActionEnableAutoPush:
+		return "Enable repo metadata so sync can auto-push this repository."
+	default:
+		return "Action has no help text yet."
 	}
 }
 

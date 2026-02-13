@@ -55,6 +55,7 @@ type FixOptions struct {
 	Project         string
 	Action          string
 	CommitMessage   string
+	NoRefresh       bool
 }
 
 func New(paths state.Paths, stdout io.Writer, stderr io.Writer) *App {

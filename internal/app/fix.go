@@ -35,10 +35,10 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 		if a.IsInteractiveTerminal == nil || !a.IsInteractiveTerminal() {
 			return 2, errors.New("bb fix requires an interactive terminal")
 		}
-		return a.runFixInteractive(opts.IncludeCatalogs)
+		return a.runFixInteractive(opts.IncludeCatalogs, opts.NoRefresh)
 	}
 
-	repos, err := a.loadFixRepos(opts.IncludeCatalogs)
+	repos, err := a.loadFixRepos(opts.IncludeCatalogs, !opts.NoRefresh)
 	if err != nil {
 		return 2, err
 	}
@@ -182,7 +182,7 @@ func resolveFixTarget(selector string, repos []fixRepoState) (fixRepoState, erro
 	return fixRepoState{}, fmt.Errorf("project %q not found", selector)
 }
 
-func (a *App) loadFixRepos(includeCatalogs []string) ([]fixRepoState, error) {
+func (a *App) loadFixRepos(includeCatalogs []string, refresh bool) ([]fixRepoState, error) {
 	a.logf("fix: acquiring global lock")
 	lock, err := state.AcquireLock(a.Paths)
 	if err != nil {
@@ -197,8 +197,12 @@ func (a *App) loadFixRepos(includeCatalogs []string) ([]fixRepoState, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := a.scanAndPublish(cfg, &machine, ScanOptions{IncludeCatalogs: includeCatalogs, AllowPush: false}); err != nil {
-		return nil, err
+	if refresh {
+		if _, err := a.scanAndPublish(cfg, &machine, ScanOptions{IncludeCatalogs: includeCatalogs, AllowPush: false}); err != nil {
+			return nil, err
+		}
+	} else {
+		a.logf("fix: using existing machine snapshot without refresh")
 	}
 
 	metas, err := state.LoadAllRepoMetadata(a.Paths)

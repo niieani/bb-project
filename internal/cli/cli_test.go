@@ -328,6 +328,9 @@ func TestRunFixForwardsOptions(t *testing.T) {
 		if fake.fixOpts.Project != "" || fake.fixOpts.Action != "" {
 			t.Fatalf("unexpected project/action: %#v", fake.fixOpts)
 		}
+		if fake.fixOpts.NoRefresh {
+			t.Fatalf("no-refresh = %t, want false", fake.fixOpts.NoRefresh)
+		}
 		mustEqualSlices(t, fake.fixOpts.IncludeCatalogs, []string{"software", "references"})
 	})
 
@@ -362,6 +365,20 @@ func TestRunFixForwardsOptions(t *testing.T) {
 		}
 		if fake.fixOpts.CommitMessage != "auto" {
 			t.Fatalf("commit message = %q, want auto", fake.fixOpts.CommitMessage)
+		}
+	})
+
+	t.Run("forwards no-refresh", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"fix", "--no-refresh"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if !fake.fixOpts.NoRefresh {
+			t.Fatalf("no-refresh = %t, want true", fake.fixOpts.NoRefresh)
 		}
 	})
 }
