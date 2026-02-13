@@ -515,16 +515,30 @@ func (a *App) notifyUnsyncable(cfg domain.ConfigFile, repos []domain.MachineRepo
 			continue
 		}
 		fingerprint := unsyncableFingerprint(rec.UnsyncableReasons)
-		entry, ok := cache.LastSent[rec.RepoID]
+		cacheKey := notifyCacheKey(rec)
+		entry, ok := cache.LastSent[cacheKey]
 		if ok && entry.Fingerprint == fingerprint && cfg.Notify.Dedupe {
 			a.logf("notify: deduped %s (%s)", rec.Name, fingerprint)
 			continue
 		}
 		a.logf("notify: emitting for %s (%s)", rec.Name, fingerprint)
 		fmt.Fprintf(a.Stdout, "notify %s: %s\n", rec.Name, fingerprint)
-		cache.LastSent[rec.RepoID] = domain.NotifyCacheEntry{Fingerprint: fingerprint, SentAt: a.Now()}
+		cache.LastSent[cacheKey] = domain.NotifyCacheEntry{Fingerprint: fingerprint, SentAt: a.Now()}
 	}
 	return state.SaveNotifyCache(a.Paths, cache)
+}
+
+func notifyCacheKey(rec domain.MachineRepoRecord) string {
+	if strings.TrimSpace(rec.RepoID) != "" {
+		return rec.RepoID
+	}
+	if strings.TrimSpace(rec.Path) != "" {
+		return "path:" + rec.Path
+	}
+	if strings.TrimSpace(rec.Name) != "" {
+		return "name:" + rec.Name
+	}
+	return "unknown"
 }
 
 func unsyncableFingerprint(reasons []domain.UnsyncableReason) string {

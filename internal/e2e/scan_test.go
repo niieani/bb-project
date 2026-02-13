@@ -62,6 +62,30 @@ func TestScanCases(t *testing.T) {
 			t.Fatalf("expected only references repo, got path %q", mf.Repos[0].Path)
 		}
 	})
+
+	t.Run("TC-SCAN-004", func(t *testing.T) {
+		_, m, catalogRoot := setupSingleMachine(t)
+		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+		worktreePath := filepath.Join(catalogRoot, "demo-worktree")
+		m.MustRunGit(now, repoPath, "worktree", "add", "-b", "worktree-branch", worktreePath)
+		m.MustRunGit(now, worktreePath, "branch", "--set-upstream-to", "origin/main", "worktree-branch")
+
+		if out, err := m.RunBB(now.Add(1*time.Minute), "scan"); err != nil {
+			t.Fatalf("scan failed: %v\n%s", err, out)
+		}
+
+		mf := loadMachineFile(t, m)
+		found := false
+		for _, rec := range mf.Repos {
+			if rec.Path == worktreePath {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected worktree repo at %q to be discovered, got repos=%+v", worktreePath, mf.Repos)
+		}
+	})
 }
 
 type twoCatalogHarness struct {

@@ -68,4 +68,23 @@ func TestNotifyCases(t *testing.T) {
 			t.Fatalf("expected no notifications for syncable repos, got: %s", out)
 		}
 	})
+
+	t.Run("TC-NOTIFY-005", func(t *testing.T) {
+		_, m, catalogRoot := setupSingleMachine(t)
+		repoOne := filepath.Join(catalogRoot, "api-one")
+		repoTwo := filepath.Join(catalogRoot, "api-two")
+		m.MustRunGit(now, catalogRoot, "init", "-b", "main", repoOne)
+		m.MustRunGit(now, catalogRoot, "init", "-b", "main", repoTwo)
+
+		out, err := m.RunBB(now.Add(1*time.Minute), "sync", "--notify")
+		if err == nil {
+			t.Fatalf("expected unsyncable sync, output=%s", out)
+		}
+		if !strings.Contains(out, "notify api-one") {
+			t.Fatalf("expected notification for api-one, got: %s", out)
+		}
+		if !strings.Contains(out, "notify api-two") {
+			t.Fatalf("expected notification for api-two, got: %s", out)
+		}
+	})
 }

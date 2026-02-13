@@ -533,8 +533,8 @@ func discoverRepos(catalogs []domain.Catalog) ([]discoveredRepo, error) {
 }
 
 func isGitDir(path string) bool {
-	i, err := os.Stat(filepath.Join(path, ".git"))
-	return err == nil && i.IsDir()
+	_, err := os.Stat(filepath.Join(path, ".git"))
+	return err == nil
 }
 
 func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush bool) (domain.MachineRepoRecord, error) {
