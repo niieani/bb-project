@@ -97,6 +97,16 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		code, err = runRepoSubcommand(a, rest)
 	case "catalog":
 		code, err = runCatalogSubcommand(a, rest)
+	case "config":
+		if err := parseConfigArgs(rest); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		if err := a.RunConfig(); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		return 0
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n", cmd)
 		printUsage(stderr)
@@ -253,10 +263,17 @@ func parseSyncArgs(args []string) (app.SyncOptions, error) {
 	return out, nil
 }
 
+func parseConfigArgs(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	return fmt.Errorf("unknown config arg %q", args[0])
+}
+
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: bb <command> [args]")
 	fmt.Fprintln(w, "global flags: --quiet")
-	fmt.Fprintln(w, "commands: init sync status doctor scan ensure repo catalog")
+	fmt.Fprintln(w, "commands: init sync status doctor scan ensure repo catalog config")
 }
 
 func stripGlobalFlags(args []string) ([]string, bool) {

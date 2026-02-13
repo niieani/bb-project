@@ -25,6 +25,9 @@ type App struct {
 	Hostname func() (string, error)
 	Getwd    func() (string, error)
 	Git      gitx.Runner
+
+	IsInteractiveTerminal func() bool
+	RunConfigWizard       ConfigWizardRunner
 }
 
 type InitOptions struct {
@@ -66,8 +69,10 @@ func New(paths state.Paths, stdout io.Writer, stderr io.Writer) *App {
 		Hostname: func() (string, error) {
 			return os.Hostname()
 		},
-		Getwd: os.Getwd,
-		Git:   gitx.Runner{Now: nowFn},
+		Getwd:                 os.Getwd,
+		Git:                   gitx.Runner{Now: nowFn},
+		IsInteractiveTerminal: defaultIsInteractiveTerminal,
+		RunConfigWizard:       runConfigWizardInteractive,
 	}
 }
 
@@ -179,7 +184,7 @@ func (a *App) RunInit(opts InitOptions) error {
 	}
 	owner := strings.TrimSpace(cfg.GitHub.Owner)
 	if owner == "" {
-		owner = "you"
+		return errors.New("github.owner is required; run 'bb config' and set github.owner")
 	}
 
 	expectedOrigin, expectedRepoID, err := a.expectedOrigin(owner, projectName, remoteProtocol)

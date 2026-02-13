@@ -186,4 +186,18 @@ func TestInitCases(t *testing.T) {
 			t.Fatalf("expected explicit outside catalogs message, got: %s", out)
 		}
 	})
+
+	t.Run("TC-INIT-011", func(t *testing.T) {
+		_, m, _ := setupSingleMachine(t)
+		cfg := strings.Replace(m.MustReadFile(m.ConfigPath()), "owner: you", "owner: \"\"", 1)
+		m.MustWriteFile(m.ConfigPath(), cfg)
+
+		out, err := m.RunBB(fixedNow, "init", "demo")
+		if err == nil {
+			t.Fatalf("expected init failure with blank owner, output: %s", out)
+		}
+		if !strings.Contains(out, "github.owner is required") {
+			t.Fatalf("expected owner validation message, got: %s", out)
+		}
+	})
 }

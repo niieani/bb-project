@@ -122,6 +122,14 @@ func LoadConfig(paths Paths) (domain.ConfigFile, error) {
 	return cfg, nil
 }
 
+func SaveConfig(paths Paths, cfg domain.ConfigFile) error {
+	cfg.Version = 1
+	if strings.TrimSpace(cfg.StateTransport.Mode) == "" {
+		cfg.StateTransport.Mode = "external"
+	}
+	return SaveYAML(paths.ConfigPath(), cfg)
+}
+
 func LoadMachine(paths Paths, machineID string) (domain.MachineFile, error) {
 	path := paths.MachinePath(machineID)
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {

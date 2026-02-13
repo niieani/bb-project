@@ -36,3 +36,15 @@ func TestStripGlobalFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestParseConfigArgs(t *testing.T) {
+	t.Parallel()
+
+	if err := parseConfigArgs(nil); err != nil {
+		t.Fatalf("parseConfigArgs(nil) error = %v", err)
+	}
+
+	if err := parseConfigArgs([]string{"--unknown"}); err == nil {
+		t.Fatal("expected error for unknown config arg")
+	}
+}

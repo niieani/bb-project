@@ -50,26 +50,20 @@ Run:
 
 ## First-Time Setup
 
-1. Add at least one catalog:
+Run interactive setup:
 
 ```bash
-./bb catalog add software /Volumes/Projects/Software
+./bb config
 ```
 
-2. Optionally set default catalog explicitly:
+This wizard configures:
 
-```bash
-./bb catalog default software
-```
+- `github.owner` (required)
+- default visibility and remote protocol
+- sync/notify options
+- catalogs and default catalog
 
-3. Configure GitHub owner in config:
-
-```bash
-sed -n '1,200p' ~/.config/bb-project/config.yaml
-# set github.owner: <your-handle>
-```
-
-Without `github.owner`, `init` falls back to placeholder owner `"you"`, which is usually not what you want.
+Manual catalog commands remain available.
 
 ## Command Reference
 
@@ -87,6 +81,7 @@ Top-level commands:
 - `ensure`
 - `repo`
 - `catalog`
+- `config`
 
 ### `bb init [project] [flags]`
 
@@ -166,6 +161,15 @@ Updates `auto_push` policy in repo metadata.
 - `bb catalog default <name>`
 - `bb catalog list`
 
+### `bb config`
+
+Launches an interactive Bubble Tea wizard for onboarding and reconfiguration.
+
+- edits all `config.yaml` keys
+- edits this machine's catalogs and default catalog
+- can be rerun to change existing values
+- requires an interactive terminal
+
 ## Exit Codes
 
 - `0`: success
@@ -185,7 +189,7 @@ version: 1
 state_transport:
   mode: external
 github:
-  owner: ""
+  owner: your-github-username
   default_visibility: private
   remote_protocol: ssh
 sync:
@@ -204,6 +208,7 @@ notify:
 Important notes:
 
 - v1 supports only `state_transport.mode: external`.
+- `github.owner` is required (`bb init` fails if blank).
 - `notify.throttle_minutes` is present in config; throttling hardening is tracked in v1.1 plan.
 
 ## State Layout
