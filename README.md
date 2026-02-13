@@ -32,6 +32,7 @@ For each `repo_id`, `bb` picks the newest syncable observation as winner and tri
 
 - macOS/Linux shell environment
 - Go `1.26.0` (for building/testing)
+- `just` in `PATH`
 - `git` CLI in `PATH`
 - `gh` CLI in `PATH` for real `bb init` GitHub repo creation
 - External file sync tool for `~/.config/bb-project`
@@ -39,7 +40,7 @@ For each `repo_id`, `bb` picks the newest syncable observation as winner and tri
 ## Build
 
 ```bash
-go build -o bb ./cmd/bb
+just build
 ```
 
 Run:
@@ -302,7 +303,7 @@ Run periodically (for example with `launchd`):
 Run tests:
 
 ```bash
-go test ./...
+just test
 ```
 
 Run focused e2e suites:
