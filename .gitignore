@@ -1,0 +1,5 @@
+# macOS metadata
+.DS_Store
+
+# Local vendor symlink references
+references/vendor/
