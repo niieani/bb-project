@@ -18,6 +18,7 @@ type fakeApp struct {
 	initOpts   app.InitOptions
 	scanOpts   app.ScanOptions
 	syncOpts   app.SyncOptions
+	fixOpts    app.FixOptions
 	statusJSON bool
 	statusIncl []string
 	doctorIncl []string
@@ -36,6 +37,8 @@ type fakeApp struct {
 	scanErr         error
 	syncCode        int
 	syncErr         error
+	fixCode         int
+	fixErr          error
 	statusCode      int
 	statusErr       error
 	doctorCode      int
@@ -72,6 +75,11 @@ func (f *fakeApp) RunScan(opts app.ScanOptions) (int, error) {
 func (f *fakeApp) RunSync(opts app.SyncOptions) (int, error) {
 	f.syncOpts = opts
 	return f.syncCode, f.syncErr
+}
+
+func (f *fakeApp) RunFix(opts app.FixOptions) (int, error) {
+	f.fixOpts = opts
+	return f.fixCode, f.fixErr
 }
 
 func (f *fakeApp) RunStatus(jsonOut bool, include []string) (int, error) {
@@ -303,6 +311,59 @@ func TestRunStatusDoctorEnsureForwardOptions(t *testing.T) {
 		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 	mustEqualSlices(t, fake.ensureIncl, []string{"software"})
+}
+
+func TestRunFixForwardsOptions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("interactive mode with catalogs", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"fix", "--include-catalog", "software", "--include-catalog", "references"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.fixOpts.Project != "" || fake.fixOpts.Action != "" {
+			t.Fatalf("unexpected project/action: %#v", fake.fixOpts)
+		}
+		mustEqualSlices(t, fake.fixOpts.IncludeCatalogs, []string{"software", "references"})
+	})
+
+	t.Run("project lookup mode", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"fix", "api"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.fixOpts.Project != "api" {
+			t.Fatalf("project = %q, want api", fake.fixOpts.Project)
+		}
+		if fake.fixOpts.Action != "" {
+			t.Fatalf("action = %q, want empty", fake.fixOpts.Action)
+		}
+	})
+
+	t.Run("apply mode with auto message", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"fix", "api", "stage-commit-push", "--message=auto"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.fixOpts.Project != "api" || fake.fixOpts.Action != "stage-commit-push" {
+			t.Fatalf("unexpected fix opts: %#v", fake.fixOpts)
+		}
+		if fake.fixOpts.CommitMessage != "auto" {
+			t.Fatalf("commit message = %q, want auto", fake.fixOpts.CommitMessage)
+		}
+	})
 }
 
 func TestRunRepoPolicyValidationAndForwarding(t *testing.T) {

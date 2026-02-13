@@ -80,6 +80,7 @@ Top-level commands:
 - `status`
 - `doctor`
 - `ensure`
+- `fix`
 - `repo`
 - `catalog`
 - `config`
@@ -147,6 +148,37 @@ Returns `1` if any unsyncable repo is present in selected catalogs.
 
 Alias for sync convergence (`bb sync` with include filters).
 
+### `bb fix [project] [action] [flags]`
+
+Inspect repositories and apply context-aware fixes.
+
+Forms:
+
+- `bb fix` opens interactive table mode (requires interactive terminal).
+- `bb fix <project>` prints repo state and currently eligible fixes.
+- `bb fix <project> <action>` applies one action and re-observes state.
+
+Selector resolution for `<project>`:
+
+- exact local path
+- exact `repo_id`
+- unique repo name
+
+Flags:
+
+- `--include-catalog <name>` (repeatable)
+- `--message <text>` (used with `stage-commit-push`; pass `auto` for generated message)
+
+Actions:
+
+- `push`
+- `stage-commit-push`
+- `pull-ff-only`
+- `set-upstream-push`
+- `enable-auto-push`
+- `abort-operation`
+- `ignore` (interactive mode only, session-only)
+
 ### `bb repo policy <repo> --auto-push=<true|false>`
 
 Updates `auto_push` policy in repo metadata.
@@ -184,7 +216,7 @@ Examples:
 ## Exit Codes
 
 - `0`: success
-- `1`: command completed but found unsyncable state (`scan`, `sync`, `doctor`)
+- `1`: command completed but found unsyncable state (`scan`, `sync`, `doctor`, `fix` list/apply when still unsyncable)
 - `2`: usage error or hard failure
 
 ## Configuration

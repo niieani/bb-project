@@ -17,6 +17,7 @@ type appRunner interface {
 	RunInit(opts app.InitOptions) error
 	RunScan(opts app.ScanOptions) (int, error)
 	RunSync(opts app.SyncOptions) (int, error)
+	RunFix(opts app.FixOptions) (int, error)
 	RunStatus(jsonOut bool, include []string) (int, error)
 	RunDoctor(include []string) (int, error)
 	RunEnsure(include []string) (int, error)
@@ -156,6 +157,7 @@ func newRootCommand(runtime *runtimeState) *cobra.Command {
 		newInitCommand(runtime),
 		newScanCommand(runtime),
 		newSyncCommand(runtime),
+		newFixCommand(runtime),
 		newStatusCommand(runtime),
 		newDoctorCommand(runtime),
 		newEnsureCommand(runtime),
@@ -294,6 +296,40 @@ func newStatusCommand(runtime *runtimeState) *cobra.Command {
 
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Print machine and repository state as JSON.")
 	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
+
+	return cmd
+}
+
+func newFixCommand(runtime *runtimeState) *cobra.Command {
+	var includeCatalogs []string
+	var message string
+
+	cmd := &cobra.Command{
+		Use:   "fix [project] [action]",
+		Short: "Inspect repositories and apply context-aware fixes.",
+		Args:  cobra.MaximumNArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			opts := app.FixOptions{
+				IncludeCatalogs: includeCatalogs,
+				CommitMessage:   message,
+			}
+			if len(args) > 0 {
+				opts.Project = args[0]
+			}
+			if len(args) > 1 {
+				opts.Action = args[1]
+			}
+			code, err := runner.RunFix(opts)
+			return withExitCode(code, err)
+		},
+	}
+
+	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
+	cmd.Flags().StringVar(&message, "message", "", "Commit message for stage-commit-push action (or 'auto').")
 
 	return cmd
 }

@@ -191,6 +191,16 @@ func (r Runner) PushUpstream(path, branch string) error {
 	return err
 }
 
+func (r Runner) AddAll(path string) error {
+	_, err := r.RunGit(path, "add", "-A")
+	return err
+}
+
+func (r Runner) Commit(path, message string) error {
+	_, err := r.RunGit(path, "commit", "-m", message)
+	return err
+}
+
 func (r Runner) Checkout(path, branch string) error {
 	_, err := r.RunGit(path, "checkout", branch)
 	if err == nil {
@@ -208,4 +218,24 @@ func (r Runner) Clone(origin, path string) error {
 
 func (r Runner) EnsureBranch(path, branch string) error {
 	return r.Checkout(path, branch)
+}
+
+func (r Runner) MergeAbort(path string) error {
+	_, err := r.RunGit(path, "merge", "--abort")
+	return err
+}
+
+func (r Runner) RebaseAbort(path string) error {
+	_, err := r.RunGit(path, "rebase", "--abort")
+	return err
+}
+
+func (r Runner) CherryPickAbort(path string) error {
+	_, err := r.RunGit(path, "cherry-pick", "--abort")
+	return err
+}
+
+func (r Runner) BisectReset(path string) error {
+	_, err := r.RunGit(path, "bisect", "reset")
+	return err
 }

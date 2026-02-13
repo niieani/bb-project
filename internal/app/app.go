@@ -50,6 +50,13 @@ type SyncOptions struct {
 	DryRun          bool
 }
 
+type FixOptions struct {
+	IncludeCatalogs []string
+	Project         string
+	Action          string
+	CommitMessage   string
+}
+
 func New(paths state.Paths, stdout io.Writer, stderr io.Writer) *App {
 	nowFn := func() time.Time {
 		if v := strings.TrimSpace(os.Getenv("BB_NOW")); v != "" {
@@ -882,4 +889,8 @@ func (a *App) RunEnsure(include []string) (int, error) {
 func (a *App) RunSync(opts SyncOptions) (int, error) {
 	// Full convergence logic is implemented in sync.go to keep this file manageable.
 	return a.runSync(opts)
+}
+
+func (a *App) RunFix(opts FixOptions) (int, error) {
+	return a.runFix(opts)
 }
