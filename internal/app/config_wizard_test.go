@@ -2,6 +2,7 @@ package app
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -276,5 +277,28 @@ func TestWizardCatalogEmptyStateDownFromTabsOpensEditor(t *testing.T) {
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	if m.catalogEdit == nil {
 		t.Fatal("expected add editor to open when moving down into empty catalog content")
+	}
+}
+
+func TestWizardCatalogEditorReplacesEmptyState(t *testing.T) {
+	m := testConfigWizardModel(t)
+	m.machine.Catalogs = nil
+	m.machine.DefaultCatalog = ""
+	m.step = stepCatalogs
+	m.startCatalogAddEditor()
+
+	view := m.viewCatalogs()
+	if strings.Contains(view, "No catalogs configured yet") {
+		t.Fatal("expected empty-state placeholder to be hidden while add editor is open")
+	}
+	if !strings.Contains(view, "Add catalog") {
+		t.Fatal("expected add catalog editor content to be visible")
+	}
+}
+
+func TestRenderEnumLineIsSingleLine(t *testing.T) {
+	line := renderEnumLine("private", []string{"private", "public"})
+	if strings.Contains(line, "\n") {
+		t.Fatalf("enum line should render in one line, got %q", line)
 	}
 }

@@ -171,12 +171,121 @@ type configWizardModel struct {
 }
 
 var (
-	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-	labelStyle  = lipgloss.NewStyle().Bold(true)
-	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	hintStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	focusStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	tabStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
+	textColor      = lipgloss.AdaptiveColor{Light: "#1F2328", Dark: "#E6EDF3"}
+	mutedTextColor = lipgloss.AdaptiveColor{Light: "#57606A", Dark: "#8B949E"}
+	borderColor    = lipgloss.AdaptiveColor{Light: "#D0D7DE", Dark: "#30363D"}
+	panelBgColor   = lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#0D1117"}
+	accentColor    = lipgloss.AdaptiveColor{Light: "#0969DA", Dark: "#58A6FF"}
+	accentBgColor  = lipgloss.AdaptiveColor{Light: "#DDF4FF", Dark: "#1F2937"}
+	successColor   = lipgloss.AdaptiveColor{Light: "#1A7F37", Dark: "#3FB950"}
+	errorFgColor   = lipgloss.AdaptiveColor{Light: "#CF222E", Dark: "#F85149"}
+
+	pageStyle = lipgloss.NewStyle().Padding(1, 2)
+
+	titleBadgeStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("230")).
+			Background(lipgloss.Color("31")).
+			Padding(0, 1)
+
+	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(textColor)
+	labelStyle  = lipgloss.NewStyle().Bold(true).Foreground(textColor)
+	errorStyle  = lipgloss.NewStyle().Foreground(errorFgColor)
+	hintStyle   = lipgloss.NewStyle().Foreground(mutedTextColor)
+
+	panelStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(borderColor).
+			Background(panelBgColor).
+			Padding(0, 2)
+
+	alertStyle = lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder(), false, false, false, true).
+			BorderForeground(errorFgColor).
+			PaddingLeft(1)
+
+	helpPanelStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(borderColor).
+			Padding(0, 1)
+
+	fieldStyle = lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder(), false, false, false, true).
+			BorderForeground(borderColor).
+			PaddingLeft(1)
+
+	fieldFocusStyle = fieldStyle.BorderForeground(accentColor)
+
+	inputStyle = lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(borderColor).
+			Padding(0, 1)
+
+	inputFocusStyle = inputStyle.BorderForeground(accentColor)
+
+	switchOnStyle = lipgloss.NewStyle().
+			Foreground(successColor).
+			Background(lipgloss.AdaptiveColor{Light: "#EAFBEF", Dark: "#0F2418"}).
+			Bold(true).
+			Padding(0, 2)
+
+	switchOffStyle = lipgloss.NewStyle().
+			Foreground(mutedTextColor).
+			Background(lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#161B22"}).
+			Padding(0, 2)
+
+	enumOptionStyle = lipgloss.NewStyle().
+			Foreground(mutedTextColor).
+			Background(lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#161B22"}).
+			Padding(0, 2).
+			MarginRight(2)
+
+	enumOptionActiveStyle = enumOptionStyle.
+				Background(lipgloss.AdaptiveColor{Light: "#DDF4FF", Dark: "#13233A"}).
+				Foreground(textColor).
+				Bold(true)
+
+	tabActiveBorder = lipgloss.Border{
+		Top:         "─",
+		Bottom:      " ",
+		Left:        "│",
+		Right:       "│",
+		TopLeft:     "╭",
+		TopRight:    "╮",
+		BottomLeft:  "┘",
+		BottomRight: "└",
+	}
+
+	tabBorder = lipgloss.Border{
+		Top:         "─",
+		Bottom:      "─",
+		Left:        "│",
+		Right:       "│",
+		TopLeft:     "╭",
+		TopRight:    "╮",
+		BottomLeft:  "┴",
+		BottomRight: "┴",
+	}
+
+	tabBaseStyle = lipgloss.NewStyle().
+			Border(tabBorder, true).
+			BorderForeground(borderColor).
+			Foreground(mutedTextColor).
+			Padding(0, 1)
+
+	tabCurrentStyle = tabBaseStyle.
+			BorderForeground(accentColor).
+			Foreground(textColor).
+			Bold(true)
+
+	tabFocusedStyle = tabCurrentStyle.
+			Border(tabActiveBorder, true).
+			Background(accentBgColor)
+
+	tabGapStyle = tabBaseStyle.
+			BorderTop(false).
+			BorderLeft(false).
+			BorderRight(false)
 )
 
 func runConfigWizardInteractive(input ConfigWizardInput) (ConfigWizardResult, error) {
@@ -341,39 +450,71 @@ func (m *configWizardModel) prevStepKeepTabs() {
 func (m *configWizardModel) View() string {
 	var b strings.Builder
 
-	b.WriteString(headerStyle.Render("bb config"))
+	title := lipgloss.JoinHorizontal(lipgloss.Center,
+		titleBadgeStyle.Render("bb"),
+		" "+headerStyle.Render("config wizard"),
+	)
+	subtitle := hintStyle.Render("Interactive setup for local configuration files")
+	b.WriteString(title)
 	b.WriteString("\n")
-	b.WriteString(m.stepsHeader())
+	b.WriteString(subtitle)
 	b.WriteString("\n\n")
+	b.WriteString(m.stepsHeader())
+	b.WriteString("\n")
 
+	content := ""
 	switch m.step {
 	case stepIntro:
-		b.WriteString(m.viewIntro())
+		content = m.viewIntro()
 	case stepGitHub:
-		b.WriteString(m.viewGitHub())
+		content = m.viewGitHub()
 	case stepSync:
-		b.WriteString(m.viewSync())
+		content = m.viewSync()
 	case stepNotify:
-		b.WriteString(m.viewNotify())
+		content = m.viewNotify()
 	case stepCatalogs:
-		b.WriteString(m.viewCatalogs())
+		content = m.viewCatalogs()
 	case stepReview:
-		b.WriteString(m.viewReview())
+		content = m.viewReview()
 	}
+	contentPanel := panelStyle
+	if w := m.viewContentWidth(); w > 0 {
+		contentPanel = contentPanel.Width(w)
+	}
+	b.WriteString(contentPanel.Render(content))
 
 	b.WriteString("\n")
 	if m.errorText != "" {
-		b.WriteString(errorStyle.Render(m.errorText))
+		b.WriteString(alertStyle.Render(errorStyle.Render(m.errorText)))
 		b.WriteString("\n")
 	}
 	if m.confirmQuit {
-		b.WriteString(errorStyle.Render("Press Ctrl+C again to discard changes and quit."))
+		b.WriteString(alertStyle.Render(errorStyle.Render("Press Ctrl+C again to discard changes and quit.")))
 		b.WriteString("\n")
 	}
-	b.WriteString("\n")
-	b.WriteString(m.help.View(m.keys))
-	b.WriteString("\n")
-	return b.String()
+
+	helpView := m.help.View(m.keys)
+	helpPanel := helpPanelStyle
+	if w := m.viewContentWidth(); w > 0 {
+		helpPanel = helpPanel.Width(w)
+	}
+	helpBlock := helpPanel.Render(helpView)
+
+	body := b.String()
+	spacer := ""
+	if m.height > 0 {
+		const pageVerticalPadding = 2
+		const separatorLines = 2
+		bodyHeight := lipgloss.Height(body)
+		helpHeight := lipgloss.Height(helpBlock)
+		total := bodyHeight + separatorLines + helpHeight + pageVerticalPadding
+		if gap := m.height - total; gap > 0 {
+			spacer = strings.Repeat("\n", gap)
+		}
+	}
+
+	doc := body + "\n\n" + spacer + helpBlock
+	return pageStyle.Render(doc) + "\n"
 }
 
 func (m *configWizardModel) updateIntro(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -383,6 +524,17 @@ func (m *configWizardModel) updateIntro(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *configWizardModel) viewContentWidth() int {
+	if m.width <= 0 {
+		return 0
+	}
+	contentWidth := m.width - 8
+	if contentWidth < 52 {
+		return 0
+	}
+	return contentWidth
 }
 
 func (m *configWizardModel) updateGitHub(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -774,7 +926,18 @@ func (m *configWizardModel) initCatalogTable() {
 		table.WithHeight(8),
 	)
 	styles := table.DefaultStyles()
-	styles.Selected = styles.Selected.Foreground(lipgloss.Color("230")).Background(lipgloss.Color("62")).Bold(false)
+	styles.Header = styles.Header.
+		Foreground(textColor).
+		Background(panelBgColor).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(borderColor).
+		BorderBottom(true).
+		Bold(true)
+	styles.Cell = styles.Cell.Foreground(textColor)
+	styles.Selected = styles.Selected.
+		Foreground(textColor).
+		Background(accentBgColor).
+		Bold(true)
 	m.catalogTable.SetStyles(styles)
 	m.rebuildCatalogRows()
 }
@@ -940,16 +1103,24 @@ func (m *configWizardModel) stepsHeader() string {
 	parts := make([]string, 0, len(labels))
 	for i, l := range labels {
 		if i == int(m.step) {
-			active := focusStyle
+			active := tabCurrentStyle
 			if m.focusTabs {
-				active = tabStyle
+				active = tabFocusedStyle
 			}
-			parts = append(parts, active.Render("["+l+"]"))
+			parts = append(parts, active.Render(l))
 			continue
 		}
-		parts = append(parts, " "+l+" ")
+		parts = append(parts, tabBaseStyle.Render(l))
 	}
-	return strings.Join(parts, " -> ")
+	row := lipgloss.JoinHorizontal(lipgloss.Bottom, parts...)
+	if m.width <= 0 {
+		return row
+	}
+	gap := m.width - lipgloss.Width(row) - 4
+	if gap <= 0 {
+		return row
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Bottom, row, tabGapStyle.Render(strings.Repeat(" ", gap)))
 }
 
 func (m *configWizardModel) viewIntro() string {
@@ -957,61 +1128,52 @@ func (m *configWizardModel) viewIntro() string {
 	if len(m.machine.Catalogs) == 0 || strings.TrimSpace(m.originalConfig.GitHub.Owner) == "" {
 		mode = "onboarding"
 	}
-	return strings.Join([]string{
-		"Interactive configuration wizard.",
-		"",
-		"Mode: " + mode,
-		"",
-		"Files that may be updated:",
-		"- " + m.input.ConfigPath,
-		"- " + m.input.MachinePath,
-		"",
-		hintStyle.Render("Use Right Arrow to continue. Use Esc to go back."),
-		hintStyle.Render("Use Up from the first field to focus tabs, then Left/Right to switch steps."),
-	}, "\n")
+	var b strings.Builder
+	b.WriteString(labelStyle.Render("Welcome"))
+	b.WriteString("\n")
+	b.WriteString("This wizard guides setup and reconfiguration without manual file editing.")
+	b.WriteString("\n\n")
+	b.WriteString(labelStyle.Render("Session mode"))
+	b.WriteString("\n")
+	b.WriteString(renderStatusPill(mode))
+	b.WriteString("\n\n")
+	b.WriteString(labelStyle.Render("Files that may be updated"))
+	b.WriteString("\n")
+	b.WriteString("- " + m.input.ConfigPath)
+	b.WriteString("\n")
+	b.WriteString("- " + m.input.MachinePath)
+	return b.String()
 }
 
 func (m *configWizardModel) viewGitHub() string {
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("GitHub & Transport"))
-	b.WriteString("\n\n")
-	b.WriteString("State transport mode is fixed to external in v1.\n\n")
-
-	ownerCursor := " "
-	if !m.focusTabs && m.githubFocus == 0 {
-		ownerCursor = ">"
-	}
-	b.WriteString(ownerCursor + " GitHub Owner (required)\n")
-	b.WriteString(hintStyle.Render("GitHub user or organization that will own new repositories created by bb init."))
 	b.WriteString("\n")
-	b.WriteString(m.githubOwnerInput.View())
-	if m.githubOwnerInput.Err != nil {
-		b.WriteString("\n")
-		b.WriteString(errorStyle.Render(m.githubOwnerInput.Err.Error()))
-	}
+	b.WriteString(hintStyle.Render("Connect bb to your GitHub defaults for repository creation and origin configuration."))
 	b.WriteString("\n\n")
-
-	visibilityCursor := " "
-	if !m.focusTabs && m.githubFocus == 1 {
-		visibilityCursor = ">"
-	}
-	b.WriteString(visibilityCursor + " Default Repository Visibility\n")
-	b.WriteString(hintStyle.Render("Default visibility for newly created repositories."))
-	b.WriteString("\n")
-	b.WriteString(renderEnumLine(m.config.GitHub.DefaultVisibility, []string{"private", "public"}))
+	b.WriteString(renderFieldBlock(
+		!m.focusTabs && m.githubFocus == 0,
+		"Repository owner",
+		"GitHub user or organization that should own repositories created by bb init.",
+		renderInputContainer(m.githubOwnerInput.View(), !m.focusTabs && m.githubFocus == 0),
+		errorText(m.githubOwnerInput.Err),
+	))
 	b.WriteString("\n\n")
-
-	protocolCursor := " "
-	if !m.focusTabs && m.githubFocus == 2 {
-		protocolCursor = ">"
-	}
-	b.WriteString(protocolCursor + " Git Remote Protocol\n")
-	b.WriteString(hintStyle.Render("Remote URL format used when configuring origin."))
-	b.WriteString("\n")
-	b.WriteString(renderEnumLine(m.config.GitHub.RemoteProtocol, []string{"ssh", "https"}))
+	b.WriteString(renderFieldBlock(
+		!m.focusTabs && m.githubFocus == 1,
+		"Default repository visibility",
+		"Visibility used when creating new repositories.",
+		renderEnumLine(m.config.GitHub.DefaultVisibility, []string{"private", "public"}),
+		"",
+	))
 	b.WriteString("\n\n")
-
-	b.WriteString(hintStyle.Render("Up/Down switches fields. Space cycles enum options. Enter continues."))
+	b.WriteString(renderFieldBlock(
+		!m.focusTabs && m.githubFocus == 2,
+		"Git remote protocol",
+		"URL format used for origin remotes.",
+		renderEnumLine(m.config.GitHub.RemoteProtocol, []string{"ssh", "https"}),
+		"",
+	))
 	return b.String()
 }
 
@@ -1042,100 +1204,124 @@ func (m *configWizardModel) viewSync() string {
 	}
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("Sync Settings"))
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Render("Define how bb discovers repositories and performs automated sync operations."))
 	b.WriteString("\n\n")
 	for i := range labels {
-		cursor := " "
-		if !m.focusTabs && i == m.syncCursor {
-			cursor = ">"
+		b.WriteString(renderToggleField(
+			!m.focusTabs && i == m.syncCursor,
+			labels[i],
+			descriptions[i],
+			values[i],
+		))
+		if i < len(labels)-1 {
+			b.WriteString("\n\n")
 		}
-		mark := "[ ]"
-		if values[i] {
-			mark = "[x]"
-		}
-		b.WriteString(fmt.Sprintf("%s %s %s\n", cursor, mark, labels[i]))
-		b.WriteString("    " + hintStyle.Render(descriptions[i]) + "\n")
 	}
-	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Up/Down switches fields. Space toggles. Enter continues."))
 	return b.String()
 }
 
 func (m *configWizardModel) viewNotify() string {
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("Notify Settings"))
-	b.WriteString("\n\n")
-	enabledCursor := " "
-	dedupeCursor := " "
-	throttleCursor := " "
-	if !m.focusTabs && m.notifyFocus == 0 {
-		enabledCursor = ">"
-	}
-	if !m.focusTabs && m.notifyFocus == 1 {
-		dedupeCursor = ">"
-	}
-	if !m.focusTabs && m.notifyFocus == 2 {
-		throttleCursor = ">"
-	}
-	b.WriteString(fmt.Sprintf("%s [%s] Enable notifications\n", enabledCursor, boolMarker(m.config.Notify.Enabled)))
-	b.WriteString("    " + hintStyle.Render("Emits notification output for unsyncable repositories when --notify is used.") + "\n")
-	b.WriteString(fmt.Sprintf("%s [%s] Deduplicate notifications\n", dedupeCursor, boolMarker(m.config.Notify.Dedupe)))
-	b.WriteString("    " + hintStyle.Render("Suppresses repeated notifications for unchanged unsyncable states.") + "\n")
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("%s Notification throttle (minutes)\n", throttleCursor))
-	b.WriteString(hintStyle.Render("Minimum minutes between notifications for the same repository."))
-	b.WriteString("\n")
-	b.WriteString(m.notifyThrottle.View())
-	if m.notifyThrottle.Err != nil {
-		b.WriteString("\n")
-		b.WriteString(errorStyle.Render(m.notifyThrottle.Err.Error()))
-	}
+	b.WriteString(hintStyle.Render("Control when and how unsyncable repository notifications are emitted."))
 	b.WriteString("\n\n")
-	b.WriteString(hintStyle.Render("Up/Down switches fields. Space toggles booleans. Enter continues."))
+	b.WriteString(renderToggleField(
+		!m.focusTabs && m.notifyFocus == 0,
+		"Enable notifications",
+		"Emits notification output for unsyncable repositories when --notify is used.",
+		m.config.Notify.Enabled,
+	))
+	b.WriteString("\n\n")
+	b.WriteString(renderToggleField(
+		!m.focusTabs && m.notifyFocus == 1,
+		"Deduplicate notifications",
+		"Suppresses repeated notifications for unchanged unsyncable states.",
+		m.config.Notify.Dedupe,
+	))
+	b.WriteString("\n\n")
+	b.WriteString(renderFieldBlock(
+		!m.focusTabs && m.notifyFocus == 2,
+		"Notification throttle (minutes)",
+		"Minimum minutes between notifications for the same repository.",
+		renderInputContainer(m.notifyThrottle.View(), !m.focusTabs && m.notifyFocus == 2),
+		errorText(m.notifyThrottle.Err),
+	))
 	return b.String()
 }
 
 func (m *configWizardModel) viewCatalogs() string {
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("Catalog Management"))
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Render("Catalogs define root folders where bb discovers repositories."))
 	b.WriteString("\n\n")
+	if m.catalogEdit != nil {
+		b.WriteString(panelStyle.Render(m.viewCatalogEditor()))
+		return b.String()
+	}
 	if len(m.machine.Catalogs) == 0 {
-		b.WriteString("No catalogs configured yet.\n\n")
-		b.WriteString(hintStyle.Render("Start by creating your first catalog below."))
-		b.WriteString("\n")
-		b.WriteString(hintStyle.Render("A catalog is a named root folder where bb discovers repositories."))
-		b.WriteString("\n")
-		b.WriteString(hintStyle.Render("Examples: /Volumes/Projects/Software or /Users/you/Code"))
+		emptyState := strings.Join([]string{
+			labelStyle.Render("No catalogs configured yet"),
+			hintStyle.Render("Press Down to open the add form and define your first catalog."),
+			hintStyle.Render("Examples: /Volumes/Projects/Software or /Users/you/Code"),
+		}, "\n")
+		b.WriteString(panelStyle.
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(borderColor).
+			Background(panelBgColor).
+			Padding(1, 2).
+			Render(emptyState))
 		b.WriteString("\n")
 	} else {
-		b.WriteString(m.catalogTable.View())
-		b.WriteString("\n")
-		b.WriteString(hintStyle.Render("a:add  e:edit root  d:delete  space/s:set default"))
-		b.WriteString("\n")
-		b.WriteString(hintStyle.Render("Use Up on first row to focus tabs, then Left/Right to switch steps."))
-		b.WriteString("\n")
+		b.WriteString(panelStyle.
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(borderColor).
+			Background(panelBgColor).
+			Padding(0, 1).
+			Render(m.catalogTable.View()))
 	}
+	return b.String()
+}
 
-	if m.catalogEdit != nil {
+func (m *configWizardModel) viewCatalogEditor() string {
+	if m.catalogEdit == nil {
+		return ""
+	}
+	var b strings.Builder
+	if m.catalogEdit.mode == catalogEditorAdd {
+		b.WriteString(labelStyle.Render("Add catalog"))
+		b.WriteString("\n\n")
+		b.WriteString(renderFieldBlock(
+			m.catalogEdit.focus == 0,
+			"Catalog name",
+			"Human-friendly name used in bb catalog commands.",
+			renderInputContainer(m.catalogEdit.inputs[0].View(), m.catalogEdit.focus == 0),
+			"",
+		))
 		b.WriteString("\n")
-		if m.catalogEdit.mode == catalogEditorAdd {
-			b.WriteString(labelStyle.Render("Add Catalog"))
-			b.WriteString("\n")
-			b.WriteString("name\n")
-			b.WriteString(m.catalogEdit.inputs[0].View())
-			b.WriteString("\nroot (absolute path)\n")
-			b.WriteString(m.catalogEdit.inputs[1].View())
-		} else {
-			b.WriteString(labelStyle.Render("Edit Catalog Root"))
-			b.WriteString("\n")
-			b.WriteString("root (absolute path)\n")
-			b.WriteString(m.catalogEdit.inputs[0].View())
-		}
-		if m.catalogEdit.err != "" {
-			b.WriteString("\n")
-			b.WriteString(errorStyle.Render(m.catalogEdit.err))
-		}
+		b.WriteString(renderFieldBlock(
+			m.catalogEdit.focus == 1,
+			"Catalog root path",
+			"Absolute path where repositories should be discovered.",
+			renderInputContainer(m.catalogEdit.inputs[1].View(), m.catalogEdit.focus == 1),
+			"",
+		))
+	} else {
+		b.WriteString(labelStyle.Render("Edit catalog root"))
+		b.WriteString("\n\n")
+		b.WriteString(renderFieldBlock(
+			m.catalogEdit.focus == 0,
+			"Catalog root path",
+			"Absolute path where repositories should be discovered.",
+			renderInputContainer(m.catalogEdit.inputs[0].View(), m.catalogEdit.focus == 0),
+			"",
+		))
+	}
+	if m.catalogEdit.err != "" {
 		b.WriteString("\n")
-		b.WriteString(hintStyle.Render("down: next field  up: previous field (or tabs from first)  enter: save  esc: cancel"))
+		b.WriteString(alertStyle.Render(errorStyle.Render(m.catalogEdit.err)))
 	}
 	return b.String()
 }
@@ -1143,31 +1329,46 @@ func (m *configWizardModel) viewCatalogs() string {
 func (m *configWizardModel) viewReview() string {
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("Review"))
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Render("Inspect pending changes before writing configuration files."))
 	b.WriteString("\n\n")
 	lines := m.diffLines()
 	if len(lines) == 0 {
-		b.WriteString("No changes\n")
+		b.WriteString(renderFieldBlock(false, "Pending changes", "No differences from current configuration.", "", ""))
 	} else {
+		diff := strings.Builder{}
 		for _, line := range lines {
-			b.WriteString("- ")
-			b.WriteString(line)
-			b.WriteString("\n")
+			diff.WriteString("• ")
+			diff.WriteString(line)
+			diff.WriteString("\n")
 		}
+		b.WriteString(renderFieldBlock(false, "Pending changes", "", strings.TrimSpace(diff.String()), ""))
 	}
 	missing := missingCatalogRoots(m.machine.Catalogs)
 	if len(missing) > 0 {
 		b.WriteString("\n")
-		b.WriteString(labelStyle.Render("Missing catalog roots"))
-		b.WriteString("\n")
+		roots := strings.Builder{}
 		for _, root := range missing {
-			b.WriteString("- ")
-			b.WriteString(root)
-			b.WriteString("\n")
+			roots.WriteString("• ")
+			roots.WriteString(root)
+			roots.WriteString("\n")
 		}
-		b.WriteString(fmt.Sprintf("\ncreate missing roots on apply: [%s] (press Space to toggle)\n", boolMarker(m.createMissingRoots)))
+		b.WriteString(renderFieldBlock(
+			false,
+			"Missing catalog roots",
+			"These paths do not exist yet.",
+			strings.TrimSpace(roots.String()),
+			"",
+		))
+		b.WriteString("\n")
+		b.WriteString(renderFieldBlock(
+			false,
+			"Create missing roots on apply",
+			"When enabled, bb creates missing catalog root folders before saving.",
+			renderCheckbox(m.createMissingRoots),
+			"",
+		))
 	}
-	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Press Enter or Ctrl+S to apply changes."))
 	return b.String()
 }
 
@@ -1197,11 +1398,75 @@ func (m *configWizardModel) diffLines() []string {
 	return out
 }
 
-func boolMarker(v bool) string {
-	if v {
-		return "x"
+func renderStatusPill(value string) string {
+	return lipgloss.NewStyle().
+		Foreground(textColor).
+		Background(accentBgColor).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(accentColor).
+		Padding(0, 1).
+		Bold(true).
+		Render(strings.ToUpper(value))
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
 	}
-	return " "
+	return err.Error()
+}
+
+func renderInputContainer(input string, focused bool) string {
+	style := inputStyle
+	if focused {
+		style = inputFocusStyle
+	}
+	return style.Render(input)
+}
+
+func renderCheckbox(v bool) string {
+	if v {
+		return switchOnStyle.Render("● ON")
+	}
+	return switchOffStyle.Render("○ OFF")
+}
+
+func renderFieldBlock(focused bool, title, description, value, err string) string {
+	var b strings.Builder
+	b.WriteString(labelStyle.Render(title))
+	if description != "" {
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render(description))
+	}
+	if value != "" {
+		b.WriteString("\n")
+		b.WriteString(value)
+	}
+	if err != "" {
+		b.WriteString("\n")
+		b.WriteString(errorStyle.Render(err))
+	}
+	style := fieldStyle
+	if focused {
+		style = fieldFocusStyle
+	}
+	return style.Render(b.String())
+}
+
+func renderToggleField(focused bool, title, description string, value bool) string {
+	var b strings.Builder
+	b.WriteString(renderCheckbox(value))
+	b.WriteString(" ")
+	b.WriteString(labelStyle.Render(title))
+	if description != "" {
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render(description))
+	}
+	style := fieldStyle
+	if focused {
+		style = fieldFocusStyle
+	}
+	return style.Render(b.String())
 }
 
 func shiftEnumValue(current string, options []string, delta int) string {
@@ -1223,13 +1488,15 @@ func shiftEnumValue(current string, options []string, delta int) string {
 func renderEnumLine(current string, options []string) string {
 	parts := make([]string, 0, len(options))
 	for _, option := range options {
-		mark := "( )"
+		label := "○ " + option
+		style := enumOptionStyle
 		if current == option {
-			mark = "(x)"
+			label = "● " + option
+			style = enumOptionActiveStyle
 		}
-		parts = append(parts, fmt.Sprintf("%s %s", mark, option))
+		parts = append(parts, style.Render(label))
 	}
-	return strings.Join(parts, "   ")
+	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
 func (m *configWizardModel) rebuildCatalogRows() {
