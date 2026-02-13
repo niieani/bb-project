@@ -35,6 +35,13 @@ const (
 	catalogEditorEditRoot
 )
 
+type catalogFocusArea int
+
+const (
+	catalogFocusTable catalogFocusArea = iota
+	catalogFocusButtons
+)
+
 type configWizardKeyMap struct {
 	NextStep       key.Binding
 	PrevStep       key.Binding
@@ -60,7 +67,6 @@ func (k configWizardKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.NextStep, k.PrevStep, k.NextField, k.PrevField, k.Back, k.Advance},
 		{k.Toggle, k.Apply, k.Help, k.Quit},
-		{k.CatalogAdd, k.CatalogEdit, k.CatalogDelete, k.CatalogDefault},
 	}
 }
 
@@ -68,11 +74,11 @@ func defaultConfigWizardKeyMap() configWizardKeyMap {
 	return configWizardKeyMap{
 		NextStep: key.NewBinding(
 			key.WithKeys("right"),
-			key.WithHelp("right", "next step (tabs focus)"),
+			key.WithHelp("right", "next step/option"),
 		),
 		PrevStep: key.NewBinding(
 			key.WithKeys("left"),
-			key.WithHelp("left", "prev step (tabs focus)"),
+			key.WithHelp("left", "prev step/option"),
 		),
 		NextField: key.NewBinding(
 			key.WithKeys("down"),
@@ -126,11 +132,12 @@ func defaultConfigWizardKeyMap() configWizardKeyMap {
 }
 
 type catalogEditor struct {
-	mode   catalogEditorMode
-	inputs []textinput.Model
-	focus  int
-	row    int
-	err    string
+	mode          catalogEditorMode
+	inputs        []textinput.Model
+	focus         int
+	row           int
+	err           string
+	confirmDelete bool
 }
 
 type configWizardModel struct {
@@ -166,6 +173,8 @@ type configWizardModel struct {
 
 	catalogTable table.Model
 	catalogEdit  *catalogEditor
+	catalogFocus catalogFocusArea
+	catalogBtn   int
 
 	createMissingRoots bool
 }
@@ -286,6 +295,39 @@ var (
 			BorderTop(false).
 			BorderLeft(false).
 			BorderRight(false)
+
+	buttonStyle = lipgloss.NewStyle().
+			Foreground(textColor).
+			Background(lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#161B22"}).
+			Padding(0, 2).
+			MarginRight(1)
+
+	buttonPrimaryStyle = buttonStyle.
+				Foreground(lipgloss.Color("230")).
+				Background(lipgloss.Color("31")).
+				Bold(true)
+
+	buttonFocusStyle = buttonStyle.
+				Background(accentBgColor).
+				Foreground(textColor).
+				Bold(true)
+
+	buttonPrimaryFocusStyle = buttonPrimaryStyle.
+				Background(lipgloss.Color("25")).
+				Underline(true)
+
+	buttonDangerStyle = buttonStyle.
+				Foreground(lipgloss.Color("230")).
+				Background(lipgloss.Color("160")).
+				Bold(true)
+
+	buttonDangerFocusStyle = buttonDangerStyle.
+				Background(lipgloss.Color("124")).
+				Underline(true)
+
+	buttonDisabledStyle = buttonStyle.
+				Foreground(mutedTextColor).
+				Background(lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#161B22"})
 )
 
 func runConfigWizardInteractive(input ConfigWizardInput) (ConfigWizardResult, error) {
@@ -334,6 +376,8 @@ func newConfigWizardModel(input ConfigWizardInput) *configWizardModel {
 		step:               stepIntro,
 		help:               help.New(),
 		keys:               defaultConfigWizardKeyMap(),
+		catalogFocus:       catalogFocusTable,
+		catalogBtn:         0,
 		createMissingRoots: true,
 	}
 	if m.machine.Catalogs == nil {
@@ -737,7 +781,17 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focusTabs {
 				return m, nil
 			}
-			if len(m.machine.Catalogs) == 0 || m.catalogTable.Cursor() <= 0 {
+			if len(m.machine.Catalogs) == 0 {
+				m.focusTabs = true
+				m.catalogTable.Blur()
+				return m, nil
+			}
+			if m.catalogFocus == catalogFocusButtons {
+				m.catalogFocus = catalogFocusTable
+				m.catalogTable.Focus()
+				return m, nil
+			}
+			if m.catalogTable.Cursor() <= 0 {
 				m.focusTabs = true
 				m.catalogTable.Blur()
 				return m, nil
@@ -745,14 +799,24 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down":
 			if m.focusTabs {
 				m.focusTabs = false
-				m.catalogTable.Focus()
-				if len(m.machine.Catalogs) == 0 && m.catalogEdit == nil {
-					m.startCatalogAddEditor()
+				if len(m.machine.Catalogs) == 0 {
+					m.catalogFocus = catalogFocusButtons
+					m.catalogBtn = 0
+					m.catalogTable.Blur()
+				} else {
+					m.catalogFocus = catalogFocusTable
+					m.catalogTable.Focus()
 				}
 				return m, nil
 			}
+			if len(m.machine.Catalogs) > 0 && m.catalogFocus == catalogFocusTable && m.catalogTable.Cursor() >= len(m.machine.Catalogs)-1 {
+				m.catalogFocus = catalogFocusButtons
+				m.catalogBtn = 0
+				m.catalogTable.Blur()
+				return m, nil
+			}
 		case " ":
-			if !m.focusTabs && len(m.machine.Catalogs) > 0 {
+			if !m.focusTabs && len(m.machine.Catalogs) > 0 && m.catalogFocus == catalogFocusTable {
 				if err := m.setDefaultFromSelection(); err != nil {
 					m.errorText = err.Error()
 				} else {
@@ -760,8 +824,30 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+		case "right":
+			if !m.focusTabs && m.catalogFocus == catalogFocusButtons && m.catalogBtn < 1 {
+				m.catalogBtn++
+				return m, nil
+			}
+		case "left":
+			if !m.focusTabs && m.catalogFocus == catalogFocusButtons && m.catalogBtn > 0 {
+				m.catalogBtn--
+				return m, nil
+			}
 		case "enter":
 			if !m.focusTabs {
+				if m.catalogFocus == catalogFocusTable && len(m.machine.Catalogs) > 0 {
+					m.startCatalogEditRootEditor()
+					return m, nil
+				}
+				if m.catalogBtn == 0 {
+					m.startCatalogAddEditor()
+					return m, nil
+				}
+				if len(m.machine.Catalogs) == 0 {
+					m.errorText = "at least one catalog is required"
+					return m, nil
+				}
 				m.advanceStep()
 				return m, nil
 			}
@@ -770,29 +856,10 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.focusTabs {
 			return m, nil
 		}
+	}
 
-		switch {
-		case key.Matches(keyMsg, m.keys.CatalogAdd):
-			m.startCatalogAddEditor()
-			return m, nil
-		case key.Matches(keyMsg, m.keys.CatalogEdit):
-			m.startCatalogEditRootEditor()
-			return m, nil
-		case key.Matches(keyMsg, m.keys.CatalogDelete):
-			if err := m.deleteSelectedCatalog(); err != nil {
-				m.errorText = err.Error()
-			} else {
-				m.recomputeDirty()
-			}
-			return m, nil
-		case key.Matches(keyMsg, m.keys.CatalogDefault):
-			if err := m.setDefaultFromSelection(); err != nil {
-				m.errorText = err.Error()
-			} else {
-				m.recomputeDirty()
-			}
-			return m, nil
-		}
+	if len(m.machine.Catalogs) == 0 || m.catalogFocus != catalogFocusTable {
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -809,9 +876,13 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 		switch keyMsg.String() {
 		case "esc":
 			m.catalogEdit = nil
+			m.updateCatalogFocus()
 			return m, nil
 		case "down":
-			editor.focus = (editor.focus + 1) % len(editor.inputs)
+			if editor.focus < m.catalogEditorFocusCount()-1 {
+				editor.focus++
+			}
+			editor.confirmDelete = false
 			m.updateCatalogEditorFocus()
 			return m, nil
 		case "up":
@@ -822,15 +893,72 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 				return m, nil
 			}
 			editor.focus--
+			editor.confirmDelete = false
 			m.updateCatalogEditorFocus()
 			return m, nil
 		case "enter":
-			if err := m.commitCatalogEditor(); err != nil {
-				editor.err = err.Error()
+			editor.err = ""
+			if editor.focus < len(editor.inputs) {
+				if editor.focus < len(editor.inputs)-1 {
+					editor.focus++
+				} else {
+					editor.focus = len(editor.inputs)
+				}
+				editor.confirmDelete = false
+				m.updateCatalogEditorFocus()
 				return m, nil
 			}
-			m.catalogEdit = nil
-			m.recomputeDirty()
+			action := editor.focus - len(editor.inputs)
+			switch editor.mode {
+			case catalogEditorAdd:
+				switch action {
+				case 0: // save
+					if err := m.commitCatalogEditor(); err != nil {
+						editor.err = err.Error()
+						return m, nil
+					}
+					m.catalogEdit = nil
+					m.catalogFocus = catalogFocusTable
+					m.catalogTable.Focus()
+					m.recomputeDirty()
+					return m, nil
+				case 1: // cancel
+					m.catalogEdit = nil
+					m.updateCatalogFocus()
+					return m, nil
+				}
+			case catalogEditorEditRoot:
+				switch action {
+				case 0: // save
+					if err := m.commitCatalogEditor(); err != nil {
+						editor.err = err.Error()
+						return m, nil
+					}
+					m.catalogEdit = nil
+					m.catalogFocus = catalogFocusTable
+					m.catalogTable.Focus()
+					m.recomputeDirty()
+					return m, nil
+				case 1: // delete
+					if !editor.confirmDelete {
+						editor.confirmDelete = true
+						editor.err = "Press Enter again to confirm delete."
+						return m, nil
+					}
+					if err := m.deleteCatalogAt(editor.row); err != nil {
+						editor.err = err.Error()
+						return m, nil
+					}
+					m.catalogEdit = nil
+					m.recomputeDirty()
+					m.updateCatalogFocus()
+					return m, nil
+				case 2: // cancel
+					m.catalogEdit = nil
+					m.updateCatalogFocus()
+					return m, nil
+				}
+			}
 			return m, nil
 		}
 	}
@@ -840,6 +968,7 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 		editor.inputs[i], cmds[i] = editor.inputs[i].Update(msg)
 	}
 	editor.err = ""
+	editor.confirmDelete = false
 	return m, tea.Batch(cmds...)
 }
 
@@ -946,13 +1075,27 @@ func (m *configWizardModel) resizeCatalogTable() {
 	if m.width <= 0 || m.height <= 0 {
 		return
 	}
-	w := m.width - 4
-	if w < 30 {
-		w = 30
+	w := m.viewContentWidth()
+	if w <= 0 {
+		w = m.width - 8
 	}
-	h := m.height - 14
-	if h < 6 {
-		h = 6
+	w -= 8
+	if w < 50 {
+		w = 50
+	}
+
+	maxVisibleHeight := m.height - 18
+	if maxVisibleHeight < 6 {
+		maxVisibleHeight = 6
+	}
+	// Keep the table compact for small catalog counts instead of filling the viewport.
+	preferredHeight := len(m.machine.Catalogs) + 3
+	if preferredHeight < 6 {
+		preferredHeight = 6
+	}
+	h := preferredHeight
+	if h > maxVisibleHeight {
+		h = maxVisibleHeight
 	}
 	m.catalogTable.SetWidth(w)
 	m.catalogTable.SetHeight(h)
@@ -988,6 +1131,20 @@ func (m *configWizardModel) updateCatalogEditorFocus() {
 			continue
 		}
 		m.catalogEdit.inputs[i].Blur()
+	}
+}
+
+func (m *configWizardModel) catalogEditorFocusCount() int {
+	if m.catalogEdit == nil {
+		return 0
+	}
+	switch m.catalogEdit.mode {
+	case catalogEditorAdd:
+		return len(m.catalogEdit.inputs) + 2 // save, cancel
+	case catalogEditorEditRoot:
+		return len(m.catalogEdit.inputs) + 3 // save, delete, cancel
+	default:
+		return len(m.catalogEdit.inputs)
 	}
 }
 
@@ -1038,14 +1195,26 @@ func (m *configWizardModel) onStepChanged() {
 	m.confirmQuit = false
 	m.updateGitHubFocus()
 	m.updateNotifyFocus()
-	if m.step == stepCatalogs && !m.focusTabs {
-		m.catalogTable.Focus()
-		if len(m.machine.Catalogs) == 0 && m.catalogEdit == nil {
-			m.startCatalogAddEditor()
-		}
-	} else {
+	m.updateCatalogFocus()
+}
+
+func (m *configWizardModel) updateCatalogFocus() {
+	if m.step != stepCatalogs || m.focusTabs || m.catalogEdit != nil {
 		m.catalogTable.Blur()
+		return
 	}
+	if len(m.machine.Catalogs) == 0 {
+		m.catalogFocus = catalogFocusButtons
+		m.catalogBtn = 0
+		m.catalogTable.Blur()
+		return
+	}
+	if m.catalogFocus == catalogFocusButtons {
+		m.catalogTable.Blur()
+		return
+	}
+	m.catalogFocus = catalogFocusTable
+	m.catalogTable.Focus()
 }
 
 func (m *configWizardModel) validateCurrentStep() error {
@@ -1264,7 +1433,7 @@ func (m *configWizardModel) viewCatalogs() string {
 	if len(m.machine.Catalogs) == 0 {
 		emptyState := strings.Join([]string{
 			labelStyle.Render("No catalogs configured yet"),
-			hintStyle.Render("Press Down to open the add form and define your first catalog."),
+			hintStyle.Render("Use Add to define your first catalog."),
 			hintStyle.Render("Examples: /Volumes/Projects/Software or /Users/you/Code"),
 		}, "\n")
 		b.WriteString(panelStyle.
@@ -1273,15 +1442,15 @@ func (m *configWizardModel) viewCatalogs() string {
 			Background(panelBgColor).
 			Padding(1, 2).
 			Render(emptyState))
-		b.WriteString("\n")
 	} else {
-		b.WriteString(panelStyle.
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(borderColor).
-			Background(panelBgColor).
-			Padding(0, 1).
-			Render(m.catalogTable.View()))
+		b.WriteString(m.catalogTable.View())
 	}
+	b.WriteString("\n\n")
+	b.WriteString(renderCatalogActions(
+		!m.focusTabs && m.catalogFocus == catalogFocusButtons && m.catalogBtn == 0,
+		!m.focusTabs && m.catalogFocus == catalogFocusButtons && m.catalogBtn == 1,
+		len(m.machine.Catalogs) > 0,
+	))
 	return b.String()
 }
 
@@ -1308,6 +1477,13 @@ func (m *configWizardModel) viewCatalogEditor() string {
 			renderInputContainer(m.catalogEdit.inputs[1].View(), m.catalogEdit.focus == 1),
 			"",
 		))
+		b.WriteString("\n\n")
+		b.WriteString(renderEditorActions(
+			false,
+			m.catalogEdit.focus == 2,
+			false,
+			m.catalogEdit.focus == 3,
+		))
 	} else {
 		b.WriteString(labelStyle.Render("Edit catalog root"))
 		b.WriteString("\n\n")
@@ -1317,6 +1493,13 @@ func (m *configWizardModel) viewCatalogEditor() string {
 			"Absolute path where repositories should be discovered.",
 			renderInputContainer(m.catalogEdit.inputs[0].View(), m.catalogEdit.focus == 0),
 			"",
+		))
+		b.WriteString("\n\n")
+		b.WriteString(renderEditorActions(
+			true,
+			m.catalogEdit.focus == 1,
+			m.catalogEdit.focus == 2,
+			m.catalogEdit.focus == 3,
 		))
 	}
 	if m.catalogEdit.err != "" {
@@ -1469,6 +1652,46 @@ func renderToggleField(focused bool, title, description string, value bool) stri
 	return style.Render(b.String())
 }
 
+func renderCatalogActions(addFocused, continueFocused, continueEnabled bool) string {
+	addStyle := buttonStyle
+	if addFocused {
+		addStyle = buttonFocusStyle
+	}
+	continueStyle := buttonPrimaryStyle
+	if !continueEnabled {
+		continueStyle = buttonDisabledStyle
+	}
+	if continueFocused && continueEnabled {
+		continueStyle = buttonPrimaryFocusStyle
+	}
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		addStyle.Render("Add"),
+		continueStyle.Render("Continue"),
+	)
+}
+
+func renderEditorActions(includeDelete, saveFocused, deleteFocused, cancelFocused bool) string {
+	saveStyle := buttonPrimaryStyle
+	if saveFocused {
+		saveStyle = buttonPrimaryFocusStyle
+	}
+	cancelStyle := buttonStyle
+	if cancelFocused {
+		cancelStyle = buttonFocusStyle
+	}
+	parts := []string{saveStyle.Render("Save")}
+	if includeDelete {
+		deleteStyle := buttonDangerStyle
+		if deleteFocused {
+			deleteStyle = buttonDangerFocusStyle
+		}
+		parts = append(parts, deleteStyle.Render("Delete"))
+	}
+	parts = append(parts, cancelStyle.Render("Cancel"))
+	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+}
+
 func shiftEnumValue(current string, options []string, delta int) string {
 	if len(options) == 0 {
 		return current
@@ -1509,6 +1732,7 @@ func (m *configWizardModel) rebuildCatalogRows() {
 		rows = append(rows, table.Row{c.Name, c.Root, def})
 	}
 	m.catalogTable.SetRows(rows)
+	m.resizeCatalogTable()
 }
 
 func (m *configWizardModel) startCatalogAddEditor() {
@@ -1526,6 +1750,7 @@ func (m *configWizardModel) startCatalogAddEditor() {
 		focus:  0,
 		row:    -1,
 	}
+	m.catalogTable.Blur()
 }
 
 func (m *configWizardModel) startCatalogEditRootEditor() {
@@ -1545,6 +1770,7 @@ func (m *configWizardModel) startCatalogEditRootEditor() {
 		focus:  0,
 		row:    idx,
 	}
+	m.catalogTable.Blur()
 }
 
 func (m *configWizardModel) commitCatalogEditor() error {
@@ -1575,6 +1801,7 @@ func (m *configWizardModel) commitCatalogEditor() error {
 			m.machine.DefaultCatalog = name
 		}
 		m.rebuildCatalogRows()
+		m.catalogTable.SetCursor(len(m.machine.Catalogs) - 1)
 		return nil
 	case catalogEditorEditRoot:
 		if editor.row < 0 || editor.row >= len(m.machine.Catalogs) {
@@ -1589,6 +1816,7 @@ func (m *configWizardModel) commitCatalogEditor() error {
 		}
 		m.machine.Catalogs[editor.row].Root = root
 		m.rebuildCatalogRows()
+		m.catalogTable.SetCursor(editor.row)
 		return nil
 	default:
 		return nil
@@ -1597,6 +1825,10 @@ func (m *configWizardModel) commitCatalogEditor() error {
 
 func (m *configWizardModel) deleteSelectedCatalog() error {
 	idx := m.catalogTable.Cursor()
+	return m.deleteCatalogAt(idx)
+}
+
+func (m *configWizardModel) deleteCatalogAt(idx int) error {
 	if idx < 0 || idx >= len(m.machine.Catalogs) {
 		return fmt.Errorf("select a catalog first")
 	}
@@ -1612,6 +1844,16 @@ func (m *configWizardModel) deleteSelectedCatalog() error {
 		}
 	}
 	m.rebuildCatalogRows()
+	if len(m.machine.Catalogs) == 0 {
+		m.catalogTable.SetCursor(0)
+		m.catalogFocus = catalogFocusButtons
+		m.catalogBtn = 0
+		return nil
+	}
+	if idx >= len(m.machine.Catalogs) {
+		idx = len(m.machine.Catalogs) - 1
+	}
+	m.catalogTable.SetCursor(idx)
 	return nil
 }
 

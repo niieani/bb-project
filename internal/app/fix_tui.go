@@ -100,6 +100,9 @@ type fixTUIModel struct {
 
 	table table.Model
 
+	width  int
+	height int
+
 	showHelp bool
 	status   string
 	errText  string
@@ -108,12 +111,6 @@ type fixTUIModel struct {
 	messageInput  textinput.Model
 	pendingPath   string
 }
-
-var (
-	fixHeaderStyle = lipgloss.NewStyle().Bold(true)
-	fixErrorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	fixHintStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-)
 
 func (a *App) runFixInteractive(includeCatalogs []string) (int, error) {
 	model, err := newFixTUIModel(a, includeCatalogs)
@@ -142,7 +139,18 @@ func newFixTUIModel(app *App, includeCatalogs []string) (*fixTUIModel, error) {
 		table.WithHeight(12),
 	)
 	styles := table.DefaultStyles()
-	styles.Selected = styles.Selected.Bold(true)
+	styles.Header = styles.Header.
+		Foreground(textColor).
+		Background(panelBgColor).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(borderColor).
+		BorderBottom(true).
+		Bold(true)
+	styles.Cell = styles.Cell.Foreground(textColor)
+	styles.Selected = styles.Selected.
+		Foreground(textColor).
+		Background(accentBgColor).
+		Bold(true)
 	t.SetStyles(styles)
 
 	m := &fixTUIModel{
@@ -168,12 +176,10 @@ func (m *fixTUIModel) Init() tea.Cmd {
 func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
 		m.help.Width = msg.Width
-		height := msg.Height - 10
-		if height < 6 {
-			height = 6
-		}
-		m.table.SetHeight(height)
+		m.resizeTable()
 		return m, nil
 	case tea.KeyMsg:
 		if key.Matches(msg, m.keys.Quit) {
@@ -217,36 +223,119 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *fixTUIModel) View() string {
 	var b strings.Builder
-	b.WriteString(fixHeaderStyle.Render("bb fix"))
+	title := lipgloss.JoinHorizontal(lipgloss.Center,
+		titleBadgeStyle.Render("bb"),
+		" "+headerStyle.Render("fix"),
+	)
+	subtitle := hintStyle.Render("Interactive remediation for unsyncable repositories")
+	b.WriteString(title)
 	b.WriteString("\n")
-	b.WriteString(fixHintStyle.Render("Use ←/→ to select a fix per row; Enter applies selected fix for the highlighted repository."))
+	b.WriteString(subtitle)
 	b.WriteString("\n\n")
-	b.WriteString(m.table.View())
-	b.WriteString("\n")
 
-	if m.messagePrompt {
-		b.WriteString("\n")
-		b.WriteString("Commit message for stage-commit-push:\n")
-		b.WriteString(m.messageInput.View())
-		b.WriteString("\n")
-		b.WriteString(fixHintStyle.Render("Enter to apply, Esc to cancel."))
-		b.WriteString("\n")
+	contentPanel := panelStyle
+	if w := m.viewContentWidth(); w > 0 {
+		contentPanel = contentPanel.Width(w)
 	}
+	b.WriteString(contentPanel.Render(m.viewMainContent()))
 
 	if m.status != "" {
 		b.WriteString("\n")
-		b.WriteString(m.status)
-		b.WriteString("\n")
+		b.WriteString(hintStyle.Render(m.status))
 	}
 	if m.errText != "" {
 		b.WriteString("\n")
-		b.WriteString(fixErrorStyle.Render(m.errText))
-		b.WriteString("\n")
+		b.WriteString(alertStyle.Render(errorStyle.Render(m.errText)))
 	}
+
+	helpView := m.help.View(m.keys)
+	helpPanel := helpPanelStyle
+	if w := m.viewContentWidth(); w > 0 {
+		helpPanel = helpPanel.Width(w)
+	}
+	helpBlock := helpPanel.Render(helpView)
+
+	body := b.String()
+	spacer := ""
+	if m.height > 0 {
+		const pageVerticalPadding = 2
+		const separatorLines = 2
+		bodyHeight := lipgloss.Height(body)
+		helpHeight := lipgloss.Height(helpBlock)
+		total := bodyHeight + separatorLines + helpHeight + pageVerticalPadding
+		if gap := m.height - total; gap > 0 {
+			spacer = strings.Repeat("\n", gap)
+		}
+	}
+
+	doc := body + "\n\n" + spacer + helpBlock
+	return pageStyle.Render(doc) + "\n"
+}
+
+func (m *fixTUIModel) viewMainContent() string {
+	var b strings.Builder
+	b.WriteString(labelStyle.Render("Repository Fixes"))
 	b.WriteString("\n")
-	b.WriteString(m.help.View(m.keys))
-	b.WriteString("\n")
+	b.WriteString(hintStyle.Render("Select a repository row, choose an action, and apply."))
+	b.WriteString("\n\n")
+	if len(m.table.Rows()) == 0 {
+		b.WriteString(fieldStyle.Render("No repositories available for interactive fix right now."))
+	} else {
+		tablePanel := panelStyle.
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(borderColor).
+			Background(panelBgColor).
+			Padding(0, 1)
+		if w := m.viewContentWidth(); w > 0 {
+			tablePanel = tablePanel.Width(w - 4)
+		}
+		b.WriteString(tablePanel.Render(m.table.View()))
+	}
+
+	if m.messagePrompt {
+		b.WriteString("\n\n")
+		b.WriteString(renderFieldBlock(
+			true,
+			"Commit message",
+			"Used for stage-commit-push. Leave default value to auto-generate.",
+			renderInputContainer(m.messageInput.View(), true),
+			"",
+		))
+	}
 	return b.String()
+}
+
+func (m *fixTUIModel) viewContentWidth() int {
+	if m.width <= 0 {
+		return 0
+	}
+	contentWidth := m.width - 8
+	if contentWidth < 52 {
+		return 0
+	}
+	return contentWidth
+}
+
+func (m *fixTUIModel) resizeTable() {
+	if m.height <= 0 {
+		return
+	}
+	reserved := 18
+	if m.messagePrompt {
+		reserved += 5
+	}
+	height := m.height - reserved
+	if height < 6 {
+		height = 6
+	}
+	m.table.SetHeight(height)
+	if w := m.viewContentWidth(); w > 0 {
+		tableWidth := w - 8
+		if tableWidth < 60 {
+			tableWidth = 60
+		}
+		m.table.SetWidth(tableWidth)
+	}
 }
 
 func (m *fixTUIModel) updateMessagePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -255,6 +344,7 @@ func (m *fixTUIModel) updateMessagePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingPath = ""
 		m.status = "stage-commit-push cancelled"
 		m.errText = ""
+		m.resizeTable()
 		return m, nil
 	}
 	if key.Matches(msg, m.keys.Apply) {
@@ -274,6 +364,7 @@ func (m *fixTUIModel) updateMessagePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err := m.refreshRepos(); err != nil {
 			m.errText = err.Error()
 		}
+		m.resizeTable()
 		return m, nil
 	}
 
@@ -419,6 +510,7 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		m.pendingPath = repo.Record.Path
 		m.status = ""
 		m.errText = ""
+		m.resizeTable()
 		return
 	}
 

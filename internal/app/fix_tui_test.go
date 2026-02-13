@@ -1,9 +1,12 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/table"
+	tea "github.com/charmbracelet/bubbletea"
 
 	"bb-project/internal/domain"
 )
@@ -116,7 +119,35 @@ func newFixTUIModelForTest(repos []fixRepoState) *fixTUIModel {
 		selectedAction: map[string]int{},
 		table:          tbl,
 		keys:           defaultFixTUIKeyMap(),
+		help:           help.New(),
 	}
 	m.rebuildTable("")
 	return m
+}
+
+func TestFixTUIViewUsesCanonicalChromeWithoutInlineKeyLegend(t *testing.T) {
+	t.Parallel()
+
+	m := newFixTUIModelForTest([]fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: false},
+		},
+	})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	view := m.View()
+
+	if !strings.Contains(view, "bb") || !strings.Contains(view, "fix") {
+		t.Fatalf("expected canonical header in view, got %q", view)
+	}
+	if strings.Contains(view, "Use ←/→") {
+		t.Fatal("expected no inline key legend in body")
+	}
 }

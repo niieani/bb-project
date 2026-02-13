@@ -1,6 +1,6 @@
 # CLI Style Guide (Bubble Tea + Bubbles + Lip Gloss)
 
-This document defines the visual language for interactive CLI surfaces in `bb`, starting with `bb config`.
+This document defines the visual language for interactive CLI surfaces in `bb`, including `bb config` and `bb fix`.
 
 ## Goals
 
@@ -41,6 +41,7 @@ Use centralized tokens (AdaptiveColor where possible):
 - Header block:
   - Left badge for product (`bb`).
   - Title + one-line subtitle.
+  - Use the same header chrome across interactive commands (for example `config`, `fix`).
 - Step navigation:
   - Lip Gloss border tabs, active tab visually distinct.
   - Focused active tab uses highlighted background and open-bottom border.
@@ -78,6 +79,14 @@ Use a reusable field block for all form rows:
   - Muted description.
   - Control/value (input, enum, checkbox, list).
   - Optional error text.
+
+### Action Buttons
+
+- For list-management steps (for example Catalogs), provide explicit action buttons below the list.
+- Primary action uses emphasized style (for example `Continue`).
+- Secondary action uses neutral style (for example `Add`).
+- Destructive action uses danger style and requires explicit confirmation before applying.
+- Buttons must be keyboard-focusable and show focus state clearly.
 
 ### Input
 
@@ -120,6 +129,7 @@ Use a reusable field block for all form rows:
 - `Left/Right` changes steps only when tabs are focused.
 - When switching tabs while tabs are focused, keep tabs focused.
 - Do not render per-step/per-panel key legends inside content; use only the global sticky footer legend.
+- In list views, `Enter` on a selected row opens contextual edit UI.
 
 ## Consistency Checklist
 

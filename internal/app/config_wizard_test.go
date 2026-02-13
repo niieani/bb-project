@@ -188,7 +188,7 @@ func TestWizardTabsFocusedCanSwitchAcrossMultipleSteps(t *testing.T) {
 	}
 }
 
-func TestWizardCatalogEmptyStateStartsAddEditor(t *testing.T) {
+func TestWizardCatalogEmptyStateShowsButtonsInsteadOfAutoEditor(t *testing.T) {
 	m := testConfigWizardModel(t)
 	m.machine.Catalogs = nil
 	m.machine.DefaultCatalog = ""
@@ -197,11 +197,11 @@ func TestWizardCatalogEmptyStateStartsAddEditor(t *testing.T) {
 	m.focusTabs = false
 	m.onStepChanged()
 
-	if m.catalogEdit == nil {
-		t.Fatal("expected add-catalog editor to auto-open for empty catalog state")
+	if m.catalogEdit != nil {
+		t.Fatal("expected no auto-open editor in empty catalog state")
 	}
-	if m.catalogEdit.mode != catalogEditorAdd {
-		t.Fatalf("catalog editor mode = %v, want %v", m.catalogEdit.mode, catalogEditorAdd)
+	if m.catalogFocus != catalogFocusButtons {
+		t.Fatalf("catalog focus = %v, want buttons", m.catalogFocus)
 	}
 }
 
@@ -261,7 +261,7 @@ func TestWizardCatalogUpOnFirstRowFocusesTabs(t *testing.T) {
 	}
 }
 
-func TestWizardCatalogEmptyStateDownFromTabsOpensEditor(t *testing.T) {
+func TestWizardCatalogEmptyStateDownFromTabsFocusesButtons(t *testing.T) {
 	m := testConfigWizardModel(t)
 	m.machine.Catalogs = nil
 	m.machine.DefaultCatalog = ""
@@ -275,8 +275,11 @@ func TestWizardCatalogEmptyStateDownFromTabsOpensEditor(t *testing.T) {
 	}
 
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	if m.catalogEdit == nil {
-		t.Fatal("expected add editor to open when moving down into empty catalog content")
+	if m.catalogEdit != nil {
+		t.Fatal("expected no editor to open when moving down into empty catalog content")
+	}
+	if m.catalogFocus != catalogFocusButtons {
+		t.Fatalf("catalog focus = %v, want buttons", m.catalogFocus)
 	}
 }
 
@@ -296,9 +299,108 @@ func TestWizardCatalogEditorReplacesEmptyState(t *testing.T) {
 	}
 }
 
+func TestWizardCatalogButtonsCanOpenAddEditorAndContinue(t *testing.T) {
+	m := testConfigWizardModel(t)
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.catalogFocus = catalogFocusButtons
+	m.catalogBtn = 0
+	m.onStepChanged()
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.catalogEdit == nil || m.catalogEdit.mode != catalogEditorAdd {
+		t.Fatal("expected Add button enter to open add editor")
+	}
+
+	m.catalogEdit = nil
+	m.catalogFocus = catalogFocusButtons
+	m.catalogBtn = 1
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.step != stepReview {
+		t.Fatalf("step = %v, want %v", m.step, stepReview)
+	}
+}
+
+func TestWizardCatalogEnterOnTableRowOpensEditor(t *testing.T) {
+	m := testConfigWizardModel(t)
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.catalogFocus = catalogFocusTable
+	m.onStepChanged()
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.catalogEdit == nil || m.catalogEdit.mode != catalogEditorEditRoot {
+		t.Fatal("expected Enter on selected catalog to open edit editor")
+	}
+}
+
+func TestWizardCatalogEditorDeleteRequiresConfirmation(t *testing.T) {
+	m := testConfigWizardModel(t)
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.catalogFocus = catalogFocusTable
+	m.startCatalogEditRootEditor()
+	if m.catalogEdit == nil {
+		t.Fatal("expected edit editor")
+	}
+	if len(m.machine.Catalogs) != 1 {
+		t.Fatalf("unexpected initial catalog count %d", len(m.machine.Catalogs))
+	}
+
+	// Move focus to Delete button (root input -> Save -> Delete).
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.catalogEdit == nil {
+		t.Fatal("expected editor to stay open on first delete confirmation")
+	}
+	if !strings.Contains(m.catalogEdit.err, "confirm delete") {
+		t.Fatalf("expected confirmation message, got %q", m.catalogEdit.err)
+	}
+	if len(m.machine.Catalogs) != 1 {
+		t.Fatal("catalog should not be deleted on first confirmation enter")
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.machine.Catalogs) != 0 {
+		t.Fatal("expected catalog to be deleted on second confirmation enter")
+	}
+}
+
 func TestRenderEnumLineIsSingleLine(t *testing.T) {
 	line := renderEnumLine("private", []string{"private", "public"})
 	if strings.Contains(line, "\n") {
 		t.Fatalf("enum line should render in one line, got %q", line)
+	}
+}
+
+func TestWizardCatalogListShowsAddedCatalogValues(t *testing.T) {
+	m := testConfigWizardModel(t)
+	m.machine.Catalogs = nil
+	m.machine.DefaultCatalog = ""
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.onStepChanged()
+	if m.catalogEdit != nil {
+		t.Fatal("expected no auto-open editor")
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.catalogEdit == nil {
+		t.Fatal("expected add editor to open from Add button")
+	}
+	m.catalogEdit.inputs[0].SetValue("software")
+	m.catalogEdit.inputs[1].SetValue("/tmp/software")
+	m.catalogEdit.focus = 2
+	m.updateCatalogEditorFocus()
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+
+	view := m.viewCatalogs()
+	if !strings.Contains(view, "software") {
+		t.Fatalf("expected catalog name in view, got %q", view)
+	}
+	if !strings.Contains(view, "/tmp/software") {
+		t.Fatalf("expected catalog root in view, got %q", view)
 	}
 }
