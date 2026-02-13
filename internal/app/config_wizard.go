@@ -41,6 +41,7 @@ type configWizardKeyMap struct {
 	NextField      key.Binding
 	PrevField      key.Binding
 	Toggle         key.Binding
+	Advance        key.Binding
 	Apply          key.Binding
 	Help           key.Binding
 	Quit           key.Binding
@@ -53,12 +54,12 @@ type configWizardKeyMap struct {
 }
 
 func (k configWizardKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.NextStep, k.PrevStep, k.Apply, k.Help, k.Quit}
+	return []key.Binding{k.NextStep, k.Back, k.NextField, k.Toggle, k.Apply, k.Help, k.Quit}
 }
 
 func (k configWizardKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.NextStep, k.PrevStep, k.NextField, k.PrevField, k.Back},
+		{k.NextStep, k.PrevStep, k.NextField, k.PrevField, k.Back, k.Advance},
 		{k.Toggle, k.Apply, k.Help, k.Quit, k.ToggleCreate},
 		{k.CatalogAdd, k.CatalogEdit, k.CatalogDelete, k.CatalogDefault},
 	}
@@ -67,24 +68,28 @@ func (k configWizardKeyMap) FullHelp() [][]key.Binding {
 func defaultConfigWizardKeyMap() configWizardKeyMap {
 	return configWizardKeyMap{
 		NextStep: key.NewBinding(
-			key.WithKeys("n", "right"),
-			key.WithHelp("n", "next step"),
+			key.WithKeys("right"),
+			key.WithHelp("right", "next step (tabs focus)"),
 		),
 		PrevStep: key.NewBinding(
-			key.WithKeys("p", "left"),
-			key.WithHelp("p", "prev step"),
+			key.WithKeys("left"),
+			key.WithHelp("left", "prev step (tabs focus)"),
 		),
 		NextField: key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "next field"),
+			key.WithKeys("down"),
+			key.WithHelp("down", "next field"),
 		),
 		PrevField: key.NewBinding(
-			key.WithKeys("shift+tab"),
-			key.WithHelp("shift+tab", "prev field"),
+			key.WithKeys("up"),
+			key.WithHelp("up", "prev field / focus tabs"),
 		),
 		Toggle: key.NewBinding(
-			key.WithKeys(" ", "enter"),
-			key.WithHelp("space/enter", "toggle/select"),
+			key.WithKeys(" "),
+			key.WithHelp("space", "toggle"),
+		),
+		Advance: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "next step"),
 		),
 		Apply: key.NewBinding(
 			key.WithKeys("ctrl+s"),
@@ -154,6 +159,7 @@ type configWizardModel struct {
 	confirmQuit bool
 	allowQuit   bool
 	applied     bool
+	focusTabs   bool
 
 	githubInputs []textinput.Model
 	githubFocus  int
@@ -175,6 +181,7 @@ var (
 	errorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	hintStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	focusStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	tabStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
 )
 
 func runConfigWizardInteractive(input ConfigWizardInput) (ConfigWizardResult, error) {
@@ -234,6 +241,7 @@ func newConfigWizardModel(input ConfigWizardInput) *configWizardModel {
 	m.initGitHubInputs()
 	m.initNotifyInput()
 	m.initCatalogTable()
+	m.onStepChanged()
 	m.recomputeDirty()
 	return m
 }
@@ -263,20 +271,6 @@ func (m *configWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.confirmQuit = true
 			m.errorText = "Unsaved changes. Press Ctrl+C again to discard and quit."
 			return m, nil
-		case key.Matches(msg, m.keys.PrevStep):
-			if m.catalogEdit != nil {
-				return m, nil
-			}
-			m.prevStep()
-			return m, nil
-		case key.Matches(msg, m.keys.NextStep):
-			if m.catalogEdit != nil {
-				return m, nil
-			}
-			if err := m.nextStep(); err != nil {
-				m.errorText = err.Error()
-			}
-			return m, nil
 		case key.Matches(msg, m.keys.Back):
 			if m.catalogEdit != nil {
 				m.catalogEdit = nil
@@ -285,6 +279,21 @@ func (m *configWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.prevStep()
 			return m, nil
+		case key.Matches(msg, m.keys.PrevStep):
+			if m.catalogEdit == nil && m.focusTabs {
+				m.prevStep()
+				return m, nil
+			}
+		case key.Matches(msg, m.keys.NextStep):
+			if m.catalogEdit == nil && m.focusTabs {
+				m.advanceStep()
+				return m, nil
+			}
+		case key.Matches(msg, m.keys.Advance):
+			if m.catalogEdit == nil && m.focusTabs && m.step != stepReview {
+				m.advanceStep()
+				return m, nil
+			}
 		}
 	}
 
@@ -306,6 +315,12 @@ func (m *configWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateReview(msg)
 	default:
 		return m, nil
+	}
+}
+
+func (m *configWizardModel) advanceStep() {
+	if err := m.nextStep(); err != nil {
+		m.errorText = err.Error()
 	}
 }
 
@@ -349,10 +364,8 @@ func (m *configWizardModel) View() string {
 
 func (m *configWizardModel) updateIntro(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		if key.Matches(keyMsg, m.keys.Toggle) {
-			if err := m.nextStep(); err != nil {
-				m.errorText = err.Error()
-			}
+		if key.Matches(keyMsg, m.keys.Advance) {
+			m.advanceStep()
 		}
 	}
 	return m, nil
@@ -360,19 +373,41 @@ func (m *configWizardModel) updateIntro(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *configWizardModel) updateGitHub(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		switch {
-		case key.Matches(keyMsg, m.keys.NextField):
-			m.githubFocus = (m.githubFocus + 1) % len(m.githubInputs)
+		switch keyMsg.String() {
+		case "up":
+			if m.focusTabs {
+				return m, nil
+			}
+			if m.githubFocus == 0 {
+				m.focusTabs = true
+				m.updateGitHubFocus()
+				return m, nil
+			}
+			m.githubFocus--
 			m.updateGitHubFocus()
 			return m, nil
-		case key.Matches(keyMsg, m.keys.PrevField):
-			m.githubFocus--
-			if m.githubFocus < 0 {
-				m.githubFocus = len(m.githubInputs) - 1
+		case "down":
+			if m.focusTabs {
+				m.focusTabs = false
+				m.githubFocus = 0
+				m.updateGitHubFocus()
+				return m, nil
+			}
+			if m.githubFocus < len(m.githubInputs)-1 {
+				m.githubFocus++
 			}
 			m.updateGitHubFocus()
 			return m, nil
+		case "enter":
+			if !m.focusTabs {
+				m.advanceStep()
+				return m, nil
+			}
 		}
+	}
+
+	if m.focusTabs {
+		return m, nil
 	}
 
 	cmds := make([]tea.Cmd, len(m.githubInputs))
@@ -392,39 +427,76 @@ func (m *configWizardModel) updateSync(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch keyMsg.String() {
-	case "up", "k":
-		if m.syncCursor > 0 {
-			m.syncCursor--
+	case "up":
+		if m.focusTabs {
+			return m, nil
 		}
-	case "down", "j":
+		if m.syncCursor == 0 {
+			m.focusTabs = true
+			return m, nil
+		}
+		m.syncCursor--
+	case "down":
+		if m.focusTabs {
+			m.focusTabs = false
+			m.syncCursor = 0
+			return m, nil
+		}
 		if m.syncCursor < 5 {
 			m.syncCursor++
 		}
-	case " ", "enter":
-		m.toggleSyncOption(m.syncCursor)
-		m.recomputeDirty()
+	case " ":
+		if !m.focusTabs {
+			m.toggleSyncOption(m.syncCursor)
+			m.recomputeDirty()
+		}
+	case "enter":
+		if !m.focusTabs {
+			m.advanceStep()
+		}
+	case "k":
+		if m.syncCursor > 0 {
+			m.syncCursor--
+		}
+	case "j":
+		if m.syncCursor < 5 {
+			m.syncCursor++
+		}
 	}
 	return m, nil
 }
 
 func (m *configWizardModel) updateNotify(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		switch {
-		case key.Matches(keyMsg, m.keys.NextField):
-			m.notifyFocus = (m.notifyFocus + 1) % 3
+		switch keyMsg.String() {
+		case "up":
+			if m.focusTabs {
+				return m, nil
+			}
+			if m.notifyFocus == 0 {
+				m.focusTabs = true
+				m.updateNotifyFocus()
+				return m, nil
+			}
+			m.notifyFocus--
 			m.updateNotifyFocus()
 			return m, nil
-		case key.Matches(keyMsg, m.keys.PrevField):
-			m.notifyFocus--
-			if m.notifyFocus < 0 {
-				m.notifyFocus = 2
+		case "down":
+			if m.focusTabs {
+				m.focusTabs = false
+				m.notifyFocus = 0
+				m.updateNotifyFocus()
+				return m, nil
+			}
+			if m.notifyFocus < 2 {
+				m.notifyFocus++
 			}
 			m.updateNotifyFocus()
 			return m, nil
-		}
-
-		switch keyMsg.String() {
-		case " ", "enter":
+		case " ":
+			if m.focusTabs {
+				return m, nil
+			}
 			if m.notifyFocus == 0 {
 				m.config.Notify.Enabled = !m.config.Notify.Enabled
 				m.recomputeDirty()
@@ -435,10 +507,15 @@ func (m *configWizardModel) updateNotify(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.recomputeDirty()
 				return m, nil
 			}
+		case "enter":
+			if !m.focusTabs {
+				m.advanceStep()
+				return m, nil
+			}
 		}
 	}
 
-	if m.notifyFocus != 2 {
+	if m.focusTabs || m.notifyFocus != 2 {
 		return m, nil
 	}
 
@@ -457,6 +534,33 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
+		case "up":
+			if m.focusTabs {
+				return m, nil
+			}
+			if m.catalogTable.Cursor() == 0 {
+				m.focusTabs = true
+				m.catalogTable.Blur()
+				return m, nil
+			}
+		case "down":
+			if m.focusTabs {
+				m.focusTabs = false
+				m.catalogTable.Focus()
+				return m, nil
+			}
+		case "enter":
+			if !m.focusTabs {
+				m.advanceStep()
+				return m, nil
+			}
+		}
+
+		if m.focusTabs {
+			return m, nil
+		}
+
 		switch {
 		case key.Matches(keyMsg, m.keys.CatalogAdd):
 			m.startCatalogAddEditor()
@@ -535,6 +639,14 @@ func (m *configWizardModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case key.Matches(keyMsg, m.keys.Apply):
+			if err := m.validateAll(); err != nil {
+				m.errorText = err.Error()
+				return m, nil
+			}
+			m.applied = true
+			m.allowQuit = true
+			return m, tea.Quit
+		case key.Matches(keyMsg, m.keys.Advance):
 			if err := m.validateAll(); err != nil {
 				m.errorText = err.Error()
 				return m, nil
@@ -643,6 +755,10 @@ func (m *configWizardModel) resizeCatalogTable() {
 
 func (m *configWizardModel) updateGitHubFocus() {
 	for i := range m.githubInputs {
+		if m.focusTabs {
+			m.githubInputs[i].Blur()
+			continue
+		}
 		if i == m.githubFocus {
 			m.githubInputs[i].Focus()
 			continue
@@ -652,6 +768,10 @@ func (m *configWizardModel) updateGitHubFocus() {
 }
 
 func (m *configWizardModel) updateNotifyFocus() {
+	if m.focusTabs {
+		m.notifyThrottle.Blur()
+		return
+	}
 	if m.notifyFocus == 2 {
 		m.notifyThrottle.Focus()
 		return
@@ -715,9 +835,10 @@ func (m *configWizardModel) prevStep() {
 func (m *configWizardModel) onStepChanged() {
 	m.errorText = ""
 	m.confirmQuit = false
+	m.focusTabs = m.step == stepIntro || m.step == stepReview
 	m.updateGitHubFocus()
 	m.updateNotifyFocus()
-	if m.step == stepCatalogs {
+	if m.step == stepCatalogs && !m.focusTabs {
 		m.catalogTable.Focus()
 	} else {
 		m.catalogTable.Blur()
@@ -775,7 +896,11 @@ func (m *configWizardModel) stepsHeader() string {
 	parts := make([]string, 0, len(labels))
 	for i, l := range labels {
 		if i == int(m.step) {
-			parts = append(parts, focusStyle.Render("["+l+"]"))
+			active := focusStyle
+			if m.focusTabs {
+				active = tabStyle
+			}
+			parts = append(parts, active.Render("["+l+"]"))
 			continue
 		}
 		parts = append(parts, " "+l+" ")
@@ -797,7 +922,8 @@ func (m *configWizardModel) viewIntro() string {
 		"- " + m.input.ConfigPath,
 		"- " + m.input.MachinePath,
 		"",
-		hintStyle.Render("Press space/enter or 'n' for next step."),
+		hintStyle.Render("Use Right Arrow to continue. Use Esc to go back."),
+		hintStyle.Render("Use Up from the first field to focus tabs, then Left/Right to switch steps."),
 	}, "\n")
 }
 
@@ -805,11 +931,27 @@ func (m *configWizardModel) viewGitHub() string {
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("GitHub & Transport"))
 	b.WriteString("\n\n")
-	b.WriteString("state_transport.mode: external (fixed in v1)\n\n")
+	b.WriteString("State transport mode is fixed to external in v1.\n\n")
 
-	labels := []string{"github.owner", "github.default_visibility", "github.remote_protocol"}
+	labels := []string{
+		"GitHub Owner (required)",
+		"Default Repository Visibility",
+		"Git Remote Protocol",
+	}
+	descriptions := []string{
+		"GitHub user or organization that will own new repositories created by bb init.",
+		"Default visibility for newly created repositories (private/public).",
+		"Remote URL format used when configuring origin (ssh/https).",
+	}
 	for i := range m.githubInputs {
+		cursor := " "
+		if !m.focusTabs && m.githubFocus == i {
+			cursor = ">"
+		}
+		b.WriteString(cursor + " ")
 		b.WriteString(labels[i])
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render(descriptions[i]))
 		b.WriteString("\n")
 		b.WriteString(m.githubInputs[i].View())
 		if m.githubInputs[i].Err != nil {
@@ -818,17 +960,26 @@ func (m *configWizardModel) viewGitHub() string {
 		}
 		b.WriteString("\n\n")
 	}
+	b.WriteString(hintStyle.Render("Up/Down switches fields. Enter continues. Space is reserved for toggles."))
 	return b.String()
 }
 
 func (m *configWizardModel) viewSync() string {
-	names := []string{
-		"sync.auto_discover",
-		"sync.include_untracked_as_dirty",
-		"sync.default_auto_push_private",
-		"sync.default_auto_push_public",
-		"sync.fetch_prune",
-		"sync.pull_ff_only",
+	labels := []string{
+		"Discover repositories automatically",
+		"Treat untracked files as dirty state",
+		"Allow automatic push for private repositories",
+		"Allow automatic push for public repositories",
+		"Run fetch --prune during sync",
+		"Require fast-forward only pulls",
+	}
+	descriptions := []string{
+		"Scans configured catalogs for git repos during sync operations.",
+		"Marks repositories unsyncable when untracked files are present.",
+		"Permits syncing to push ahead commits for private repositories.",
+		"Permits syncing to push ahead commits for public repositories.",
+		"Keeps remote tracking refs clean before reconciliation.",
+		"Prevents merge commits during automated pull operations.",
 	}
 	values := []bool{
 		m.config.Sync.AutoDiscover,
@@ -841,19 +992,20 @@ func (m *configWizardModel) viewSync() string {
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("Sync Settings"))
 	b.WriteString("\n\n")
-	for i := range names {
+	for i := range labels {
 		cursor := " "
-		if i == m.syncCursor {
+		if !m.focusTabs && i == m.syncCursor {
 			cursor = ">"
 		}
 		mark := "[ ]"
 		if values[i] {
 			mark = "[x]"
 		}
-		b.WriteString(fmt.Sprintf("%s %s %s\n", cursor, mark, names[i]))
+		b.WriteString(fmt.Sprintf("%s %s %s\n", cursor, mark, labels[i]))
+		b.WriteString("    " + hintStyle.Render(descriptions[i]) + "\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Use up/down and space/enter to toggle."))
+	b.WriteString(hintStyle.Render("Up/Down switches fields. Space toggles. Enter continues."))
 	return b.String()
 }
 
@@ -864,26 +1016,30 @@ func (m *configWizardModel) viewNotify() string {
 	enabledCursor := " "
 	dedupeCursor := " "
 	throttleCursor := " "
-	if m.notifyFocus == 0 {
+	if !m.focusTabs && m.notifyFocus == 0 {
 		enabledCursor = ">"
 	}
-	if m.notifyFocus == 1 {
+	if !m.focusTabs && m.notifyFocus == 1 {
 		dedupeCursor = ">"
 	}
-	if m.notifyFocus == 2 {
+	if !m.focusTabs && m.notifyFocus == 2 {
 		throttleCursor = ">"
 	}
-	b.WriteString(fmt.Sprintf("%s [%s] notify.enabled\n", enabledCursor, boolMarker(m.config.Notify.Enabled)))
-	b.WriteString(fmt.Sprintf("%s [%s] notify.dedupe\n", dedupeCursor, boolMarker(m.config.Notify.Dedupe)))
+	b.WriteString(fmt.Sprintf("%s [%s] Enable notifications\n", enabledCursor, boolMarker(m.config.Notify.Enabled)))
+	b.WriteString("    " + hintStyle.Render("Emits notification output for unsyncable repositories when --notify is used.") + "\n")
+	b.WriteString(fmt.Sprintf("%s [%s] Deduplicate notifications\n", dedupeCursor, boolMarker(m.config.Notify.Dedupe)))
+	b.WriteString("    " + hintStyle.Render("Suppresses repeated notifications for unchanged unsyncable states.") + "\n")
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("%s notify.throttle_minutes\n", throttleCursor))
+	b.WriteString(fmt.Sprintf("%s Notification throttle (minutes)\n", throttleCursor))
+	b.WriteString(hintStyle.Render("Minimum minutes between notifications for the same repository."))
+	b.WriteString("\n")
 	b.WriteString(m.notifyThrottle.View())
 	if m.notifyThrottle.Err != nil {
 		b.WriteString("\n")
 		b.WriteString(errorStyle.Render(m.notifyThrottle.Err.Error()))
 	}
 	b.WriteString("\n\n")
-	b.WriteString(hintStyle.Render("Use tab/shift+tab to switch fields."))
+	b.WriteString(hintStyle.Render("Up/Down switches fields. Space toggles booleans. Enter continues."))
 	return b.String()
 }
 
@@ -894,6 +1050,8 @@ func (m *configWizardModel) viewCatalogs() string {
 	b.WriteString(m.catalogTable.View())
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("a:add  e:edit root  d:delete  s:set default"))
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Render("Use Up on first row to focus tabs, then Left/Right to switch steps."))
 	b.WriteString("\n")
 
 	if m.catalogEdit != nil {
@@ -916,7 +1074,7 @@ func (m *configWizardModel) viewCatalogs() string {
 			b.WriteString(errorStyle.Render(m.catalogEdit.err))
 		}
 		b.WriteString("\n")
-		b.WriteString(hintStyle.Render("enter: save  esc: cancel  tab: next field"))
+		b.WriteString(hintStyle.Render("enter: save  esc: cancel"))
 	}
 	return b.String()
 }
@@ -948,7 +1106,7 @@ func (m *configWizardModel) viewReview() string {
 		b.WriteString(fmt.Sprintf("\ncreate missing roots on apply: [%s] (press 'm' to toggle)\n", boolMarker(m.createMissingRoots)))
 	}
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Press Ctrl+S to apply changes."))
+	b.WriteString(hintStyle.Render("Press Enter or Ctrl+S to apply changes."))
 	return b.String()
 }
 
