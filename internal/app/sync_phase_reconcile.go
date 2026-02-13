@@ -1,191 +1,12 @@
 package app
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
-	"time"
 
 	"bb-project/internal/domain"
 	"bb-project/internal/gitx"
-	"bb-project/internal/state"
 )
-
-func (a *App) runSync(opts SyncOptions) (int, error) {
-	a.logf("sync: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
-	if err != nil {
-		return 2, err
-	}
-	defer func() {
-		_ = lock.Release()
-		a.logf("sync: released global lock")
-	}()
-
-	cfg, machine, err := a.loadContext()
-	if err != nil {
-		return 2, err
-	}
-	a.logf("sync: start push=%t notify=%t dry-run=%t", opts.Push, opts.Notify, opts.DryRun)
-
-	selectedCatalogs, err := domain.SelectCatalogs(machine, opts.IncludeCatalogs)
-	if err != nil {
-		return 2, err
-	}
-	a.logf("sync: selected %d catalog(s)", len(selectedCatalogs))
-	selectedCatalogMap := map[string]domain.Catalog{}
-	for _, c := range selectedCatalogs {
-		selectedCatalogMap[c.Name] = c
-	}
-
-	previous := map[string]domain.MachineRepoRecord{}
-	for _, rec := range machine.Repos {
-		previous[rec.RepoID+"|"+rec.Path] = rec
-	}
-
-	discovered, err := discoverRepos(selectedCatalogs)
-	if err != nil {
-		return 2, err
-	}
-	a.logf("sync: discovered %d local repo(s)", len(discovered))
-	localRecords := make([]domain.MachineRepoRecord, 0, len(discovered))
-	transitionedToSyncable := map[string]bool{}
-	for _, repo := range discovered {
-		rec, err := a.observeAndApplyLocalSync(cfg, repo, opts)
-		if err != nil {
-			return 2, err
-		}
-		key := rec.RepoID + "|" + rec.Path
-		if old, ok := previous[key]; ok && !old.Syncable && rec.Syncable {
-			transitionedToSyncable[key] = true
-		}
-		localRecords = append(localRecords, rec)
-	}
-
-	machine.Repos = localRecords
-	machine.UpdatedAt = a.Now()
-	if err := persistMachineRecords(a.Paths, &machine, previous, a.Now); err != nil {
-		return 2, err
-	}
-	a.logf("sync: published local observations")
-
-	machines, err := state.LoadAllMachineFiles(a.Paths)
-	if err != nil {
-		return 2, err
-	}
-	repoMetas, err := state.LoadAllRepoMetadata(a.Paths)
-	if err != nil {
-		return 2, err
-	}
-
-	if err := a.ensureFromWinners(cfg, &machine, machines, repoMetas, selectedCatalogMap, transitionedToSyncable, opts); err != nil {
-		return 2, err
-	}
-	a.logf("sync: winner reconciliation completed")
-
-	if err := persistMachineRecords(a.Paths, &machine, previous, a.Now); err != nil {
-		return 2, err
-	}
-	a.logf("sync: published post-reconciliation observations")
-
-	if opts.Notify {
-		a.logf("sync: processing notifications")
-		if err := a.notifyUnsyncable(cfg, machine.Repos); err != nil {
-			return 2, err
-		}
-	}
-
-	anyUnsyncable := false
-	for _, rec := range machine.Repos {
-		if _, ok := selectedCatalogMap[rec.Catalog]; !ok {
-			continue
-		}
-		if !rec.Syncable {
-			anyUnsyncable = true
-			break
-		}
-	}
-	if anyUnsyncable {
-		a.logf("sync: completed with unsyncable repos")
-		return 1, nil
-	}
-	a.logf("sync: completed successfully")
-	return 0, nil
-}
-
-func persistMachineRecords(paths state.Paths, machine *domain.MachineFile, previous map[string]domain.MachineRepoRecord, now timeNowFn) error {
-	for i := range machine.Repos {
-		key := machine.Repos[i].RepoID + "|" + machine.Repos[i].Path
-		old := previous[key]
-		machine.Repos[i] = domain.UpdateObservedAt(old, machine.Repos[i], now())
-	}
-	sort.Slice(machine.Repos, func(i, j int) bool {
-		if machine.Repos[i].RepoID == machine.Repos[j].RepoID {
-			return machine.Repos[i].Path < machine.Repos[j].Path
-		}
-		return machine.Repos[i].RepoID < machine.Repos[j].RepoID
-	})
-	machine.UpdatedAt = now()
-	return state.SaveMachine(paths, *machine)
-}
-
-type timeNowFn func() time.Time
-
-func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRepo, opts SyncOptions) (domain.MachineRepoRecord, error) {
-	a.logf("sync: observing local repo %s", repo.Path)
-	rec, err := a.observeRepo(cfg, repo, opts.Push)
-	if err != nil {
-		return domain.MachineRepoRecord{}, err
-	}
-
-	if cfg.Sync.FetchPrune && !opts.DryRun {
-		a.logf("sync: fetch --prune %s", repo.Path)
-		if err := a.Git.FetchPrune(repo.Path); err != nil {
-			rec.Syncable = false
-			rec.UnsyncableReasons = appendUniqueReasons(rec.UnsyncableReasons, domain.ReasonPullFailed)
-			rec.StateHash = domain.ComputeStateHash(rec)
-			return rec, nil
-		}
-		rec, err = a.observeRepo(cfg, repo, opts.Push)
-		if err != nil {
-			return domain.MachineRepoRecord{}, err
-		}
-	}
-
-	if !rec.Syncable || opts.DryRun {
-		return rec, nil
-	}
-
-	if rec.Behind > 0 && rec.Ahead == 0 {
-		a.logf("sync: pulling ff-only for %s", repo.Path)
-		if err := a.Git.PullFFOnly(repo.Path); err != nil {
-			rec.Syncable = false
-			rec.UnsyncableReasons = appendUniqueReasons(rec.UnsyncableReasons, domain.ReasonPullFailed)
-			rec.StateHash = domain.ComputeStateHash(rec)
-			return rec, nil
-		}
-	}
-
-	if rec.Ahead > 0 {
-		autoPush := false
-		if meta, err := state.LoadRepoMetadata(a.Paths, rec.RepoID); err == nil {
-			autoPush = meta.AutoPush
-		}
-		if autoPush || opts.Push {
-			a.logf("sync: pushing ahead commits for %s", repo.Path)
-			if err := a.Git.Push(repo.Path); err != nil {
-				rec.Syncable = false
-				rec.UnsyncableReasons = appendUniqueReasons(rec.UnsyncableReasons, domain.ReasonPushFailed)
-				rec.StateHash = domain.ComputeStateHash(rec)
-				return rec, nil
-			}
-		}
-	}
-
-	return a.observeRepo(cfg, repo, opts.Push)
-}
 
 func (a *App) ensureFromWinners(
 	cfg domain.ConfigFile,
@@ -295,7 +116,7 @@ func (a *App) ensureFromWinners(
 			continue
 		}
 		a.logf("sync: ensuring local copy at %s", targetPath)
-		if err := a.ensureLocalCopy(cfg, machine, meta, winner, targetCatalog, targetPath, selectedCatalogMap, opts); err != nil {
+		if err := a.ensureLocalCopy(cfg, machine, meta, winner, targetCatalog, targetPath, opts); err != nil {
 			return err
 		}
 	}
@@ -404,7 +225,6 @@ func (a *App) ensureLocalCopy(
 	winner domain.MachineRepoRecordWithMachine,
 	targetCatalog domain.Catalog,
 	targetPath string,
-	selected map[string]domain.Catalog,
 	opts SyncOptions,
 ) error {
 	if info, err := os.Stat(targetPath); os.IsNotExist(err) {
@@ -490,65 +310,4 @@ func (a *App) addOrUpdateSyntheticUnsyncable(machine *domain.MachineFile, meta d
 	}
 	rec.StateHash = domain.ComputeStateHash(rec)
 	machine.Repos = append(machine.Repos, rec)
-}
-
-func appendUniqueReasons(in []domain.UnsyncableReason, reason domain.UnsyncableReason) []domain.UnsyncableReason {
-	for _, r := range in {
-		if r == reason {
-			return in
-		}
-	}
-	return append(in, reason)
-}
-
-func (a *App) notifyUnsyncable(cfg domain.ConfigFile, repos []domain.MachineRepoRecord) error {
-	if !cfg.Notify.Enabled {
-		a.logf("notify: disabled in config")
-		return nil
-	}
-	cache, err := state.LoadNotifyCache(a.Paths)
-	if err != nil {
-		return err
-	}
-	for _, rec := range repos {
-		if rec.Syncable {
-			continue
-		}
-		fingerprint := unsyncableFingerprint(rec.UnsyncableReasons)
-		cacheKey := notifyCacheKey(rec)
-		entry, ok := cache.LastSent[cacheKey]
-		if ok && entry.Fingerprint == fingerprint && cfg.Notify.Dedupe {
-			a.logf("notify: deduped %s (%s)", rec.Name, fingerprint)
-			continue
-		}
-		a.logf("notify: emitting for %s (%s)", rec.Name, fingerprint)
-		fmt.Fprintf(a.Stdout, "notify %s: %s\n", rec.Name, fingerprint)
-		cache.LastSent[cacheKey] = domain.NotifyCacheEntry{Fingerprint: fingerprint, SentAt: a.Now()}
-	}
-	return state.SaveNotifyCache(a.Paths, cache)
-}
-
-func notifyCacheKey(rec domain.MachineRepoRecord) string {
-	if strings.TrimSpace(rec.RepoID) != "" {
-		return rec.RepoID
-	}
-	if strings.TrimSpace(rec.Path) != "" {
-		return "path:" + rec.Path
-	}
-	if strings.TrimSpace(rec.Name) != "" {
-		return "name:" + rec.Name
-	}
-	return "unknown"
-}
-
-func unsyncableFingerprint(reasons []domain.UnsyncableReason) string {
-	if len(reasons) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(reasons))
-	for _, r := range reasons {
-		parts = append(parts, string(r))
-	}
-	sort.Strings(parts)
-	return strings.Join(parts, "+")
 }

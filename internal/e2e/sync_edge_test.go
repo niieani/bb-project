@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -196,6 +197,54 @@ func TestSyncEdgeCases(t *testing.T) {
 		_, err := m.RunBB(time.Date(2026, 2, 13, 20, 40, 0, 0, time.UTC), "sync")
 		if err == nil {
 			t.Fatal("expected lock failure")
+		}
+	})
+
+	t.Run("TC-SYNC-018", func(t *testing.T) {
+		_, m, _ := setupSingleMachine(t)
+		base := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
+		if out, err := m.RunBB(base, "scan"); err != nil {
+			t.Fatalf("scan setup failed: %v\n%s", err, out)
+		}
+
+		hostname, err := os.Hostname()
+		if err != nil {
+			t.Fatalf("hostname: %v", err)
+		}
+		lockPath := filepath.Join(m.LocalStateRoot(), "lock")
+		lockBody := fmt.Sprintf(
+			"pid=%d\nhostname=%s\ncreated_at=%s\n",
+			99999999,
+			hostname,
+			base.Add(-10*time.Minute).UTC().Format(time.RFC3339),
+		)
+		if err := os.WriteFile(lockPath, []byte(lockBody), 0o644); err != nil {
+			t.Fatalf("write lock: %v", err)
+		}
+
+		if out, err := m.RunBB(base.Add(1*time.Minute), "sync"); err != nil {
+			t.Fatalf("expected stale pid lock recovery: %v\n%s", err, out)
+		}
+	})
+
+	t.Run("TC-SYNC-019", func(t *testing.T) {
+		_, m, _ := setupSingleMachine(t)
+		base := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
+		if out, err := m.RunBB(base, "scan"); err != nil {
+			t.Fatalf("scan setup failed: %v\n%s", err, out)
+		}
+
+		lockPath := filepath.Join(m.LocalStateRoot(), "lock")
+		if err := os.WriteFile(lockPath, []byte("held\n"), 0o644); err != nil {
+			t.Fatalf("write lock: %v", err)
+		}
+		old := time.Now().Add(-25 * time.Hour)
+		if err := os.Chtimes(lockPath, old, old); err != nil {
+			t.Fatalf("chtimes: %v", err)
+		}
+
+		if out, err := m.RunBB(base.Add(1*time.Minute), "sync"); err != nil {
+			t.Fatalf("expected old corrupt lock recovery: %v\n%s", err, out)
 		}
 	})
 }

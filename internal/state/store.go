@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -100,7 +103,7 @@ func LoadConfig(paths Paths) (domain.ConfigFile, error) {
 		return cfg, nil
 	}
 
-	var cfg domain.ConfigFile
+	cfg := DefaultConfig()
 	if err := LoadYAML(cfgPath, &cfg); err != nil {
 		return domain.ConfigFile{}, fmt.Errorf("parse %s: %w", cfgPath, err)
 	}
@@ -115,9 +118,6 @@ func LoadConfig(paths Paths) (domain.ConfigFile, error) {
 	}
 	if cfg.GitHub.RemoteProtocol == "" {
 		cfg.GitHub.RemoteProtocol = "ssh"
-	}
-	if cfg.Notify.ThrottleMinutes == 0 {
-		cfg.Notify.ThrottleMinutes = 60
 	}
 	return cfg, nil
 }
@@ -289,14 +289,45 @@ func AcquireLock(paths Paths) (*Lock, error) {
 		return nil, err
 	}
 	path := paths.LockPath()
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return nil, fmt.Errorf("another bb process holds the lock")
-		}
+	lock, err := createLock(path)
+	if err == nil {
+		return lock, nil
+	}
+	if !errors.Is(err, os.ErrExist) {
 		return nil, err
 	}
-	_, _ = f.WriteString(fmt.Sprintf("pid=%d\n", os.Getpid()))
+
+	stale, err := lockIsStale(path, time.Now().UTC(), 24*time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	if !stale {
+		return nil, fmt.Errorf("another bb process holds the lock")
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+
+	lock, err = createLock(path)
+	if err == nil {
+		return lock, nil
+	}
+	if errors.Is(err, os.ErrExist) {
+		return nil, fmt.Errorf("another bb process holds the lock")
+	}
+	return nil, err
+}
+
+func createLock(path string) (*Lock, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeLockPayload(f); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return nil, err
+	}
 	return &Lock{path: path, file: f}, nil
 }
 
@@ -308,6 +339,140 @@ func (l *Lock) Release() error {
 		_ = l.file.Close()
 	}
 	return os.Remove(l.path)
+}
+
+func writeLockPayload(f *os.File) error {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(fmt.Sprintf(
+		"pid=%d\nhostname=%s\ncreated_at=%s\n",
+		os.Getpid(),
+		hostname,
+		time.Now().UTC().Format(time.RFC3339),
+	))
+	return err
+}
+
+type lockMeta struct {
+	PID       int
+	Hostname  string
+	CreatedAt time.Time
+}
+
+func parseLockMeta(content []byte) (lockMeta, error) {
+	values := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(content)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			return lockMeta{}, fmt.Errorf("invalid lock line %q", line)
+		}
+		values[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+	}
+
+	pidText, ok := values["pid"]
+	if !ok || pidText == "" {
+		return lockMeta{}, errors.New("missing lock pid")
+	}
+	pid, err := strconv.Atoi(pidText)
+	if err != nil {
+		return lockMeta{}, fmt.Errorf("invalid lock pid %q", pidText)
+	}
+
+	hostname, ok := values["hostname"]
+	if !ok || hostname == "" {
+		return lockMeta{}, errors.New("missing lock hostname")
+	}
+
+	createdAtText, ok := values["created_at"]
+	if !ok || createdAtText == "" {
+		return lockMeta{}, errors.New("missing lock created_at")
+	}
+	createdAt, err := time.Parse(time.RFC3339, createdAtText)
+	if err != nil {
+		return lockMeta{}, fmt.Errorf("invalid lock created_at %q", createdAtText)
+	}
+
+	return lockMeta{
+		PID:       pid,
+		Hostname:  hostname,
+		CreatedAt: createdAt,
+	}, nil
+}
+
+func lockIsStale(path string, now time.Time, maxAge time.Duration) (bool, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	fileAge := now.Sub(info.ModTime())
+	if fileAge < 0 {
+		fileAge = 0
+	}
+
+	content, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	meta, err := parseLockMeta(content)
+	if err != nil {
+		return fileAge >= maxAge, nil
+	}
+
+	createdAge := now.Sub(meta.CreatedAt)
+	if createdAge < 0 {
+		createdAge = 0
+	}
+	if createdAge >= maxAge || fileAge >= maxAge {
+		return true, nil
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		return false, err
+	}
+	if strings.EqualFold(hostname, meta.Hostname) && !isProcessAlive(meta.PID) {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func isProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		// Windows has no signal-0 probe; rely on age fallback there.
+		return true
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, os.ErrProcessDone) {
+		return false
+	}
+	if os.IsPermission(err) {
+		return true
+	}
+	return false
 }
 
 func LoadOrCreateMachineID(paths Paths, fallback string) (string, error) {

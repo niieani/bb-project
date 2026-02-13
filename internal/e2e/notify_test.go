@@ -52,8 +52,8 @@ func TestNotifyCases(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected unsyncable sync, output=%s", out)
 		}
-		if !strings.Contains(out, "notify api") {
-			t.Fatalf("expected notification for changed fingerprint, got: %s", out)
+		if strings.Contains(out, "notify api") {
+			t.Fatalf("expected throttle suppression for changed fingerprint inside window, got: %s", out)
 		}
 	})
 
@@ -85,6 +85,44 @@ func TestNotifyCases(t *testing.T) {
 		}
 		if !strings.Contains(out, "notify api-two") {
 			t.Fatalf("expected notification for api-two, got: %s", out)
+		}
+	})
+
+	t.Run("TC-NOTIFY-006", func(t *testing.T) {
+		_, m, catalogRoot := setupSingleMachine(t)
+		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "api", now)
+		m.MustWriteFile(filepath.Join(repoPath, "README.md"), "dirty\n")
+
+		_, _ = m.RunBB(now.Add(1*time.Minute), "sync", "--notify")
+		m.MustRunGit(now, repoPath, "checkout", "--", "README.md")
+		m.MustWriteFile(filepath.Join(repoPath, "scratch.txt"), "untracked\n")
+
+		out, err := m.RunBB(now.Add(62*time.Minute), "sync", "--notify")
+		if err == nil {
+			t.Fatalf("expected unsyncable sync, output=%s", out)
+		}
+		if !strings.Contains(out, "notify api") {
+			t.Fatalf("expected notification after throttle window expires, got: %s", out)
+		}
+	})
+
+	t.Run("TC-NOTIFY-007", func(t *testing.T) {
+		_, m, catalogRoot := setupSingleMachine(t)
+		cfg := strings.Replace(m.MustReadFile(m.ConfigPath()), "throttle_minutes: 60", "throttle_minutes: 0", 1)
+		m.MustWriteFile(m.ConfigPath(), cfg)
+		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "api", now)
+		m.MustWriteFile(filepath.Join(repoPath, "README.md"), "dirty\n")
+
+		_, _ = m.RunBB(now.Add(1*time.Minute), "sync", "--notify")
+		m.MustRunGit(now, repoPath, "checkout", "--", "README.md")
+		m.MustWriteFile(filepath.Join(repoPath, "scratch.txt"), "untracked\n")
+
+		out, err := m.RunBB(now.Add(2*time.Minute), "sync", "--notify")
+		if err == nil {
+			t.Fatalf("expected unsyncable sync, output=%s", out)
+		}
+		if !strings.Contains(out, "notify api") {
+			t.Fatalf("expected notification when throttle disabled, got: %s", out)
 		}
 	})
 }

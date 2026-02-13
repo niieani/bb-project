@@ -227,6 +227,20 @@ last_sent:
     sent_at: "2026-02-13T20:35:00Z"
 ```
 
+### 5) `lock` (local runtime state)
+
+```text
+pid=12345
+hostname=mbp14
+created_at=2026-02-13T20:31:00Z
+```
+
+Lock recovery behavior:
+
+- If lock metadata is valid and `hostname` matches this machine, a dead `pid` is treated as stale and recovered.
+- If lock metadata is missing/corrupt, recovery uses file age fallback (recover only when age is at least `24h`).
+- Active lock contention keeps current behavior: return `another bb process holds the lock`.
+
 ## Syncable vs Unsyncable Rules
 
 A repo is `syncable` only if all conditions are true:
@@ -291,6 +305,15 @@ Pseudocode for `bb sync [--push] [--notify] [--include-catalog <name>...]`:
 
 ```text
 acquire_global_lock()
+  if lock exists:
+    if same-host pid is dead:
+      recover stale lock and retry once
+    else if lock metadata is invalid and lock age >= 24h:
+      recover stale lock and retry once
+    else if lock age >= 24h:
+      recover stale lock and retry once
+    else:
+      fail "another bb process holds the lock"
 load shared config
 ensure state_transport.mode == external
 ensure machine_id exists
@@ -373,7 +396,9 @@ for each repo_id with shared metadata:
 
 refresh local observations and rewrite this machine file
 if --notify:
-  notify on newly unsyncable fingerprints (deduped)
+  dedupe identical fingerprints (if dedupe enabled)
+  then enforce throttle window (if throttle_minutes > 0)
+  emit and update notify cache only when not deduped/throttled
 release lock
 ```
 
@@ -554,33 +579,38 @@ Test IDs are normative for coverage tracking.
 28. `TC-SYNC-015`: ahead-only public repo with `--push` pushes successfully.
 29. `TC-SYNC-016`: fetch/pull/push failure maps to correct unsyncable reason (`pull_failed`/`push_failed`).
 30. `TC-SYNC-017`: lock prevents concurrent sync runs from mutating state simultaneously.
+31. `TC-SYNC-018`: stale lock with dead same-host pid is recovered automatically.
+32. `TC-SYNC-019`: stale corrupt lock older than threshold is recovered automatically.
 
-31. `TC-PATH-001`: target clone path exists and is empty directory -> clone allowed.
-32. `TC-PATH-002`: target path exists non-empty and not git repo -> `target_path_nonempty_not_repo`.
-33. `TC-PATH-003`: target path is git repo with mismatched origin -> `target_path_repo_mismatch`.
-34. `TC-PATH-004`: target path is git repo with matching origin -> adopt existing repo, no reclone.
-35. `TC-PATH-005`: same `repo_id` found at multiple local paths on one machine -> `duplicate_local_repo_id`.
-36. `TC-PATH-006`: when path conflict reason is active, sync makes no project changes for that repo.
+33. `TC-PATH-001`: target clone path exists and is empty directory -> clone allowed.
+34. `TC-PATH-002`: target path exists non-empty and not git repo -> `target_path_nonempty_not_repo`.
+35. `TC-PATH-003`: target path is git repo with mismatched origin -> `target_path_repo_mismatch`.
+36. `TC-PATH-004`: target path is git repo with matching origin -> adopt existing repo, no reclone.
+37. `TC-PATH-005`: same `repo_id` found at multiple local paths on one machine -> `duplicate_local_repo_id`.
+38. `TC-PATH-006`: when path conflict reason is active, sync makes no project changes for that repo.
 
-37. `TC-CATALOG-001`: `bb init` without `--catalog` uses `default_catalog`.
-38. `TC-CATALOG-002`: `bb init --catalog <name>` uses specified catalog root.
-39. `TC-CATALOG-003`: sync without filters processes all catalogs.
-40. `TC-CATALOG-004`: sync with repeated `--include-catalog` processes union of specified catalogs.
-41. `TC-CATALOG-005`: repo with `preferred_catalog` absent on machine falls back to `default_catalog`.
-42. `TC-CATALOG-006`: invalid catalog name in include/init returns clear validation error.
+39. `TC-CATALOG-001`: `bb init` without `--catalog` uses `default_catalog`.
+40. `TC-CATALOG-002`: `bb init --catalog <name>` uses specified catalog root.
+41. `TC-CATALOG-003`: sync without filters processes all catalogs.
+42. `TC-CATALOG-004`: sync with repeated `--include-catalog` processes union of specified catalogs.
+43. `TC-CATALOG-005`: repo with `preferred_catalog` absent on machine falls back to `default_catalog`.
+44. `TC-CATALOG-006`: invalid catalog name in include/init returns clear validation error.
 
-43. `TC-ADOPT-001`: first-run on two machines with same existing repo adopts both copies and converges by `repo_id`.
-44. `TC-ADOPT-002`: first-run with different local paths for same repo still converges branch state correctly.
-45. `TC-ADOPT-003`: first-run with pre-existing non-empty conflicting target path marks unsyncable and skips.
+45. `TC-ADOPT-001`: first-run on two machines with same existing repo adopts both copies and converges by `repo_id`.
+46. `TC-ADOPT-002`: first-run with different local paths for same repo still converges branch state correctly.
+47. `TC-ADOPT-003`: first-run with pre-existing non-empty conflicting target path marks unsyncable and skips.
 
-46. `TC-NOTIFY-001`: notification emitted when repo first becomes unsyncable.
-47. `TC-NOTIFY-002`: repeated sync with same unsyncable fingerprint emits no duplicate notification.
-48. `TC-NOTIFY-003`: notification emitted when unsyncable reason fingerprint changes.
-49. `TC-NOTIFY-004`: no notification emitted for repos that remain syncable.
+48. `TC-NOTIFY-001`: notification emitted when repo first becomes unsyncable.
+49. `TC-NOTIFY-002`: repeated sync with same unsyncable fingerprint emits no duplicate notification.
+50. `TC-NOTIFY-003`: changed fingerprint inside throttle window is suppressed.
+51. `TC-NOTIFY-004`: no notification emitted for repos that remain syncable.
+52. `TC-NOTIFY-005`: multiple unsyncable repos each emit notifications on first run.
+53. `TC-NOTIFY-006`: changed fingerprint emits after throttle window expires.
+54. `TC-NOTIFY-007`: `throttle_minutes: 0` disables throttling.
 
-50. `TC-CONFIG-001`: unsupported `state_transport.mode` fails with explicit config error in v1.
-51. `TC-CONFIG-002`: missing machine file bootstraps defaults and persists machine identity.
-52. `TC-CONFIG-003`: malformed YAML in shared state returns non-zero and clear parse error.
+55. `TC-CONFIG-001`: unsupported `state_transport.mode` fails with explicit config error in v1.
+56. `TC-CONFIG-002`: missing machine file bootstraps defaults and persists machine identity.
+57. `TC-CONFIG-003`: malformed YAML in shared state returns non-zero and clear parse error.
 
 ## Initial Adoption and Pre-existing Repositories
 
@@ -611,8 +641,14 @@ Suggested exit codes:
 
 `bb sync --notify` sends macOS notifications only when:
 
-1. Repo becomes newly unsyncable, or
-2. Unsyncable reason fingerprint changes.
+1. Repo is unsyncable and not deduped by fingerprint (`notify.dedupe=true`), and
+2. Repo is outside the throttle window (`notify.throttle_minutes > 0`), or throttling is disabled (`notify.throttle_minutes <= 0`).
+
+Throttle semantics:
+
+- At most one notification per repo per throttle window.
+- Fingerprint changes inside the throttle window are suppressed.
+- Suppressed events do not update cached `sent_at`.
 
 Notification payload:
 
