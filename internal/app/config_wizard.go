@@ -50,7 +50,6 @@ type configWizardKeyMap struct {
 	CatalogEdit    key.Binding
 	CatalogDelete  key.Binding
 	CatalogDefault key.Binding
-	ToggleCreate   key.Binding
 }
 
 func (k configWizardKeyMap) ShortHelp() []key.Binding {
@@ -60,7 +59,7 @@ func (k configWizardKeyMap) ShortHelp() []key.Binding {
 func (k configWizardKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.NextStep, k.PrevStep, k.NextField, k.PrevField, k.Back, k.Advance},
-		{k.Toggle, k.Apply, k.Help, k.Quit, k.ToggleCreate},
+		{k.Toggle, k.Apply, k.Help, k.Quit},
 		{k.CatalogAdd, k.CatalogEdit, k.CatalogDelete, k.CatalogDefault},
 	}
 }
@@ -123,10 +122,6 @@ func defaultConfigWizardKeyMap() configWizardKeyMap {
 			key.WithKeys("s"),
 			key.WithHelp("s", "set default"),
 		),
-		ToggleCreate: key.NewBinding(
-			key.WithKeys("m"),
-			key.WithHelp("m", "toggle mkdir missing roots"),
-		),
 	}
 }
 
@@ -161,8 +156,8 @@ type configWizardModel struct {
 	applied     bool
 	focusTabs   bool
 
-	githubInputs []textinput.Model
-	githubFocus  int
+	githubOwnerInput textinput.Model
+	githubFocus      int
 
 	syncCursor int
 
@@ -241,6 +236,7 @@ func newConfigWizardModel(input ConfigWizardInput) *configWizardModel {
 	m.initGitHubInputs()
 	m.initNotifyInput()
 	m.initCatalogTable()
+	m.focusTabs = true
 	m.onStepChanged()
 	m.recomputeDirty()
 	return m
@@ -281,12 +277,12 @@ func (m *configWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, m.keys.PrevStep):
 			if m.catalogEdit == nil && m.focusTabs {
-				m.prevStep()
+				m.prevStepKeepTabs()
 				return m, nil
 			}
 		case key.Matches(msg, m.keys.NextStep):
 			if m.catalogEdit == nil && m.focusTabs {
-				m.advanceStep()
+				m.advanceStepKeepTabs()
 				return m, nil
 			}
 		case key.Matches(msg, m.keys.Advance):
@@ -322,6 +318,24 @@ func (m *configWizardModel) advanceStep() {
 	if err := m.nextStep(); err != nil {
 		m.errorText = err.Error()
 	}
+}
+
+func (m *configWizardModel) advanceStepKeepTabs() {
+	if err := m.nextStep(); err != nil {
+		m.errorText = err.Error()
+		return
+	}
+	m.focusTabs = true
+	m.onStepChanged()
+}
+
+func (m *configWizardModel) prevStepKeepTabs() {
+	if m.step == stepIntro {
+		return
+	}
+	m.step--
+	m.focusTabs = true
+	m.onStepChanged()
 }
 
 func (m *configWizardModel) View() string {
@@ -393,7 +407,7 @@ func (m *configWizardModel) updateGitHub(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateGitHubFocus()
 				return m, nil
 			}
-			if m.githubFocus < len(m.githubInputs)-1 {
+			if m.githubFocus < 2 {
 				m.githubFocus++
 			}
 			m.updateGitHubFocus()
@@ -403,22 +417,54 @@ func (m *configWizardModel) updateGitHub(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.advanceStep()
 				return m, nil
 			}
+		case " ":
+			if m.focusTabs {
+				return m, nil
+			}
+			if m.githubFocus == 1 {
+				m.config.GitHub.DefaultVisibility = shiftEnumValue(m.config.GitHub.DefaultVisibility, []string{"private", "public"}, +1)
+				m.recomputeDirty()
+				return m, nil
+			}
+			if m.githubFocus == 2 {
+				m.config.GitHub.RemoteProtocol = shiftEnumValue(m.config.GitHub.RemoteProtocol, []string{"ssh", "https"}, +1)
+				m.recomputeDirty()
+				return m, nil
+			}
+		case "right":
+			if !m.focusTabs && m.githubFocus == 1 {
+				m.config.GitHub.DefaultVisibility = shiftEnumValue(m.config.GitHub.DefaultVisibility, []string{"private", "public"}, +1)
+				m.recomputeDirty()
+				return m, nil
+			}
+			if !m.focusTabs && m.githubFocus == 2 {
+				m.config.GitHub.RemoteProtocol = shiftEnumValue(m.config.GitHub.RemoteProtocol, []string{"ssh", "https"}, +1)
+				m.recomputeDirty()
+				return m, nil
+			}
+		case "left":
+			if !m.focusTabs && m.githubFocus == 1 {
+				m.config.GitHub.DefaultVisibility = shiftEnumValue(m.config.GitHub.DefaultVisibility, []string{"private", "public"}, -1)
+				m.recomputeDirty()
+				return m, nil
+			}
+			if !m.focusTabs && m.githubFocus == 2 {
+				m.config.GitHub.RemoteProtocol = shiftEnumValue(m.config.GitHub.RemoteProtocol, []string{"ssh", "https"}, -1)
+				m.recomputeDirty()
+				return m, nil
+			}
 		}
 	}
 
-	if m.focusTabs {
+	if m.focusTabs || m.githubFocus != 0 {
 		return m, nil
 	}
 
-	cmds := make([]tea.Cmd, len(m.githubInputs))
-	for i := range m.githubInputs {
-		m.githubInputs[i], cmds[i] = m.githubInputs[i].Update(msg)
-	}
-	m.config.GitHub.Owner = strings.TrimSpace(m.githubInputs[0].Value())
-	m.config.GitHub.DefaultVisibility = strings.TrimSpace(m.githubInputs[1].Value())
-	m.config.GitHub.RemoteProtocol = strings.TrimSpace(m.githubInputs[2].Value())
+	var cmd tea.Cmd
+	m.githubOwnerInput, cmd = m.githubOwnerInput.Update(msg)
+	m.config.GitHub.Owner = strings.TrimSpace(m.githubOwnerInput.Value())
 	m.recomputeDirty()
-	return m, tea.Batch(cmds...)
+	return m, cmd
 }
 
 func (m *configWizardModel) updateSync(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -539,7 +585,7 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focusTabs {
 				return m, nil
 			}
-			if m.catalogTable.Cursor() == 0 {
+			if len(m.machine.Catalogs) == 0 || m.catalogTable.Cursor() <= 0 {
 				m.focusTabs = true
 				m.catalogTable.Blur()
 				return m, nil
@@ -548,6 +594,18 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focusTabs {
 				m.focusTabs = false
 				m.catalogTable.Focus()
+				if len(m.machine.Catalogs) == 0 && m.catalogEdit == nil {
+					m.startCatalogAddEditor()
+				}
+				return m, nil
+			}
+		case " ":
+			if !m.focusTabs && len(m.machine.Catalogs) > 0 {
+				if err := m.setDefaultFromSelection(); err != nil {
+					m.errorText = err.Error()
+				} else {
+					m.recomputeDirty()
+				}
 				return m, nil
 			}
 		case "enter":
@@ -600,15 +658,18 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 		case "esc":
 			m.catalogEdit = nil
 			return m, nil
-		case "tab":
+		case "down":
 			editor.focus = (editor.focus + 1) % len(editor.inputs)
 			m.updateCatalogEditorFocus()
 			return m, nil
-		case "shift+tab":
-			editor.focus--
-			if editor.focus < 0 {
-				editor.focus = len(editor.inputs) - 1
+		case "up":
+			if editor.focus == 0 {
+				m.catalogEdit = nil
+				m.focusTabs = true
+				m.catalogTable.Blur()
+				return m, nil
 			}
+			editor.focus--
 			m.updateCatalogEditorFocus()
 			return m, nil
 		case "enter":
@@ -633,7 +694,7 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 func (m *configWizardModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch {
-		case key.Matches(keyMsg, m.keys.ToggleCreate):
+		case key.Matches(keyMsg, m.keys.Toggle):
 			if len(missingCatalogRoots(m.machine.Catalogs)) > 0 {
 				m.createMissingRoots = !m.createMissingRoots
 			}
@@ -660,7 +721,6 @@ func (m *configWizardModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *configWizardModel) initGitHubInputs() {
-	m.githubInputs = make([]textinput.Model, 3)
 	owner := textinput.New()
 	owner.Prompt = ""
 	owner.Placeholder = "GitHub owner"
@@ -672,31 +732,13 @@ func (m *configWizardModel) initGitHubInputs() {
 		return nil
 	}
 	owner.Focus()
-	m.githubInputs[0] = owner
-
-	visibility := textinput.New()
-	visibility.Prompt = ""
-	visibility.Placeholder = "private or public"
-	visibility.SetValue(strings.TrimSpace(m.config.GitHub.DefaultVisibility))
-	visibility.Validate = func(v string) error {
-		if v != "private" && v != "public" {
-			return fmt.Errorf("must be private or public")
-		}
-		return nil
+	m.githubOwnerInput = owner
+	if m.config.GitHub.DefaultVisibility != "private" && m.config.GitHub.DefaultVisibility != "public" {
+		m.config.GitHub.DefaultVisibility = "private"
 	}
-	m.githubInputs[1] = visibility
-
-	protocol := textinput.New()
-	protocol.Prompt = ""
-	protocol.Placeholder = "ssh or https"
-	protocol.SetValue(strings.TrimSpace(m.config.GitHub.RemoteProtocol))
-	protocol.Validate = func(v string) error {
-		if v != "ssh" && v != "https" {
-			return fmt.Errorf("must be ssh or https")
-		}
-		return nil
+	if m.config.GitHub.RemoteProtocol != "ssh" && m.config.GitHub.RemoteProtocol != "https" {
+		m.config.GitHub.RemoteProtocol = "ssh"
 	}
-	m.githubInputs[2] = protocol
 	m.updateGitHubFocus()
 }
 
@@ -754,17 +796,11 @@ func (m *configWizardModel) resizeCatalogTable() {
 }
 
 func (m *configWizardModel) updateGitHubFocus() {
-	for i := range m.githubInputs {
-		if m.focusTabs {
-			m.githubInputs[i].Blur()
-			continue
-		}
-		if i == m.githubFocus {
-			m.githubInputs[i].Focus()
-			continue
-		}
-		m.githubInputs[i].Blur()
+	if m.focusTabs || m.githubFocus != 0 {
+		m.githubOwnerInput.Blur()
+		return
 	}
+	m.githubOwnerInput.Focus()
 }
 
 func (m *configWizardModel) updateNotifyFocus() {
@@ -819,6 +855,7 @@ func (m *configWizardModel) nextStep() error {
 	}
 	if int(m.step) < m.stepCount()-1 {
 		m.step++
+		m.focusTabs = m.step == stepIntro || m.step == stepReview
 		m.onStepChanged()
 	}
 	return nil
@@ -829,17 +866,20 @@ func (m *configWizardModel) prevStep() {
 		return
 	}
 	m.step--
+	m.focusTabs = m.step == stepIntro || m.step == stepReview
 	m.onStepChanged()
 }
 
 func (m *configWizardModel) onStepChanged() {
 	m.errorText = ""
 	m.confirmQuit = false
-	m.focusTabs = m.step == stepIntro || m.step == stepReview
 	m.updateGitHubFocus()
 	m.updateNotifyFocus()
 	if m.step == stepCatalogs && !m.focusTabs {
 		m.catalogTable.Focus()
+		if len(m.machine.Catalogs) == 0 && m.catalogEdit == nil {
+			m.startCatalogAddEditor()
+		}
 	} else {
 		m.catalogTable.Blur()
 	}
@@ -848,13 +888,17 @@ func (m *configWizardModel) onStepChanged() {
 func (m *configWizardModel) validateCurrentStep() error {
 	switch m.step {
 	case stepGitHub:
-		for _, in := range m.githubInputs {
-			if in.Err != nil {
-				return in.Err
-			}
+		if m.githubOwnerInput.Err != nil {
+			return m.githubOwnerInput.Err
 		}
-		if strings.TrimSpace(m.githubInputs[0].Value()) == "" {
+		if strings.TrimSpace(m.githubOwnerInput.Value()) == "" {
 			return fmt.Errorf("github.owner is required")
+		}
+		if m.config.GitHub.DefaultVisibility != "private" && m.config.GitHub.DefaultVisibility != "public" {
+			return fmt.Errorf("default visibility must be private or public")
+		}
+		if m.config.GitHub.RemoteProtocol != "ssh" && m.config.GitHub.RemoteProtocol != "https" {
+			return fmt.Errorf("remote protocol must be ssh or https")
 		}
 	case stepNotify:
 		if m.notifyThrottle.Err != nil {
@@ -933,34 +977,41 @@ func (m *configWizardModel) viewGitHub() string {
 	b.WriteString("\n\n")
 	b.WriteString("State transport mode is fixed to external in v1.\n\n")
 
-	labels := []string{
-		"GitHub Owner (required)",
-		"Default Repository Visibility",
-		"Git Remote Protocol",
+	ownerCursor := " "
+	if !m.focusTabs && m.githubFocus == 0 {
+		ownerCursor = ">"
 	}
-	descriptions := []string{
-		"GitHub user or organization that will own new repositories created by bb init.",
-		"Default visibility for newly created repositories (private/public).",
-		"Remote URL format used when configuring origin (ssh/https).",
-	}
-	for i := range m.githubInputs {
-		cursor := " "
-		if !m.focusTabs && m.githubFocus == i {
-			cursor = ">"
-		}
-		b.WriteString(cursor + " ")
-		b.WriteString(labels[i])
+	b.WriteString(ownerCursor + " GitHub Owner (required)\n")
+	b.WriteString(hintStyle.Render("GitHub user or organization that will own new repositories created by bb init."))
+	b.WriteString("\n")
+	b.WriteString(m.githubOwnerInput.View())
+	if m.githubOwnerInput.Err != nil {
 		b.WriteString("\n")
-		b.WriteString(hintStyle.Render(descriptions[i]))
-		b.WriteString("\n")
-		b.WriteString(m.githubInputs[i].View())
-		if m.githubInputs[i].Err != nil {
-			b.WriteString("\n")
-			b.WriteString(errorStyle.Render(m.githubInputs[i].Err.Error()))
-		}
-		b.WriteString("\n\n")
+		b.WriteString(errorStyle.Render(m.githubOwnerInput.Err.Error()))
 	}
-	b.WriteString(hintStyle.Render("Up/Down switches fields. Enter continues. Space is reserved for toggles."))
+	b.WriteString("\n\n")
+
+	visibilityCursor := " "
+	if !m.focusTabs && m.githubFocus == 1 {
+		visibilityCursor = ">"
+	}
+	b.WriteString(visibilityCursor + " Default Repository Visibility\n")
+	b.WriteString(hintStyle.Render("Default visibility for newly created repositories."))
+	b.WriteString("\n")
+	b.WriteString(renderEnumLine(m.config.GitHub.DefaultVisibility, []string{"private", "public"}))
+	b.WriteString("\n\n")
+
+	protocolCursor := " "
+	if !m.focusTabs && m.githubFocus == 2 {
+		protocolCursor = ">"
+	}
+	b.WriteString(protocolCursor + " Git Remote Protocol\n")
+	b.WriteString(hintStyle.Render("Remote URL format used when configuring origin."))
+	b.WriteString("\n")
+	b.WriteString(renderEnumLine(m.config.GitHub.RemoteProtocol, []string{"ssh", "https"}))
+	b.WriteString("\n\n")
+
+	b.WriteString(hintStyle.Render("Up/Down switches fields. Space cycles enum options. Enter continues."))
 	return b.String()
 }
 
@@ -1047,12 +1098,22 @@ func (m *configWizardModel) viewCatalogs() string {
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("Catalog Management"))
 	b.WriteString("\n\n")
-	b.WriteString(m.catalogTable.View())
-	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("a:add  e:edit root  d:delete  s:set default"))
-	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Use Up on first row to focus tabs, then Left/Right to switch steps."))
-	b.WriteString("\n")
+	if len(m.machine.Catalogs) == 0 {
+		b.WriteString("No catalogs configured yet.\n\n")
+		b.WriteString(hintStyle.Render("Start by creating your first catalog below."))
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render("A catalog is a named root folder where bb discovers repositories."))
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render("Examples: /Volumes/Projects/Software or /Users/you/Code"))
+		b.WriteString("\n")
+	} else {
+		b.WriteString(m.catalogTable.View())
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render("a:add  e:edit root  d:delete  space/s:set default"))
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render("Use Up on first row to focus tabs, then Left/Right to switch steps."))
+		b.WriteString("\n")
+	}
 
 	if m.catalogEdit != nil {
 		b.WriteString("\n")
@@ -1074,7 +1135,7 @@ func (m *configWizardModel) viewCatalogs() string {
 			b.WriteString(errorStyle.Render(m.catalogEdit.err))
 		}
 		b.WriteString("\n")
-		b.WriteString(hintStyle.Render("enter: save  esc: cancel"))
+		b.WriteString(hintStyle.Render("down: next field  up: previous field (or tabs from first)  enter: save  esc: cancel"))
 	}
 	return b.String()
 }
@@ -1103,7 +1164,7 @@ func (m *configWizardModel) viewReview() string {
 			b.WriteString(root)
 			b.WriteString("\n")
 		}
-		b.WriteString(fmt.Sprintf("\ncreate missing roots on apply: [%s] (press 'm' to toggle)\n", boolMarker(m.createMissingRoots)))
+		b.WriteString(fmt.Sprintf("\ncreate missing roots on apply: [%s] (press Space to toggle)\n", boolMarker(m.createMissingRoots)))
 	}
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Press Enter or Ctrl+S to apply changes."))
@@ -1141,6 +1202,34 @@ func boolMarker(v bool) string {
 		return "x"
 	}
 	return " "
+}
+
+func shiftEnumValue(current string, options []string, delta int) string {
+	if len(options) == 0 {
+		return current
+	}
+	for i, option := range options {
+		if option == current {
+			next := i + delta
+			for next < 0 {
+				next += len(options)
+			}
+			return options[next%len(options)]
+		}
+	}
+	return options[0]
+}
+
+func renderEnumLine(current string, options []string) string {
+	parts := make([]string, 0, len(options))
+	for _, option := range options {
+		mark := "( )"
+		if current == option {
+			mark = "(x)"
+		}
+		parts = append(parts, fmt.Sprintf("%s %s", mark, option))
+	}
+	return strings.Join(parts, "   ")
 }
 
 func (m *configWizardModel) rebuildCatalogRows() {
