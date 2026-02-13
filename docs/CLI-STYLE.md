@@ -121,6 +121,15 @@ Use a reusable field block for all form rows:
   - Concrete example paths.
 - Catalog editor should use the same field blocks and input containers as other steps.
 
+## Fix UX Standards
+
+- In fix-selection tables, default each row to explicit no-op (`-`) rather than auto-selecting a mutating action.
+- Provide a batch operation to apply all explicitly selected fixes.
+- Keep table cell content plain text (no inline ANSI/lipgloss-rendered spans), otherwise width math can break and rows may soft-wrap incorrectly.
+- Use responsive table columns; `Reasons` and `Selected Fix` should expand in wider terminals instead of truncating aggressively.
+- If category color-coding is needed, apply it in surrounding detail panels or status chips, not directly in table cell strings.
+- Keep the selected row visible while navigating large lists; viewport must follow cursor movement.
+
 ## Interaction + Focus Standards
 
 - Only one element group may be visually focused at a time (for example tabs, table row set, button row, or editor controls).

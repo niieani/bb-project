@@ -18,6 +18,7 @@ type fixTUIKeyMap struct {
 	Left     key.Binding
 	Right    key.Binding
 	Apply    key.Binding
+	ApplyAll key.Binding
 	Refresh  key.Binding
 	Ignore   key.Binding
 	Unignore key.Binding
@@ -48,6 +49,10 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "apply selected fix"),
 		),
+		ApplyAll: key.NewBinding(
+			key.WithKeys("ctrl+a"),
+			key.WithHelp("ctrl+a", "apply all selected"),
+		),
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),
 			key.WithHelp("r", "refresh repos"),
@@ -76,13 +81,13 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 }
 
 func (k fixTUIKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Left, k.Apply, k.Refresh, k.Ignore, k.Quit}
+	return []key.Binding{k.Up, k.Left, k.Apply, k.ApplyAll, k.Refresh, k.Quit}
 }
 
 func (k fixTUIKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right},
-		{k.Apply, k.Refresh, k.Ignore, k.Unignore},
+		{k.Apply, k.ApplyAll, k.Refresh, k.Ignore, k.Unignore},
 		{k.Help, k.Cancel, k.Quit},
 	}
 }
@@ -112,6 +117,18 @@ type fixTUIModel struct {
 	pendingPath   string
 }
 
+const fixNoAction = "-"
+
+const (
+	fixTableDefaultWidth = 120
+	fixTableReservedCols = 12
+)
+
+var (
+	fixNoActionStyle = lipgloss.NewStyle().
+		Foreground(mutedTextColor)
+)
+
 func (a *App) runFixInteractive(includeCatalogs []string) (int, error) {
 	model, err := newFixTUIModel(a, includeCatalogs)
 	if err != nil {
@@ -125,15 +142,8 @@ func (a *App) runFixInteractive(includeCatalogs []string) (int, error) {
 }
 
 func newFixTUIModel(app *App, includeCatalogs []string) (*fixTUIModel, error) {
-	columns := []table.Column{
-		{Title: "Repo", Width: 24},
-		{Title: "Branch", Width: 20},
-		{Title: "State", Width: 12},
-		{Title: "Reasons", Width: 32},
-		{Title: "Selected Fix", Width: 22},
-	}
 	t := table.New(
-		table.WithColumns(columns),
+		table.WithColumns(fixTableColumnsForWidth(fixTableDefaultWidth)),
 		table.WithRows([]table.Row{}),
 		table.WithFocused(true),
 		table.WithHeight(12),
@@ -148,8 +158,8 @@ func newFixTUIModel(app *App, includeCatalogs []string) (*fixTUIModel, error) {
 		Bold(true)
 	styles.Cell = styles.Cell.Foreground(textColor)
 	styles.Selected = styles.Selected.
-		Foreground(textColor).
-		Background(accentBgColor).
+		Foreground(lipgloss.Color("230")).
+		Background(lipgloss.Color("33")).
 		Bold(true)
 	t.SetStyles(styles)
 
@@ -202,6 +212,9 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Apply):
 			m.applyCurrentSelection()
 			return m, nil
+		case key.Matches(msg, m.keys.ApplyAll):
+			m.applyAllSelections()
+			return m, nil
 		case key.Matches(msg, m.keys.Refresh):
 			if err := m.refreshRepos(); err != nil {
 				m.errText = err.Error()
@@ -218,6 +231,7 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.table, cmd = m.table.Update(msg)
+	m.syncCursorViewport()
 	return m, cmd
 }
 
@@ -276,7 +290,9 @@ func (m *fixTUIModel) viewMainContent() string {
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("Repository Fixes"))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Select a repository row, choose an action, and apply."))
+	b.WriteString(hintStyle.Render("Select per-repo fixes. Default selection is '-' (no action)."))
+	b.WriteString("\n\n")
+	b.WriteString(m.viewFixSummary())
 	b.WriteString("\n\n")
 	if len(m.table.Rows()) == 0 {
 		b.WriteString(fieldStyle.Render("No repositories available for interactive fix right now."))
@@ -290,6 +306,10 @@ func (m *fixTUIModel) viewMainContent() string {
 			tablePanel = tablePanel.Width(w - 4)
 		}
 		b.WriteString(tablePanel.Render(m.table.View()))
+		if repo, ok := m.currentRepo(); ok {
+			b.WriteString("\n\n")
+			b.WriteString(fieldStyle.Render(fmt.Sprintf("Selected: %s  (%s)", repo.Record.Name, repo.Record.Path)))
+		}
 	}
 
 	if m.messagePrompt {
@@ -303,6 +323,20 @@ func (m *fixTUIModel) viewMainContent() string {
 		))
 	}
 	return b.String()
+}
+
+func (m *fixTUIModel) viewFixSummary() string {
+	total := len(m.visible)
+	pending := 0
+	for _, repo := range m.visible {
+		if m.selectedAction[repo.Record.Path] >= 0 {
+			pending++
+		}
+	}
+	totalStyle := renderStatusPill(fmt.Sprintf("%d repos", total))
+	pendingStyle := renderStatusPill(fmt.Sprintf("%d selected", pending))
+	noneStyle := fixNoActionStyle.Render("'-' means no action")
+	return lipgloss.JoinHorizontal(lipgloss.Top, totalStyle, " ", pendingStyle, "  ", noneStyle)
 }
 
 func (m *fixTUIModel) viewContentWidth() int {
@@ -335,6 +369,47 @@ func (m *fixTUIModel) resizeTable() {
 			tableWidth = 60
 		}
 		m.table.SetWidth(tableWidth)
+		m.table.SetColumns(fixTableColumnsForWidth(tableWidth))
+	}
+	m.syncCursorViewport()
+}
+
+func (m *fixTUIModel) syncCursorViewport() {
+	if len(m.table.Rows()) == 0 {
+		return
+	}
+	m.setCursor(m.table.Cursor())
+}
+
+func (m *fixTUIModel) setCursor(target int) {
+	if len(m.table.Rows()) == 0 {
+		m.table.SetCursor(0)
+		return
+	}
+	if target < 0 {
+		target = 0
+	}
+	if target > len(m.table.Rows())-1 {
+		target = len(m.table.Rows()) - 1
+	}
+	current := m.table.Cursor()
+	if target > current {
+		m.table.MoveDown(target - current)
+		return
+	}
+	if target < current {
+		m.table.MoveUp(current - target)
+		return
+	}
+	// SetCursor keeps position but may not adjust viewport in all cases; nudge with move methods.
+	if target > 0 {
+		m.table.MoveUp(1)
+		m.table.MoveDown(1)
+		return
+	}
+	if len(m.table.Rows()) > 1 {
+		m.table.MoveDown(1)
+		m.table.MoveUp(1)
 	}
 }
 
@@ -398,18 +473,11 @@ func (m *fixTUIModel) rebuildTable(preferredPath string) {
 			continue
 		}
 		actions := eligibleFixActions(repo.Record, repo.Meta)
-		if len(actions) == 0 {
-			delete(m.selectedAction, key)
-		} else {
-			if idx, ok := m.selectedAction[key]; !ok || idx < 0 || idx >= len(actions) {
-				m.selectedAction[key] = 0
-			}
+		if idx, ok := m.selectedAction[key]; !ok || idx < -1 || idx >= len(actions) {
+			m.selectedAction[key] = -1
 		}
 
-		selectedFix := "-"
-		if len(actions) > 0 {
-			selectedFix = actions[m.selectedAction[key]]
-		}
+		selectedFix := m.currentActionForRepo(key, actions)
 		reasons := "none"
 		if len(repo.Record.UnsyncableReasons) > 0 {
 			parts := make([]string, 0, len(repo.Record.UnsyncableReasons))
@@ -417,7 +485,7 @@ func (m *fixTUIModel) rebuildTable(preferredPath string) {
 				parts = append(parts, string(r))
 			}
 			sortStrings(parts)
-			reasons = strings.Join(parts, ",")
+			reasons = strings.Join(parts, ", ")
 		}
 		state := "syncable"
 		if !repo.Record.Syncable {
@@ -447,7 +515,7 @@ func (m *fixTUIModel) rebuildTable(preferredPath string) {
 			}
 		}
 	}
-	m.table.SetCursor(cursor)
+	m.setCursor(cursor)
 }
 
 func (m *fixTUIModel) currentRepo() (fixRepoState, bool) {
@@ -467,18 +535,20 @@ func (m *fixTUIModel) cycleCurrentAction(delta int) {
 		return
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta)
-	if len(actions) == 0 {
-		m.status = "no eligible actions for selected repository"
-		return
-	}
 	key := repo.Record.Path
-	idx := m.selectedAction[key]
-	idx = (idx + delta) % len(actions)
-	if idx < 0 {
-		idx += len(actions)
+	optionCount := len(actions) + 1 // include "-" no-op option
+	pos := m.selectedAction[key] + 1
+	pos = (pos + delta) % optionCount
+	if pos < 0 {
+		pos += optionCount
 	}
-	m.selectedAction[key] = idx
-	m.status = fmt.Sprintf("%s selected for %s", actions[idx], repo.Record.Name)
+	m.selectedAction[key] = pos - 1
+	selected := m.currentActionForRepo(key, actions)
+	if selected == fixNoAction {
+		m.status = fmt.Sprintf("no action selected for %s", repo.Record.Name)
+	} else {
+		m.status = fmt.Sprintf("%s selected for %s", selected, repo.Record.Name)
+	}
 	m.rebuildTable(repo.Record.Path)
 }
 
@@ -489,14 +559,16 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		return
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta)
-	if len(actions) == 0 {
-		m.status = "no eligible actions for selected repository"
+	idx := m.selectedAction[repo.Record.Path]
+	if idx < 0 {
+		m.status = fmt.Sprintf("no action selected for %s", repo.Record.Name)
 		return
 	}
-	idx := m.selectedAction[repo.Record.Path]
-	if idx < 0 || idx >= len(actions) {
-		idx = 0
-		m.selectedAction[repo.Record.Path] = idx
+	if idx >= len(actions) {
+		m.selectedAction[repo.Record.Path] = -1
+		m.status = fmt.Sprintf("selection reset for %s; pick an eligible action", repo.Record.Name)
+		m.rebuildTable(repo.Record.Path)
+		return
 	}
 	action := actions[idx]
 
@@ -525,6 +597,59 @@ func (m *fixTUIModel) applyCurrentSelection() {
 	}
 }
 
+func (m *fixTUIModel) applyAllSelections() {
+	if len(m.visible) == 0 {
+		m.status = "no repositories available"
+		return
+	}
+
+	applied := 0
+	skipped := 0
+	failures := make([]string, 0, 3)
+
+	for _, repo := range m.visible {
+		actions := eligibleFixActions(repo.Record, repo.Meta)
+		idx := m.selectedAction[repo.Record.Path]
+		if idx < 0 {
+			skipped++
+			continue
+		}
+		if idx >= len(actions) {
+			skipped++
+			m.selectedAction[repo.Record.Path] = -1
+			continue
+		}
+
+		action := actions[idx]
+		commitMessage := ""
+		if action == FixActionStageCommitPush {
+			commitMessage = "auto"
+		}
+		if _, err := m.app.applyFixAction(m.includeCatalogs, repo.Record.Path, action, commitMessage); err != nil {
+			failures = append(failures, fmt.Sprintf("%s (%s)", repo.Record.Name, action))
+			continue
+		}
+		applied++
+	}
+
+	if m.app != nil {
+		if err := m.refreshRepos(); err != nil {
+			m.errText = err.Error()
+			return
+		}
+	} else if applied > 0 || len(failures) > 0 {
+		m.errText = "internal: app is not configured for apply-all"
+		return
+	}
+
+	if len(failures) > 0 {
+		m.errText = fmt.Sprintf("failed: %s", strings.Join(failures, ", "))
+	} else {
+		m.errText = ""
+	}
+	m.status = fmt.Sprintf("applied %d, skipped %d, failed %d", applied, skipped, len(failures))
+}
+
 func (m *fixTUIModel) ignoreCurrentRepo() {
 	repo, ok := m.currentRepo()
 	if !ok {
@@ -549,6 +674,50 @@ func (m *fixTUIModel) unignoreCurrentRepo() {
 	}
 	m.status = "cleared ignored repositories"
 	m.rebuildTable("")
+}
+
+func (m *fixTUIModel) currentActionForRepo(path string, actions []string) string {
+	idx := m.selectedAction[path]
+	if idx < 0 || idx >= len(actions) {
+		return fixNoAction
+	}
+	return actions[idx]
+}
+
+func fixTableColumnsForWidth(tableWidth int) []table.Column {
+	const (
+		repoMin    = 18
+		branchMin  = 16
+		stateMin   = 10
+		reasonsMin = 30
+		actionMin  = 22
+	)
+	widths := []int{repoMin, branchMin, stateMin, reasonsMin, actionMin}
+	minTotal := repoMin + branchMin + stateMin + reasonsMin + actionMin
+
+	budget := tableWidth - fixTableReservedCols
+	if budget < minTotal {
+		budget = minTotal
+	}
+	extra := budget - minTotal
+	if extra > 0 {
+		reasonsExtra := extra * 45 / 100
+		actionExtra := extra * 35 / 100
+		repoExtra := extra * 15 / 100
+		branchExtra := extra - reasonsExtra - actionExtra - repoExtra
+		widths[0] += repoExtra
+		widths[1] += branchExtra
+		widths[3] += reasonsExtra
+		widths[4] += actionExtra
+	}
+
+	return []table.Column{
+		{Title: "Repo", Width: widths[0]},
+		{Title: "Branch", Width: widths[1]},
+		{Title: "State", Width: widths[2]},
+		{Title: "Reasons", Width: widths[3]},
+		{Title: "Selected Fix", Width: widths[4]},
+	}
 }
 
 func sortStrings(in []string) {
