@@ -135,8 +135,10 @@ Use a reusable field block for all form rows:
 - Avoid nested bordered containers for the same content region (for example list-inside-list-panel) because combined frame widths can trigger wrap artifacts (`─┘`, double-height rows).
 - For custom row delegates, reserve at least one wrap-guard column so rendered row width stays strictly below viewport width.
 - Keep tiering internal for sort/grouping; in the table itself communicate fixability via state wording and color, not a dedicated `Tier` column.
+- `autofixable` may be shown only when available fix actions cover all current unsyncable reasons; otherwise show manual/blocked.
 - Order rows by fixability tier: autofixable unsyncable first, unsyncable manual/blocked second, syncable last.
 - Action labels shown in UI must be human-readable (for example `Allow auto-push in sync`) rather than raw internal action IDs (for example `enable-auto-push`).
+- When multiple fix actions are available for a repo, include an explicit `All fixes` option in `Selected Fix`.
 - In selected-row details, always render a concise `Action help` line that explains what the currently selected fix action will do.
 - In selected-row details, avoid field-border glyphs (`│`) to prevent visual merging with table columns.
 - In selected-row details, render labels and values with distinct styles (for example accent label + higher-contrast value + muted path/context).

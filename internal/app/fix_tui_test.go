@@ -345,6 +345,9 @@ func TestFixTUIOrdersReposByTier(t *testing.T) {
 				Upstream:  "origin/main",
 				Syncable:  false,
 				Diverged:  true,
+				UnsyncableReasons: []domain.UnsyncableReason{
+					domain.ReasonDiverged,
+				},
 			},
 			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/aaa-blocked", AutoPush: true},
 		},
@@ -357,8 +360,11 @@ func TestFixTUIOrdersReposByTier(t *testing.T) {
 				Upstream:  "origin/main",
 				Syncable:  false,
 				Ahead:     1,
+				UnsyncableReasons: []domain.UnsyncableReason{
+					domain.ReasonPushPolicyBlocked,
+				},
 			},
-			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/mmm-auto", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/mmm-auto", AutoPush: false},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -407,12 +413,13 @@ func TestFixRepoDelegateLeavesWrapGuardColumn(t *testing.T) {
 	repoList.Select(0)
 
 	item := fixListItem{
-		Name:    "phomemo_m02s",
-		Branch:  "main",
-		State:   "unsyncable",
-		Reasons: "dirty_tracked, dirty_untracked, missing_origin",
-		Action:  FixActionEnableAutoPush,
-		Tier:    fixRepoTierAutofixable,
+		Name:      "phomemo_m02s",
+		Branch:    "main",
+		State:     "unsyncable",
+		Reasons:   "dirty_tracked, dirty_untracked, missing_origin",
+		Action:    fixActionLabel(FixActionEnableAutoPush),
+		ActionKey: FixActionEnableAutoPush,
+		Tier:      fixRepoTierAutofixable,
 	}
 
 	var b strings.Builder
@@ -536,6 +543,44 @@ func TestFixTUISelectedDetailsHeaderHasNoFieldBorderAndUsesSelectedLabel(t *test
 	}
 	if !strings.Contains(firstLine, "Selected:") || !strings.Contains(firstLine, "api") {
 		t.Fatalf("selected details header missing expected label/value, got %q", firstLine)
+	}
+}
+
+func TestClassifyFixRepoRequiresFullReasonCoverage(t *testing.T) {
+	t.Parallel()
+
+	repo := fixRepoState{
+		Record: domain.MachineRepoRecord{
+			Name:      "api",
+			Path:      "/repos/api",
+			RepoID:    "github.com/you/api",
+			OriginURL: "git@github.com:you/api.git",
+			Upstream:  "origin/main",
+			Syncable:  false,
+			Diverged:  true,
+			UnsyncableReasons: []domain.UnsyncableReason{
+				domain.ReasonDiverged,
+				domain.ReasonPushPolicyBlocked,
+			},
+		},
+		Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: false},
+	}
+	actions := eligibleFixActions(repo.Record, repo.Meta)
+
+	if got := classifyFixRepo(repo, actions); got != fixRepoTierUnsyncableBlocked {
+		t.Fatalf("tier = %v, want unsyncable blocked when not all reasons are coverable", got)
+	}
+}
+
+func TestSelectableFixActionsAddsAllFixesOptionForMultiple(t *testing.T) {
+	t.Parallel()
+
+	options := selectableFixActions([]string{FixActionPush, FixActionEnableAutoPush})
+	if len(options) != 3 {
+		t.Fatalf("options len = %d, want 3", len(options))
+	}
+	if got := options[2]; got != fixAllActions {
+		t.Fatalf("last option = %q, want %q", got, fixAllActions)
 	}
 }
 

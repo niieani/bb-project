@@ -1,10 +1,13 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
+
+	"bb-project/internal/domain"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -120,13 +123,14 @@ type fixTUIModel struct {
 }
 
 type fixListItem struct {
-	Path    string
-	Name    string
-	Branch  string
-	State   string
-	Reasons string
-	Action  string
-	Tier    fixRepoTier
+	Path      string
+	Name      string
+	Branch    string
+	State     string
+	Reasons   string
+	Action    string
+	ActionKey string
+	Tier      fixRepoTier
 }
 
 func (i fixListItem) FilterValue() string {
@@ -193,7 +197,7 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 	stateCell := renderFixColumnCell(row.State, layout.State, stateStyle)
 	reasonsCell := renderFixColumnCell(row.Reasons, layout.Reasons, fixReasonsStyle)
-	actionStyle := fixActionStyleFor(row.Action)
+	actionStyle := fixActionStyleFor(row.ActionKey)
 	if selected {
 		actionStyle = actionStyle.Copy().Bold(true)
 	}
@@ -223,6 +227,7 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 }
 
 const fixNoAction = "-"
+const fixAllActions = "__all__"
 
 const (
 	fixListDefaultWidth = 120
@@ -554,7 +559,7 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 
 	state := "syncable"
 	stateStyle := fixStateSyncableStyle
-	tier := classifyFixRepo(repo.Record.Syncable, actions)
+	tier := classifyFixRepo(repo, actions)
 	switch tier {
 	case fixRepoTierAutofixable:
 		state = "unsyncable (autofixable)"
@@ -606,7 +611,7 @@ func (m *fixTUIModel) viewFixSummary() string {
 		if m.selectedAction[repo.Record.Path] >= 0 {
 			pending++
 		}
-		tier := classifyFixRepo(repo.Record.Syncable, eligibleFixActions(repo.Record, repo.Meta))
+		tier := classifyFixRepo(repo, eligibleFixActions(repo.Record, repo.Meta))
 		switch tier {
 		case fixRepoTierAutofixable:
 			autofixable++
@@ -751,13 +756,14 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 		}
 
 		actions := eligibleFixActions(repo.Record, repo.Meta)
-		if idx, ok := m.selectedAction[path]; !ok || idx < -1 || idx >= len(actions) {
+		options := selectableFixActions(actions)
+		if idx, ok := m.selectedAction[path]; !ok || idx < -1 || idx >= len(options) {
 			m.selectedAction[path] = -1
 		}
 		entries = append(entries, fixVisibleEntry{
 			repo:    repo,
 			actions: actions,
-			tier:    classifyFixRepo(repo.Record.Syncable, actions),
+			tier:    classifyFixRepo(repo, actions),
 		})
 	}
 
@@ -793,14 +799,16 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			state = "unsyncable (manual)"
 		}
 
+		selected := m.currentActionForRepo(path, entry.actions)
 		items = append(items, fixListItem{
-			Path:    path,
-			Name:    repo.Record.Name,
-			Branch:  repo.Record.Branch,
-			State:   state,
-			Reasons: reasons,
-			Action:  fixActionLabel(m.currentActionForRepo(path, entry.actions)),
-			Tier:    entry.tier,
+			Path:      path,
+			Name:      repo.Record.Name,
+			Branch:    repo.Record.Branch,
+			State:     state,
+			Reasons:   reasons,
+			Action:    fixActionLabel(selected),
+			ActionKey: selected,
+			Tier:      entry.tier,
 		})
 		m.visible = append(m.visible, repo)
 	}
@@ -854,8 +862,9 @@ func (m *fixTUIModel) cycleCurrentAction(delta int) {
 		return
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta)
+	options := selectableFixActions(actions)
 	key := repo.Record.Path
-	optionCount := len(actions) + 1 // include "-" no-op option
+	optionCount := len(options) + 1 // include "-" no-op option
 	pos := m.selectedAction[key] + 1
 	pos = (pos + delta) % optionCount
 	if pos < 0 {
@@ -878,18 +887,33 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		return
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta)
+	options := selectableFixActions(actions)
 	idx := m.selectedAction[repo.Record.Path]
 	if idx < 0 {
 		m.status = fmt.Sprintf("no action selected for %s", repo.Record.Name)
 		return
 	}
-	if idx >= len(actions) {
+	if idx >= len(options) {
 		m.selectedAction[repo.Record.Path] = -1
 		m.status = fmt.Sprintf("selection reset for %s; pick an eligible action", repo.Record.Name)
 		m.rebuildList(repo.Record.Path)
 		return
 	}
-	action := actions[idx]
+	action := options[idx]
+
+	if action == fixAllActions {
+		applied, skipped, err := m.applyRepoActions(repo.Record.Path, actions, "auto")
+		if err != nil {
+			m.errText = err.Error()
+			return
+		}
+		m.status = fmt.Sprintf("applied %d fix(es) to %s, skipped %d", applied, repo.Record.Name, skipped)
+		m.errText = ""
+		if err := m.refreshRepos(true); err != nil {
+			m.errText = err.Error()
+		}
+		return
+	}
 
 	if action == FixActionStageCommitPush {
 		ti := textinput.New()
@@ -909,7 +933,7 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		m.errText = err.Error()
 		return
 	}
-	m.status = fmt.Sprintf("applied %s to %s", action, repo.Record.Name)
+	m.status = fmt.Sprintf("applied %s to %s", fixActionLabel(action), repo.Record.Name)
 	m.errText = ""
 	if err := m.refreshRepos(true); err != nil {
 		m.errText = err.Error()
@@ -928,27 +952,38 @@ func (m *fixTUIModel) applyAllSelections() {
 
 	for _, repo := range m.visible {
 		actions := eligibleFixActions(repo.Record, repo.Meta)
+		options := selectableFixActions(actions)
 		idx := m.selectedAction[repo.Record.Path]
 		if idx < 0 {
 			skipped++
 			continue
 		}
-		if idx >= len(actions) {
+		if idx >= len(options) {
 			skipped++
 			m.selectedAction[repo.Record.Path] = -1
 			continue
 		}
 
-		action := actions[idx]
-		commitMessage := ""
-		if action == FixActionStageCommitPush {
-			commitMessage = "auto"
+		selection := options[idx]
+		switch selection {
+		case fixAllActions:
+			repoApplied, _, err := m.applyRepoActions(repo.Record.Path, actions, "auto")
+			if err != nil {
+				failures = append(failures, fmt.Sprintf("%s (%s)", repo.Record.Name, fixActionLabel(selection)))
+				continue
+			}
+			applied += repoApplied
+		default:
+			commitMessage := ""
+			if selection == FixActionStageCommitPush {
+				commitMessage = "auto"
+			}
+			if _, err := m.app.applyFixAction(m.includeCatalogs, repo.Record.Path, selection, commitMessage); err != nil {
+				failures = append(failures, fmt.Sprintf("%s (%s)", repo.Record.Name, fixActionLabel(selection)))
+				continue
+			}
+			applied++
 		}
-		if _, err := m.app.applyFixAction(m.includeCatalogs, repo.Record.Path, action, commitMessage); err != nil {
-			failures = append(failures, fmt.Sprintf("%s (%s)", repo.Record.Name, action))
-			continue
-		}
-		applied++
 	}
 
 	if m.app != nil {
@@ -996,11 +1031,45 @@ func (m *fixTUIModel) unignoreCurrentRepo() {
 }
 
 func (m *fixTUIModel) currentActionForRepo(path string, actions []string) string {
+	options := selectableFixActions(actions)
 	idx := m.selectedAction[path]
-	if idx < 0 || idx >= len(actions) {
+	if idx < 0 || idx >= len(options) {
 		return fixNoAction
 	}
-	return actions[idx]
+	return options[idx]
+}
+
+func selectableFixActions(actions []string) []string {
+	if len(actions) <= 1 {
+		return actions
+	}
+	out := make([]string, 0, len(actions)+1)
+	out = append(out, actions...)
+	out = append(out, fixAllActions)
+	return out
+}
+
+func (m *fixTUIModel) applyRepoActions(path string, actions []string, stageCommitMessage string) (int, int, error) {
+	if m.app == nil {
+		return 0, 0, errors.New("internal: app is not configured")
+	}
+	applied := 0
+	skipped := 0
+	for _, action := range actions {
+		commitMessage := ""
+		if action == FixActionStageCommitPush {
+			commitMessage = stageCommitMessage
+		}
+		if _, err := m.app.applyFixAction(m.includeCatalogs, path, action, commitMessage); err != nil {
+			if errors.Is(err, errFixActionNotEligible) {
+				skipped++
+				continue
+			}
+			return applied, skipped, err
+		}
+		applied++
+	}
+	return applied, skipped, nil
 }
 
 func fixListColumnsForWidth(listWidth int) fixColumnLayout {
@@ -1063,6 +1132,8 @@ func fixActionStyleFor(action string) lipgloss.Style {
 	switch action {
 	case fixNoAction:
 		return fixNoActionStyle
+	case fixAllActions:
+		return fixActionAutoPushStyle.Copy().Bold(true)
 	case FixActionPush:
 		return fixActionPushStyle
 	case FixActionStageCommitPush:
@@ -1084,6 +1155,8 @@ func fixActionLabel(action string) string {
 	switch action {
 	case fixNoAction:
 		return fixNoAction
+	case fixAllActions:
+		return "All fixes"
 	case FixActionAbortOperation:
 		return "Abort operation"
 	case FixActionPush:
@@ -1105,6 +1178,8 @@ func fixActionDescription(action string) string {
 	switch action {
 	case fixNoAction:
 		return "Do nothing for this repository in the current run."
+	case fixAllActions:
+		return "Run all currently eligible fixes for this repository."
 	case FixActionAbortOperation:
 		return "Cancel the active git operation (merge, rebase, cherry-pick, or bisect)."
 	case FixActionPush:
@@ -1122,14 +1197,53 @@ func fixActionDescription(action string) string {
 	}
 }
 
-func classifyFixRepo(syncable bool, actions []string) fixRepoTier {
-	if !syncable && len(actions) > 0 {
+func classifyFixRepo(repo fixRepoState, actions []string) fixRepoTier {
+	if repo.Record.Syncable {
+		return fixRepoTierSyncable
+	}
+	if unsyncableReasonsFullyCoverable(repo.Record.UnsyncableReasons, actions) {
 		return fixRepoTierAutofixable
 	}
-	if !syncable {
+	if !repo.Record.Syncable {
 		return fixRepoTierUnsyncableBlocked
 	}
 	return fixRepoTierSyncable
+}
+
+func unsyncableReasonsFullyCoverable(reasons []domain.UnsyncableReason, actions []string) bool {
+	if len(reasons) == 0 {
+		return false
+	}
+	has := map[string]bool{}
+	for _, action := range actions {
+		has[action] = true
+	}
+
+	covers := func(reason domain.UnsyncableReason) bool {
+		switch reason {
+		case domain.ReasonOperationInProgress:
+			return has[FixActionAbortOperation]
+		case domain.ReasonDirtyTracked, domain.ReasonDirtyUntracked:
+			return has[FixActionStageCommitPush]
+		case domain.ReasonMissingUpstream:
+			return has[FixActionSetUpstreamPush] || has[FixActionStageCommitPush]
+		case domain.ReasonPushPolicyBlocked:
+			return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush] || has[FixActionEnableAutoPush]
+		case domain.ReasonPushFailed:
+			return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush]
+		case domain.ReasonPullFailed:
+			return has[FixActionPullFFOnly]
+		default:
+			return false
+		}
+	}
+
+	for _, reason := range reasons {
+		if !covers(reason) {
+			return false
+		}
+	}
+	return true
 }
 
 func sortStrings(in []string) {
