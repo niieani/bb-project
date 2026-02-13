@@ -506,8 +506,36 @@ func TestFixTUISelectedDetailsRenderActionHelp(t *testing.T) {
 	if !strings.Contains(details, "Action help:") {
 		t.Fatalf("expected action help in selected details, got %q", details)
 	}
-	if !strings.Contains(details, "Push local ahead commits") {
+	if !strings.Contains(details, "Push local commits") {
 		t.Fatalf("expected push action description, got %q", details)
+	}
+}
+
+func TestFixTUISelectedDetailsHeaderHasNoFieldBorderAndUsesSelectedLabel(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: false},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	details := m.viewSelectedRepoDetails()
+
+	firstLine := strings.Split(details, "\n")[0]
+	if strings.Contains(firstLine, "│") {
+		t.Fatalf("selected details header should not use field border glyph, got %q", firstLine)
+	}
+	if !strings.Contains(firstLine, "Selected:") || !strings.Contains(firstLine, "api") {
+		t.Fatalf("selected details header missing expected label/value, got %q", firstLine)
 	}
 }
 

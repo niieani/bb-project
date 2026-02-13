@@ -265,6 +265,17 @@ var (
 				Foreground(textColor).
 				Bold(true)
 
+	fixDetailsLabelStyle = lipgloss.NewStyle().
+				Foreground(accentColor).
+				Bold(true)
+
+	fixDetailsValueStyle = lipgloss.NewStyle().
+				Foreground(textColor).
+				Bold(true)
+
+	fixDetailsPathStyle = lipgloss.NewStyle().
+				Foreground(mutedTextColor)
+
 	fixActionPushStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("45"))
 
@@ -529,6 +540,7 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta)
 	action := m.currentActionForRepo(repo.Record.Path, actions)
+	actionLabelValue := fixActionLabel(action)
 
 	reasonText := "none"
 	if len(repo.Record.UnsyncableReasons) > 0 {
@@ -553,7 +565,13 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(fieldStyle.Render(fmt.Sprintf("Selected: %s (%s)", repo.Record.Name, repo.Record.Path)))
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top,
+		fixDetailsLabelStyle.Render("Selected:"),
+		" ",
+		fixDetailsValueStyle.Render(repo.Record.Name),
+		" ",
+		fixDetailsPathStyle.Render("("+repo.Record.Path+")"),
+	))
 	b.WriteString("\n")
 	stateLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("State:")
 	actionLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Action:")
@@ -565,7 +583,7 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 		"   ",
 		actionLabel,
 		" ",
-		fixActionStyleFor(action).Render(action),
+		fixActionStyleFor(action).Render(actionLabelValue),
 		"   ",
 		branchLabel,
 		" ",
@@ -781,7 +799,7 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			Branch:  repo.Record.Branch,
 			State:   state,
 			Reasons: reasons,
-			Action:  m.currentActionForRepo(path, entry.actions),
+			Action:  fixActionLabel(m.currentActionForRepo(path, entry.actions)),
 			Tier:    entry.tier,
 		})
 		m.visible = append(m.visible, repo)
@@ -848,7 +866,7 @@ func (m *fixTUIModel) cycleCurrentAction(delta int) {
 	if selected == fixNoAction {
 		m.status = fmt.Sprintf("no action selected for %s", repo.Record.Name)
 	} else {
-		m.status = fmt.Sprintf("%s selected for %s (%s)", selected, repo.Record.Name, fixActionDescription(selected))
+		m.status = fmt.Sprintf("%s selected for %s (%s)", fixActionLabel(selected), repo.Record.Name, fixActionDescription(selected))
 	}
 	m.rebuildList(repo.Record.Path)
 }
@@ -1062,22 +1080,43 @@ func fixActionStyleFor(action string) lipgloss.Style {
 	}
 }
 
+func fixActionLabel(action string) string {
+	switch action {
+	case fixNoAction:
+		return fixNoAction
+	case FixActionAbortOperation:
+		return "Abort operation"
+	case FixActionPush:
+		return "Push commits"
+	case FixActionStageCommitPush:
+		return "Stage, commit & push"
+	case FixActionPullFFOnly:
+		return "Pull (ff-only)"
+	case FixActionSetUpstreamPush:
+		return "Set upstream & push"
+	case FixActionEnableAutoPush:
+		return "Allow auto-push in sync"
+	default:
+		return action
+	}
+}
+
 func fixActionDescription(action string) string {
 	switch action {
 	case fixNoAction:
-		return "No action. Use Left/Right to select and preview a fix."
+		return "Do nothing for this repository in the current run."
 	case FixActionAbortOperation:
-		return "Abort the active git operation (merge, rebase, cherry-pick, or bisect)."
+		return "Cancel the active git operation (merge, rebase, cherry-pick, or bisect)."
 	case FixActionPush:
-		return "Push local ahead commits to the configured upstream branch."
+		return "Push local commits that are ahead of upstream."
 	case FixActionStageCommitPush:
-		return "Stage all tracked and untracked changes, commit, and push."
+		return "Stage all local changes, create a commit, then push."
 	case FixActionPullFFOnly:
-		return "Pull upstream changes with fast-forward only."
+		return "Fast-forward your branch to upstream without creating a merge commit."
 	case FixActionSetUpstreamPush:
-		return "Set upstream tracking for the current branch by pushing with --set-upstream."
+		return "Set this branch's upstream tracking target and push."
 	case FixActionEnableAutoPush:
-		return "Enable repo metadata so sync can auto-push this repository."
+		return "Allow future bb sync runs to auto-push this repo by enabling its auto-push policy."
 	default:
 		return "Action has no help text yet."
 	}

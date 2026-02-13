@@ -136,7 +136,11 @@ Use a reusable field block for all form rows:
 - For custom row delegates, reserve at least one wrap-guard column so rendered row width stays strictly below viewport width.
 - Keep tiering internal for sort/grouping; in the table itself communicate fixability via state wording and color, not a dedicated `Tier` column.
 - Order rows by fixability tier: autofixable unsyncable first, unsyncable manual/blocked second, syncable last.
+- Action labels shown in UI must be human-readable (for example `Allow auto-push in sync`) rather than raw internal action IDs (for example `enable-auto-push`).
 - In selected-row details, always render a concise `Action help` line that explains what the currently selected fix action will do.
+- In selected-row details, avoid field-border glyphs (`│`) to prevent visual merging with table columns.
+- In selected-row details, render labels and values with distinct styles (for example accent label + higher-contrast value + muted path/context).
+- List height must be budgeted from full chrome (header, panel borders, details, footer help) so top panel borders are never clipped off-screen.
 
 ## Interaction + Focus Standards
 
