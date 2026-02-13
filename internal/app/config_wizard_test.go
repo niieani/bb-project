@@ -304,7 +304,7 @@ func TestWizardCatalogButtonsCanOpenAddEditorAndContinue(t *testing.T) {
 	m.step = stepCatalogs
 	m.focusTabs = false
 	m.catalogFocus = catalogFocusButtons
-	m.catalogBtn = 0
+	m.catalogBtn = 1 // add
 	m.onStepChanged()
 
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -314,10 +314,81 @@ func TestWizardCatalogButtonsCanOpenAddEditorAndContinue(t *testing.T) {
 
 	m.catalogEdit = nil
 	m.catalogFocus = catalogFocusButtons
-	m.catalogBtn = 1
+	m.catalogBtn = 3 // continue
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.step != stepReview {
 		t.Fatalf("step = %v, want %v", m.step, stepReview)
+	}
+}
+
+func TestWizardCatalogButtonsSetDefault(t *testing.T) {
+	m := testConfigWizardModel(t)
+	m.machine.Catalogs = append(m.machine.Catalogs, domain.Catalog{Name: "alt", Root: filepath.Join(t.TempDir(), "alt")})
+	m.machine.DefaultCatalog = "software"
+	m.rebuildCatalogRows()
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.catalogFocus = catalogFocusButtons
+	m.onStepChanged()
+	m.catalogTable.SetCursor(1)
+	m.catalogFocus = catalogFocusButtons
+	m.catalogBtn = 2 // set default
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.machine.DefaultCatalog != "alt" {
+		t.Fatalf("default catalog = %q, want %q", m.machine.DefaultCatalog, "alt")
+	}
+}
+
+func TestWizardCatalogButtonsLeftRightWorkImmediately(t *testing.T) {
+	m := testConfigWizardModel(t)
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.catalogFocus = catalogFocusButtons
+	m.catalogBtn = 0
+	m.onStepChanged()
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if m.catalogBtn != 1 {
+		t.Fatalf("catalog button = %d, want 1 after right", m.catalogBtn)
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if m.catalogBtn != 0 {
+		t.Fatalf("catalog button = %d, want 0 after left", m.catalogBtn)
+	}
+}
+
+func TestWizardCatalogButtonsDefaultToEditWhenCatalogsExist(t *testing.T) {
+	m := testConfigWizardModel(t)
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.catalogFocus = catalogFocusButtons
+	m.catalogBtn = 99
+	m.onStepChanged()
+
+	if m.catalogBtn != 0 {
+		t.Fatalf("catalog button = %d, want 0 (Edit)", m.catalogBtn)
+	}
+}
+
+func TestWizardCatalogButtonsAllowChangingSelectedRowWithUpDown(t *testing.T) {
+	m := testConfigWizardModel(t)
+	m.machine.Catalogs = append(m.machine.Catalogs, domain.Catalog{Name: "alt", Root: filepath.Join(t.TempDir(), "alt")})
+	m.machine.DefaultCatalog = "software"
+	m.rebuildCatalogRows()
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.catalogFocus = catalogFocusButtons
+	m.catalogBtn = 2 // set default
+	m.catalogTable.SetCursor(1)
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if m.catalogTable.Cursor() != 0 {
+		t.Fatalf("cursor = %d, want 0 after up", m.catalogTable.Cursor())
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.machine.DefaultCatalog != "software" {
+		t.Fatalf("default catalog = %q, want %q", m.machine.DefaultCatalog, "software")
 	}
 }
 
@@ -325,7 +396,8 @@ func TestWizardCatalogEnterOnTableRowOpensEditor(t *testing.T) {
 	m := testConfigWizardModel(t)
 	m.step = stepCatalogs
 	m.focusTabs = false
-	m.catalogFocus = catalogFocusTable
+	m.catalogFocus = catalogFocusButtons
+	m.catalogBtn = 0 // edit
 	m.onStepChanged()
 
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -364,6 +436,47 @@ func TestWizardCatalogEditorDeleteRequiresConfirmation(t *testing.T) {
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if len(m.machine.Catalogs) != 0 {
 		t.Fatal("expected catalog to be deleted on second confirmation enter")
+	}
+}
+
+func TestWizardCatalogEditorActionButtonsNavigateWithLeftRight(t *testing.T) {
+	m := testConfigWizardModel(t)
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.catalogFocus = catalogFocusTable
+	m.startCatalogEditRootEditor()
+	if m.catalogEdit == nil {
+		t.Fatal("expected edit editor")
+	}
+
+	// Move from input to Save action.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if m.catalogEdit.focus != 1 {
+		t.Fatalf("focus = %d, want 1 (Save)", m.catalogEdit.focus)
+	}
+	// Left from Save should stay.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if m.catalogEdit.focus != 1 {
+		t.Fatalf("focus = %d, want 1 after left at first action", m.catalogEdit.focus)
+	}
+	// Right to Delete then Cancel.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if m.catalogEdit.focus != 2 {
+		t.Fatalf("focus = %d, want 2 (Delete)", m.catalogEdit.focus)
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if m.catalogEdit.focus != 3 {
+		t.Fatalf("focus = %d, want 3 (Cancel)", m.catalogEdit.focus)
+	}
+	// Right at end should stay.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if m.catalogEdit.focus != 3 {
+		t.Fatalf("focus = %d, want 3 after right at last action", m.catalogEdit.focus)
+	}
+	// Left back to Delete.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	if m.catalogEdit.focus != 2 {
+		t.Fatalf("focus = %d, want 2 after left from cancel", m.catalogEdit.focus)
 	}
 }
 

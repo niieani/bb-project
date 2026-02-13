@@ -84,7 +84,8 @@ Use a reusable field block for all form rows:
 
 - For list-management steps (for example Catalogs), provide explicit action buttons below the list.
 - Primary action uses emphasized style (for example `Continue`).
-- Secondary action uses neutral style (for example `Add`).
+- Secondary actions use neutral style (for example `Add`, `Set Default`).
+- When items exist, include `Edit` as the first action and focus it by default.
 - Destructive action uses danger style and requires explicit confirmation before applying.
 - Buttons must be keyboard-focusable and show focus state clearly.
 
@@ -122,6 +123,8 @@ Use a reusable field block for all form rows:
 
 ## Interaction + Focus Standards
 
+- Only one element group may be visually focused at a time (for example tabs, table row set, button row, or editor controls).
+- When focus changes, remove active/focused styling from the previously focused group.
 - `Up/Down` moves between fields.
 - `Esc` goes back/cancel.
 - `Enter` advances/applies (never toggles boolean state).
@@ -130,6 +133,7 @@ Use a reusable field block for all form rows:
 - When switching tabs while tabs are focused, keep tabs focused.
 - Do not render per-step/per-panel key legends inside content; use only the global sticky footer legend.
 - In list views, `Enter` on a selected row opens contextual edit UI.
+- In button groups and action rows, `Left/Right` moves focus between adjacent actions.
 
 ## Consistency Checklist
 
