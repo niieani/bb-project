@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -119,13 +120,13 @@ type fixTUIModel struct {
 }
 
 type fixListItem struct {
-	Path     string
-	Name     string
-	Branch   string
-	State    string
-	Reasons  string
-	Action   string
-	Syncable bool
+	Path    string
+	Name    string
+	Branch  string
+	State   string
+	Reasons string
+	Action  string
+	Tier    fixRepoTier
 }
 
 func (i fixListItem) FilterValue() string {
@@ -139,6 +140,14 @@ type fixColumnLayout struct {
 	Reasons int
 	Action  int
 }
+
+type fixRepoTier int
+
+const (
+	fixRepoTierAutofixable fixRepoTier = iota
+	fixRepoTierUnsyncableBlocked
+	fixRepoTierSyncable
+)
 
 type fixRepoDelegate struct{}
 
@@ -172,9 +181,12 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	repoCell := renderFixColumnCell(row.Name, layout.Repo, fixRepoNameStyle.Copy().Bold(selected))
 	branchCell := renderFixColumnCell(row.Branch, layout.Branch, fixBranchStyle)
-	stateStyle := fixStateUnsyncableStyle
-	if row.Syncable {
-		stateStyle = fixStateSyncableStyle
+	stateStyle := fixStateSyncableStyle
+	switch row.Tier {
+	case fixRepoTierAutofixable:
+		stateStyle = fixStateAutofixableStyle
+	case fixRepoTierUnsyncableBlocked:
+		stateStyle = fixStateUnsyncableStyle
 	}
 	if selected {
 		stateStyle = stateStyle.Copy().Bold(true)
@@ -232,6 +244,9 @@ var (
 
 	fixStateSyncableStyle = lipgloss.NewStyle().
 				Foreground(successColor)
+
+	fixStateAutofixableStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("214"))
 
 	fixStateUnsyncableStyle = lipgloss.NewStyle().
 				Foreground(errorFgColor)
@@ -419,18 +434,19 @@ func (m *fixTUIModel) View() string {
 	body := b.String()
 	spacer := ""
 	if m.height > 0 {
-		const pageVerticalPadding = 2
+		available := m.height - pageStyle.GetVerticalFrameSize()
+		if available < 0 {
+			available = 0
+		}
 		const separatorLines = 2
-		bodyHeight := lipgloss.Height(body)
-		helpHeight := lipgloss.Height(helpBlock)
-		total := bodyHeight + separatorLines + helpHeight + pageVerticalPadding
-		if gap := m.height - total; gap > 0 {
+		used := lipgloss.Height(body) + separatorLines + lipgloss.Height(helpBlock)
+		if gap := available - used; gap > 0 {
 			spacer = strings.Repeat("\n", gap)
 		}
 	}
 
 	doc := body + "\n\n" + spacer + helpBlock
-	return pageStyle.Render(doc) + "\n"
+	return pageStyle.Render(doc)
 }
 
 func (m *fixTUIModel) viewMainContent() string {
@@ -438,6 +454,8 @@ func (m *fixTUIModel) viewMainContent() string {
 	b.WriteString(labelStyle.Render("Repository Fixes"))
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Select per-repo fixes. Default selection is '-' (no action)."))
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Render("List order: autofixable unsyncable, unsyncable manual, then syncable."))
 	b.WriteString("\n\n")
 	b.WriteString(m.viewFixSummary())
 	b.WriteString("\n\n")
@@ -520,8 +538,13 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 
 	state := "syncable"
 	stateStyle := fixStateSyncableStyle
-	if !repo.Record.Syncable {
-		state = "unsyncable"
+	tier := classifyFixRepo(repo.Record.Syncable, actions)
+	switch tier {
+	case fixRepoTierAutofixable:
+		state = "unsyncable (autofixable)"
+		stateStyle = fixStateAutofixableStyle
+	case fixRepoTierUnsyncableBlocked:
+		state = "unsyncable (manual)"
 		stateStyle = fixStateUnsyncableStyle
 	}
 
@@ -552,15 +575,29 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 func (m *fixTUIModel) viewFixSummary() string {
 	total := len(m.visible)
 	pending := 0
+	autofixable := 0
+	blocked := 0
+	syncable := 0
 	for _, repo := range m.visible {
 		if m.selectedAction[repo.Record.Path] >= 0 {
 			pending++
 		}
+		tier := classifyFixRepo(repo.Record.Syncable, eligibleFixActions(repo.Record, repo.Meta))
+		switch tier {
+		case fixRepoTierAutofixable:
+			autofixable++
+		case fixRepoTierUnsyncableBlocked:
+			blocked++
+		case fixRepoTierSyncable:
+			syncable++
+		}
 	}
 	totalStyle := renderStatusPill(fmt.Sprintf("%d repos", total))
 	pendingStyle := renderStatusPill(fmt.Sprintf("%d selected", pending))
-	noneStyle := fixNoActionStyle.Render("'-' means no action")
-	return lipgloss.JoinHorizontal(lipgloss.Top, totalStyle, " ", pendingStyle, "  ", noneStyle)
+	autoStyle := renderFixSummaryPill(fmt.Sprintf("%d autofixable", autofixable), lipgloss.Color("214"))
+	blockedStyle := renderFixSummaryPill(fmt.Sprintf("%d unsyncable manual", blocked), errorFgColor)
+	syncStyle := renderFixSummaryPill(fmt.Sprintf("%d syncable", syncable), successColor)
+	return lipgloss.JoinHorizontal(lipgloss.Top, totalStyle, " ", pendingStyle, "  ", autoStyle, " ", blockedStyle, " ", syncStyle)
 }
 
 func (m *fixTUIModel) viewContentWidth() int {
@@ -649,8 +686,15 @@ func (m *fixTUIModel) refreshRepos() error {
 }
 
 func (m *fixTUIModel) rebuildList(preferredPath string) {
+	type fixVisibleEntry struct {
+		repo    fixRepoState
+		actions []string
+		tier    fixRepoTier
+	}
+
 	m.visible = m.visible[:0]
 	items := make([]list.Item, 0, len(m.repos))
+	entries := make([]fixVisibleEntry, 0, len(m.repos))
 
 	for _, repo := range m.repos {
 		path := repo.Record.Path
@@ -662,7 +706,28 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 		if idx, ok := m.selectedAction[path]; !ok || idx < -1 || idx >= len(actions) {
 			m.selectedAction[path] = -1
 		}
+		entries = append(entries, fixVisibleEntry{
+			repo:    repo,
+			actions: actions,
+			tier:    classifyFixRepo(repo.Record.Syncable, actions),
+		})
+	}
 
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].tier != entries[j].tier {
+			return entries[i].tier < entries[j].tier
+		}
+		leftName := strings.ToLower(entries[i].repo.Record.Name)
+		rightName := strings.ToLower(entries[j].repo.Record.Name)
+		if leftName == rightName {
+			return entries[i].repo.Record.Path < entries[j].repo.Record.Path
+		}
+		return leftName < rightName
+	})
+
+	for _, entry := range entries {
+		repo := entry.repo
+		path := repo.Record.Path
 		reasons := "none"
 		if len(repo.Record.UnsyncableReasons) > 0 {
 			parts := make([]string, 0, len(repo.Record.UnsyncableReasons))
@@ -673,18 +738,21 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			reasons = strings.Join(parts, ", ")
 		}
 		state := "syncable"
-		if !repo.Record.Syncable {
-			state = "unsyncable"
+		switch entry.tier {
+		case fixRepoTierAutofixable:
+			state = "unsyncable (autofixable)"
+		case fixRepoTierUnsyncableBlocked:
+			state = "unsyncable (manual)"
 		}
 
 		items = append(items, fixListItem{
-			Path:     path,
-			Name:     repo.Record.Name,
-			Branch:   repo.Record.Branch,
-			State:    state,
-			Reasons:  reasons,
-			Action:   m.currentActionForRepo(path, actions),
-			Syncable: repo.Record.Syncable,
+			Path:    path,
+			Name:    repo.Record.Name,
+			Branch:  repo.Record.Branch,
+			State:   state,
+			Reasons: reasons,
+			Action:  m.currentActionForRepo(path, entry.actions),
+			Tier:    entry.tier,
 		})
 		m.visible = append(m.visible, repo)
 	}
@@ -891,7 +959,7 @@ func fixListColumnsForWidth(listWidth int) fixColumnLayout {
 	const (
 		repoMin    = 7
 		branchMin  = 7
-		stateMin   = 6
+		stateMin   = 18
 		reasonsMin = 12
 		actionMin  = 10
 	)
@@ -911,10 +979,10 @@ func fixListColumnsForWidth(listWidth int) fixColumnLayout {
 	}
 	extra := budget - minTotal
 	if extra > 0 {
-		repoExtra := extra * 18 / 100
-		branchExtra := extra * 16 / 100
+		repoExtra := extra * 16 / 100
+		branchExtra := extra * 14 / 100
 		stateExtra := extra * 10 / 100
-		reasonsExtra := extra * 32 / 100
+		reasonsExtra := extra * 30 / 100
 		actionExtra := extra - repoExtra - branchExtra - stateExtra - reasonsExtra
 		layout.Repo += repoExtra
 		layout.Branch += branchExtra
@@ -930,6 +998,17 @@ func renderFixColumnCell(value string, width int, style lipgloss.Style) string {
 		return ""
 	}
 	return style.Width(width).MaxWidth(width).Render(ansi.Truncate(value, width, "…"))
+}
+
+func renderFixSummaryPill(value string, fg lipgloss.TerminalColor) string {
+	return lipgloss.NewStyle().
+		Foreground(fg).
+		Background(accentBgColor).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(accentColor).
+		Padding(0, 1).
+		Bold(true).
+		Render(strings.ToUpper(value))
 }
 
 func fixActionStyleFor(action string) lipgloss.Style {
@@ -951,6 +1030,16 @@ func fixActionStyleFor(action string) lipgloss.Style {
 	default:
 		return lipgloss.NewStyle().Foreground(textColor)
 	}
+}
+
+func classifyFixRepo(syncable bool, actions []string) fixRepoTier {
+	if !syncable && len(actions) > 0 {
+		return fixRepoTierAutofixable
+	}
+	if !syncable {
+		return fixRepoTierUnsyncableBlocked
+	}
+	return fixRepoTierSyncable
 }
 
 func sortStrings(in []string) {

@@ -320,6 +320,60 @@ func TestFixTUIResizeExpandsWideColumns(t *testing.T) {
 	}
 }
 
+func TestFixTUIOrdersReposByTier(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "zzz-sync",
+				Path:      "/repos/zzz-sync",
+				RepoID:    "github.com/you/zzz-sync",
+				OriginURL: "git@github.com:you/zzz-sync.git",
+				Upstream:  "origin/main",
+				Syncable:  true,
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/zzz-sync", AutoPush: false},
+		},
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "aaa-blocked",
+				Path:      "/repos/aaa-blocked",
+				RepoID:    "github.com/you/aaa-blocked",
+				OriginURL: "git@github.com:you/aaa-blocked.git",
+				Upstream:  "origin/main",
+				Syncable:  false,
+				Diverged:  true,
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/aaa-blocked", AutoPush: true},
+		},
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "mmm-auto",
+				Path:      "/repos/mmm-auto",
+				RepoID:    "github.com/you/mmm-auto",
+				OriginURL: "git@github.com:you/mmm-auto.git",
+				Upstream:  "origin/main",
+				Syncable:  false,
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/mmm-auto", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+
+	if got := m.visible[0].Record.Name; got != "mmm-auto" {
+		t.Fatalf("first row = %q, want autofixable repo first", got)
+	}
+	if got := m.visible[1].Record.Name; got != "aaa-blocked" {
+		t.Fatalf("second row = %q, want unsyncable blocked repo second", got)
+	}
+	if got := m.visible[2].Record.Name; got != "zzz-sync" {
+		t.Fatalf("third row = %q, want syncable repo last", got)
+	}
+}
+
 func TestFixTUIViewDoesNotRenderNestedNormalBorderAroundList(t *testing.T) {
 	t.Parallel()
 
@@ -353,12 +407,12 @@ func TestFixRepoDelegateLeavesWrapGuardColumn(t *testing.T) {
 	repoList.Select(0)
 
 	item := fixListItem{
-		Name:     "phomemo_m02s",
-		Branch:   "main",
-		State:    "unsyncable",
-		Reasons:  "dirty_tracked, dirty_untracked, missing_origin",
-		Action:   FixActionEnableAutoPush,
-		Syncable: false,
+		Name:    "phomemo_m02s",
+		Branch:  "main",
+		State:   "unsyncable",
+		Reasons: "dirty_tracked, dirty_untracked, missing_origin",
+		Action:  FixActionEnableAutoPush,
+		Tier:    fixRepoTierAutofixable,
 	}
 
 	var b strings.Builder
@@ -371,4 +425,42 @@ func TestFixRepoDelegateLeavesWrapGuardColumn(t *testing.T) {
 	if width := ansi.StringWidth(row); width >= repoList.Width() {
 		t.Fatalf("delegate row width %d must stay below list width %d to avoid hard wrap", width, repoList.Width())
 	}
+}
+
+func TestFixTUIFooterDoesNotLeaveExtraTrailingBlankRows(t *testing.T) {
+	t.Parallel()
+
+	m := newFixTUIModelForTest([]fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: false},
+		},
+	})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 24})
+	view := m.View()
+
+	trailing := trailingEmptyLineCount(view)
+	if trailing > 1 {
+		t.Fatalf("expected at most one trailing empty line after footer, got %d", trailing)
+	}
+}
+
+func trailingEmptyLineCount(s string) int {
+	lines := strings.Split(s, "\n")
+	n := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) == "" {
+			n++
+			continue
+		}
+		break
+	}
+	return n
 }

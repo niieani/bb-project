@@ -52,6 +52,8 @@ Use centralized tokens (AdaptiveColor where possible):
   - Dedicated help panel.
   - Error/confirm-warn callouts above help.
   - The footer help panel is the single source of truth for keybindings.
+  - Footer help must be visually anchored to the terminal bottom (no trailing empty rows beneath it).
+  - Root `View()` output should not append an unconditional trailing newline; this can push top borders out of viewport in some terminals.
 
 ## Spacing System
 
@@ -65,6 +67,7 @@ Use explicit rhythm values and keep them consistent across all wizard steps:
 - Chip/pill controls:
   - Minimum horizontal padding: 2 spaces on both sides.
   - Minimum gap between adjacent enum chips: 2 spaces.
+  - Do not mix multi-line pills with single-line helper text in one baseline row; use all pills or move helper text to its own line.
 
 ## Field Components
 
@@ -129,6 +132,10 @@ Use a reusable field block for all form rows:
 - Use responsive table columns; `Reasons` and `Selected Fix` should expand in wider terminals instead of truncating aggressively.
 - If category color-coding is needed, apply it in surrounding detail panels or status chips, not directly in table cell strings.
 - Keep the selected row visible while navigating large lists; viewport must follow cursor movement.
+- Avoid nested bordered containers for the same content region (for example list-inside-list-panel) because combined frame widths can trigger wrap artifacts (`─┘`, double-height rows).
+- For custom row delegates, reserve at least one wrap-guard column so rendered row width stays strictly below viewport width.
+- Keep tiering internal for sort/grouping; in the table itself communicate fixability via state wording and color, not a dedicated `Tier` column.
+- Order rows by fixability tier: autofixable unsyncable first, unsyncable manual/blocked second, syncable last.
 
 ## Interaction + Focus Standards
 
