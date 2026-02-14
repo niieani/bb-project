@@ -673,7 +673,7 @@ func (m *fixTUIModel) View() string {
 	var b strings.Builder
 	if m.viewMode == fixViewWizard {
 		b.WriteString(m.viewWizardTopLine())
-		b.WriteString("\n\n")
+		b.WriteString("\n")
 	} else {
 		title := lipgloss.JoinHorizontal(lipgloss.Center,
 			titleBadgeStyle.Render("bb"),

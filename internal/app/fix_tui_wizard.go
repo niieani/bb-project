@@ -64,6 +64,16 @@ type fixSummaryResult struct {
 	Detail   string
 }
 
+type wizardLineRange struct {
+	Start int
+	End   int
+}
+
+type wizardContentLayout struct {
+	Content     string
+	FocusRanges map[fixWizardFocusArea]wizardLineRange
+}
+
 const (
 	fixWizardActionApply = iota
 	fixWizardActionSkip
@@ -509,7 +519,7 @@ func (m *fixTUIModel) viewWizardContent() string {
 	m.syncWizardViewport()
 
 	hint := m.wizardFooterHint()
-	actions := renderWizardActionButtons(m.wizard.ActionFocus)
+	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus), m.wizardBodyLineWidth())
 
 	var b strings.Builder
 	b.WriteString(m.wizard.BodyViewport.View())
@@ -521,7 +531,7 @@ func (m *fixTUIModel) viewWizardContent() string {
 }
 
 func (m *fixTUIModel) viewWizardTopLine() string {
-	progress := renderStatusPill(fmt.Sprintf("%d/%d", m.wizard.Index+1, len(m.wizard.Queue)))
+	progress := hintStyle.Copy().Bold(true).Render(fmt.Sprintf("[%d/%d]", m.wizard.Index+1, len(m.wizard.Queue)))
 	left := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		titleBadgeStyle.Render("bb"),
@@ -529,22 +539,68 @@ func (m *fixTUIModel) viewWizardTopLine() string {
 		"  ",
 		labelStyle.Render("Confirm Risky Fix"),
 	)
-	if m.wizard.RepoName == "" {
-		return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", progress)
+	line := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", progress)
+	if m.wizard.RepoName != "" {
+		context := hintStyle.Render(fmt.Sprintf("(%s · %s)", m.wizard.RepoName, fixActionLabel(m.wizard.Action)))
+		line = lipgloss.JoinHorizontal(lipgloss.Top, line, " ", context)
 	}
-	context := hintStyle.Render(fmt.Sprintf("(%s · %s)", m.wizard.RepoName, fixActionLabel(m.wizard.Action)))
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", progress, " ", context)
+	return m.clampSingleLine(line, m.pageLineWidth())
 }
 
 func (m *fixTUIModel) wizardFooterHint() string {
-	if m.wizard.FocusArea == fixWizardFocusCommit || m.wizard.FocusArea == fixWizardFocusProjectName {
-		return hintStyle.Render("Typing mode: text input captures letters. Up/down moves focus or scrolls at edge. Tab/Shift+Tab cycles focus. Esc cancels remaining.")
-	}
-	return hintStyle.Render("Up/down: scroll (or move focus at edge)   tab/shift+tab: move focus   left/right: enum or buttons   enter: activate   esc: cancel remaining")
+	const text = "Tab/Shift+Tab: focus  Up/Down: scroll or move focus at edge  Left/Right: change enum/buttons  Enter: activate  Esc: cancel"
+	return hintStyle.Render(m.clampSingleLine(text, m.wizardBodyLineWidth()))
 }
 
-func (m *fixTUIModel) viewWizardScrollableContent() string {
+func (m *fixTUIModel) pageLineWidth() int {
+	if m.width <= 0 {
+		return 0
+	}
+	width := m.width - fixPageStyle.GetHorizontalFrameSize()
+	if width < 1 {
+		return 1
+	}
+	return width
+}
+
+func (m *fixTUIModel) wizardBodyLineWidth() int {
+	width := m.wizardInnerWidth()
+	if width > 0 {
+		return width
+	}
+	if content := m.viewContentWidth(); content > 8 {
+		return content - 8
+	}
+	return 0
+}
+
+func (m *fixTUIModel) clampSingleLine(text string, width int) string {
+	line := strings.ReplaceAll(text, "\n", " ")
+	if width <= 0 {
+		return line
+	}
+	return ansi.Truncate(line, width, "…")
+}
+
+func (m *fixTUIModel) buildWizardContentLayout() wizardContentLayout {
 	var b strings.Builder
+	lineCount := 0
+	focusRanges := map[fixWizardFocusArea]wizardLineRange{}
+
+	appendBlock := func(block string) wizardLineRange {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+			lineCount += 2
+		}
+		start := lineCount
+		b.WriteString(block)
+		height := lipgloss.Height(block)
+		if height < 1 {
+			height = 1
+		}
+		lineCount += height
+		return wizardLineRange{Start: start, End: lineCount}
+	}
 
 	targetBranch := m.wizard.Branch
 	if targetBranch == "" {
@@ -560,13 +616,11 @@ func (m *fixTUIModel) viewWizardScrollableContent() string {
 		fmt.Sprintf("Action: %s", fixActionLabel(m.wizard.Action)),
 		fmt.Sprintf("Target branch: %s", targetLabel),
 	}, "\n")
-	b.WriteString(fieldStyle.Render(context))
-	b.WriteString("\n\n")
-	b.WriteString(renderFieldBlock(false, "Changed files", "Files that will be included by this fix.", m.renderChangedFilesList(), ""))
+	appendBlock(fieldStyle.Render(context))
+	appendBlock(renderFieldBlock(false, "Changed files", "Files that will be included by this fix.", m.renderChangedFilesList(), ""))
 
 	if len(m.wizard.Risk.SecretLikeChangedPaths) > 0 {
-		b.WriteString("\n\n")
-		b.WriteString(renderFieldBlock(
+		appendBlock(renderFieldBlock(
 			false,
 			"Secret-like changes detected",
 			"Review carefully before any push/commit operation.",
@@ -583,8 +637,7 @@ func (m *fixTUIModel) viewWizardScrollableContent() string {
 		} else {
 			detail += " This step will not generate .gitignore."
 		}
-		b.WriteString("\n\n")
-		b.WriteString(renderFieldBlock(
+		appendBlock(renderFieldBlock(
 			false,
 			"Missing root .gitignore",
 			detail,
@@ -594,28 +647,27 @@ func (m *fixTUIModel) viewWizardScrollableContent() string {
 	}
 
 	if m.wizard.EnableCommitMessage {
-		b.WriteString("\n\n")
-		b.WriteString(renderFieldBlock(
+		rng := appendBlock(renderFieldBlock(
 			m.wizard.FocusArea == fixWizardFocusCommit,
 			"Commit message",
 			"Leave empty to auto-generate.",
 			renderInputContainer(m.wizard.CommitMessage.View(), m.wizard.FocusArea == fixWizardFocusCommit),
 			"",
 		))
+		focusRanges[fixWizardFocusCommit] = rng
 	}
 	if m.wizard.EnableProjectName {
-		b.WriteString("\n\n")
-		b.WriteString(renderFieldBlock(
+		rng := appendBlock(renderFieldBlock(
 			m.wizard.FocusArea == fixWizardFocusProjectName,
 			"Repository name on GitHub",
 			"Leave empty to use the current folder/repo name.",
 			renderInputContainer(m.wizard.ProjectName.View(), m.wizard.FocusArea == fixWizardFocusProjectName),
 			"",
 		))
+		focusRanges[fixWizardFocusProjectName] = rng
 	}
 	if m.wizard.ShowGitignoreToggle {
-		b.WriteString("\n\n")
-		b.WriteString(renderToggleField(
+		appendBlock(renderToggleField(
 			false,
 			"Generate .gitignore before commit",
 			"Only when root .gitignore is missing.",
@@ -623,20 +675,25 @@ func (m *fixTUIModel) viewWizardScrollableContent() string {
 		))
 	}
 	if m.wizard.Action == FixActionCreateProject {
-		b.WriteString("\n\n")
-		b.WriteString(renderFieldBlock(
+		rng := appendBlock(renderFieldBlock(
 			m.wizard.FocusArea == fixWizardFocusVisibility,
 			"Project visibility",
 			"Left/right changes this field when focused.",
 			renderCreateVisibilityLine(m.wizard.Visibility, m.wizard.DefaultVis),
 			"",
 		))
+		focusRanges[fixWizardFocusVisibility] = rng
 	}
-	return b.String()
+
+	return wizardContentLayout{
+		Content:     b.String(),
+		FocusRanges: focusRanges,
+	}
 }
 
 func (m *fixTUIModel) syncWizardViewport() {
-	content := m.viewWizardScrollableContent()
+	layout := m.buildWizardContentLayout()
+	content := layout.Content
 	staticLines := lipgloss.Height(renderWizardActionButtons(m.wizard.ActionFocus)) + lipgloss.Height(m.wizardFooterHint())
 	width, height := m.wizardViewportSize(lipgloss.Height(content), longestANSIWidth(content), staticLines)
 	if width < 1 {
@@ -653,6 +710,25 @@ func (m *fixTUIModel) syncWizardViewport() {
 	m.wizard.BodyViewport.Height = height
 	m.wizard.BodyViewport.SetContent(content)
 	m.wizard.BodyViewport.SetYOffset(offset)
+	m.ensureWizardFocusVisible(layout)
+}
+
+func (m *fixTUIModel) ensureWizardFocusVisible(layout wizardContentLayout) {
+	rng, ok := layout.FocusRanges[m.wizard.FocusArea]
+	if !ok || m.wizard.BodyViewport.Height < 1 {
+		return
+	}
+	top := m.wizard.BodyViewport.YOffset
+	bottom := top + m.wizard.BodyViewport.Height - 1
+	focusTop := rng.Start
+	focusBottom := max(rng.End-1, focusTop)
+	if focusTop < top {
+		m.wizard.BodyViewport.SetYOffset(focusTop)
+		return
+	}
+	if focusBottom > bottom {
+		m.wizard.BodyViewport.SetYOffset(focusBottom - m.wizard.BodyViewport.Height + 1)
+	}
 }
 
 func (m *fixTUIModel) wizardViewportSize(contentHeight int, contentWidth int, staticLines int) (int, int) {
@@ -674,7 +750,7 @@ func (m *fixTUIModel) wizardViewportSize(contentHeight int, contentWidth int, st
 	available -= m.wizardHelpHeight()
 	available -= 1 // separator line between body and help
 
-	nonPanel := 2 // single top wizard header line + one spacer line
+	nonPanel := 1 // single top wizard header line
 	if m.status != "" {
 		nonPanel++
 	}

@@ -790,6 +790,63 @@ func TestFixTUIWizardViewUsesSingleTopLineWithoutExtraWizardHeaders(t *testing.T
 	}
 }
 
+func TestFixTUIWizardTopLineUsesSingleLineProgress(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 24})
+
+	top := ansi.Strip(m.viewWizardTopLine())
+	if strings.Contains(top, "\n") {
+		t.Fatalf("wizard top line should be single-line, got %q", top)
+	}
+	if strings.Contains(top, "╭") || strings.Contains(top, "│") || strings.Contains(top, "╰") {
+		t.Fatalf("wizard top line should not use multi-line boxed progress, got %q", top)
+	}
+}
+
+func TestFixTUIWizardFooterHintIsStableSingleLine(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+
+	m.wizard.FocusArea = fixWizardFocusProjectName
+	hintTextInput := ansi.Strip(m.wizardFooterHint())
+	m.wizard.FocusArea = fixWizardFocusActions
+	hintActions := ansi.Strip(m.wizardFooterHint())
+
+	if hintTextInput != hintActions {
+		t.Fatalf("wizard footer hint should be stable across focus changes:\ninput=%q\nactions=%q", hintTextInput, hintActions)
+	}
+	if strings.Contains(hintTextInput, "\n") {
+		t.Fatalf("wizard footer hint should stay single-line, got %q", hintTextInput)
+	}
+}
+
 func TestFixTUIWizardInputAcceptsMappedLetters(t *testing.T) {
 	t.Parallel()
 
@@ -982,6 +1039,45 @@ func TestFixTUIWizardDownScrollsBeforeChangingNonInputFocus(t *testing.T) {
 	}
 	if m.wizard.BodyViewport.YOffset <= startOffset {
 		t.Fatalf("expected viewport to scroll down, yoffset %d -> %d", startOffset, m.wizard.BodyViewport.YOffset)
+	}
+}
+
+func TestFixTUIWizardFocusMoveRevealsVisibilityFieldContent(t *testing.T) {
+	t.Parallel()
+
+	noisy := make([]string, 0, 40)
+	for i := 0; i < 40; i++ {
+		noisy = append(noisy, fmt.Sprintf("tmp/noisy-%02d.log", i))
+	}
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{
+				NoisyChangedPaths: noisy,
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project name -> visibility
+	if m.wizard.FocusArea != fixWizardFocusVisibility {
+		t.Fatalf("focus area after down = %v, want visibility", m.wizard.FocusArea)
+	}
+
+	_ = m.viewWizardContent() // sync viewport layout for assertions
+	visible := ansi.Strip(m.wizard.BodyViewport.View())
+	if !strings.Contains(visible, "Project visibility") {
+		t.Fatalf("focused visibility field should be visible in viewport, got %q", visible)
+	}
+	if !strings.Contains(visible, "private (default)") {
+		t.Fatalf("visibility options should be visible in viewport, got %q", visible)
 	}
 }
 

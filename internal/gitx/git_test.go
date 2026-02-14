@@ -26,3 +26,50 @@ func TestLooksLikePushAccessDenied(t *testing.T) {
 		})
 	}
 }
+
+func TestGitCommandEnvDisablesInteractivePrompts(t *testing.T) {
+	t.Parallel()
+
+	env := gitCommandEnv([]string{
+		"PATH=/usr/bin",
+		"GIT_TERMINAL_PROMPT=1",
+		"GCM_INTERACTIVE=always",
+		"GIT_ASKPASS=/tmp/askpass",
+		"SSH_ASKPASS=/tmp/ssh-askpass",
+		"SSH_ASKPASS_REQUIRE=force",
+	})
+
+	values := map[string]string{}
+	for _, entry := range env {
+		key, value, ok := splitEnvEntry(entry)
+		if !ok {
+			continue
+		}
+		values[key] = value
+	}
+
+	if got := values["GIT_TERMINAL_PROMPT"]; got != "0" {
+		t.Fatalf("GIT_TERMINAL_PROMPT = %q, want %q", got, "0")
+	}
+	if got := values["GCM_INTERACTIVE"]; got != "never" {
+		t.Fatalf("GCM_INTERACTIVE = %q, want %q", got, "never")
+	}
+	if got := values["GIT_ASKPASS"]; got != "" {
+		t.Fatalf("GIT_ASKPASS = %q, want empty", got)
+	}
+	if got := values["SSH_ASKPASS"]; got != "" {
+		t.Fatalf("SSH_ASKPASS = %q, want empty", got)
+	}
+	if got := values["SSH_ASKPASS_REQUIRE"]; got != "never" {
+		t.Fatalf("SSH_ASKPASS_REQUIRE = %q, want %q", got, "never")
+	}
+}
+
+func splitEnvEntry(entry string) (string, string, bool) {
+	for i := 0; i < len(entry); i++ {
+		if entry[i] == '=' {
+			return entry[:i], entry[i+1:], true
+		}
+	}
+	return "", "", false
+}

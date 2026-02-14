@@ -23,17 +23,31 @@ type Result struct {
 	Stderr string
 }
 
+var gitProcessEnv = []string{
+	"GIT_CONFIG_GLOBAL=/dev/null",
+	"GIT_CONFIG_NOSYSTEM=1",
+	"GIT_AUTHOR_NAME=bb",
+	"GIT_AUTHOR_EMAIL=bb@example.com",
+	"GIT_COMMITTER_NAME=bb",
+	"GIT_COMMITTER_EMAIL=bb@example.com",
+	"GIT_TERMINAL_PROMPT=0",
+	"GIT_ASKPASS=",
+	"SSH_ASKPASS=",
+	"SSH_ASKPASS_REQUIRE=never",
+	"GCM_INTERACTIVE=never",
+}
+
+func gitCommandEnv(base []string) []string {
+	out := make([]string, 0, len(base)+len(gitProcessEnv))
+	out = append(out, base...)
+	out = append(out, gitProcessEnv...)
+	return out
+}
+
 func (r Runner) run(dir string, name string, args ...string) (Result, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_AUTHOR_NAME=bb",
-		"GIT_AUTHOR_EMAIL=bb@example.com",
-		"GIT_COMMITTER_NAME=bb",
-		"GIT_COMMITTER_EMAIL=bb@example.com",
-	)
+	cmd.Env = gitCommandEnv(os.Environ())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
