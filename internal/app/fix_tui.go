@@ -234,6 +234,7 @@ func (m *fixTUIModel) wizardHelpMap() fixTUIHelpMap {
 	short := make([]key.Binding, 0, 8)
 	primary := make([]key.Binding, 0, 5)
 	secondary := make([]key.Binding, 0, 3)
+	tertiary := make([]key.Binding, 0, 2)
 
 	enterDesc := "activate"
 	if m.wizard.FocusArea != fixWizardFocusActions {
@@ -274,12 +275,17 @@ func (m *fixTUIModel) wizardHelpMap() fixTUIHelpMap {
 	short = append(short, focus)
 	secondary = append(secondary, focus)
 
+	helpToggle := newHelpBinding([]string{"?"}, "?", "more keys")
+	quit := newHelpBinding([]string{"q", "ctrl+c"}, "q", "quit")
+	tertiary = append(tertiary, helpToggle, quit)
+
 	rows := [][]key.Binding{primary, secondary}
 	if m.wizardHasContextOverflow() {
 		page := newHelpBinding([]string{"pgup", "pgdown"}, "pgup/pgdn", "page scroll")
 		short = append(short, page)
 		rows = append(rows, []key.Binding{page})
 	}
+	rows = append(rows, tertiary)
 	return fixTUIHelpMap{short: short, full: rows}
 }
 
@@ -315,6 +321,77 @@ func (m *fixTUIModel) hasAnySelectedFixes() bool {
 		}
 	}
 	return false
+}
+
+func (m *fixTUIModel) footerHelpInnerWidth(helpPanel lipgloss.Style) int {
+	if w := helpPanel.GetWidth(); w > 0 {
+		inner := w - helpPanel.GetHorizontalFrameSize()
+		if inner > 0 {
+			return inner
+		}
+	}
+	if w := m.viewContentWidth(); w > 0 {
+		inner := w - helpPanelStyle.GetHorizontalFrameSize()
+		if inner > 0 {
+			return inner
+		}
+	}
+	if m.width > 0 {
+		inner := (m.width - fixPageStyle.GetHorizontalFrameSize()) - helpPanelStyle.GetHorizontalFrameSize()
+		if inner > 0 {
+			return inner
+		}
+	}
+	return 0
+}
+
+func (m *fixTUIModel) footerHelpView(helpPanel lipgloss.Style) string {
+	helpMap := m.contextualHelpMap()
+	helpModel := m.help
+	innerWidth := m.footerHelpInnerWidth(helpPanel)
+	if innerWidth > 0 {
+		helpModel.Width = innerWidth
+	}
+	if helpModel.ShowAll {
+		return helpModel.View(helpMap)
+	}
+	return renderSingleLineShortHelp(helpModel, helpMap.ShortHelp(), innerWidth)
+}
+
+func renderSingleLineShortHelp(helpModel help.Model, bindings []key.Binding, width int) string {
+	separatorText := helpModel.ShortSeparator
+	if separatorText == "" {
+		separatorText = " • "
+	}
+	separator := helpModel.Styles.ShortSeparator.Render(separatorText)
+	ellipsisText := helpModel.Ellipsis
+	if ellipsisText == "" {
+		ellipsisText = "…"
+	}
+	ellipsis := helpModel.Styles.Ellipsis.Render(ellipsisText)
+
+	entries := make([]string, 0, len(bindings))
+	for _, binding := range bindings {
+		if !binding.Enabled() {
+			continue
+		}
+		item := binding.Help()
+		keyLabel := strings.TrimSpace(item.Key)
+		desc := strings.TrimSpace(item.Desc)
+		if keyLabel == "" || desc == "" {
+			continue
+		}
+		entries = append(entries, helpModel.Styles.ShortKey.Render(keyLabel)+" "+helpModel.Styles.ShortDesc.Render(desc))
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	line := strings.Join(entries, separator)
+	line = strings.ReplaceAll(line, "\n", " ")
+	if width > 0 {
+		line = ansi.Truncate(line, width, ellipsis)
+	}
+	return line
 }
 
 type fixTUIModel struct {
@@ -916,11 +993,11 @@ func (m *fixTUIModel) View() string {
 		b.WriteString(alertStyle.Render(errorStyle.Render(m.errText)))
 	}
 
-	helpView := m.help.View(m.contextualHelpMap())
 	helpPanel := helpPanelStyle
 	if w := m.viewContentWidth(); w > 0 {
 		helpPanel = helpPanel.Width(w)
 	}
+	helpView := m.footerHelpView(helpPanel)
 	helpBlock := helpPanel.Render(helpView)
 
 	body := b.String()
@@ -1131,7 +1208,7 @@ func (m *fixTUIModel) resizeRepoList() {
 	if w := m.viewContentWidth(); w > 0 {
 		helpPanel = helpPanel.Width(w)
 	}
-	helpHeight := lipgloss.Height(helpPanel.Render(m.help.View(m.contextualHelpMap())))
+	helpHeight := lipgloss.Height(helpPanel.Render(m.footerHelpView(helpPanel)))
 
 	reserved := 0
 	reserved += fixPageStyle.GetVerticalFrameSize()

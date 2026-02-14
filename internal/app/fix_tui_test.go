@@ -1235,6 +1235,86 @@ func TestFixTUIListGlobalFooterHelpShowsOnlyAvailableActions(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardShortFooterHelpIsSingleLineWithEllipsis(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{
+				MissingRootGitignore:       true,
+				NoisyChangedPaths:          []string{"dist/app.js"},
+				SuggestedGitignorePatterns: []string{"dist/"},
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 86, Height: 24})
+
+	lines := footerHelpContentLines(m.View())
+	if len(lines) != 1 {
+		t.Fatalf("expected collapsed footer help to stay single-line, got %d lines: %v", len(lines), lines)
+	}
+	if !strings.HasSuffix(lines[0], "…") {
+		t.Fatalf("expected collapsed footer help to end with ellipsis when truncated, got %q", lines[0])
+	}
+}
+
+func TestFixTUIWizardQuestionMarkTogglesExpandedFooterHelp(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{
+				MissingRootGitignore:       true,
+				NoisyChangedPaths:          []string{"dist/app.js"},
+				SuggestedGitignorePatterns: []string{"dist/"},
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+
+	collapsed := footerHelpContentLines(m.View())
+	if len(collapsed) != 1 {
+		t.Fatalf("expected collapsed footer help to start as single-line, got %d lines: %v", len(collapsed), collapsed)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	if !m.help.ShowAll {
+		t.Fatal("expected ? to enable expanded help in wizard")
+	}
+
+	expanded := footerHelpContentLines(m.View())
+	if len(expanded) <= 1 {
+		t.Fatalf("expected expanded footer help to include multiple lines, got %d lines: %v", len(expanded), expanded)
+	}
+	expandedText := strings.Join(expanded, " ")
+	if !strings.Contains(expandedText, "q quit") {
+		t.Fatalf("expected expanded footer help to include comprehensive keys, got %q", expandedText)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	if m.help.ShowAll {
+		t.Fatal("expected ? to collapse help in wizard")
+	}
+}
+
 func TestFixTUIWizardInputAcceptsMappedLetters(t *testing.T) {
 	t.Parallel()
 
@@ -2532,4 +2612,36 @@ func helpContains(entries []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func footerHelpContentLines(view string) []string {
+	lines := strings.Split(ansi.Strip(view), "\n")
+	top := -1
+	bottom := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if bottom < 0 && strings.HasPrefix(trimmed, "╰") && strings.HasSuffix(trimmed, "╯") {
+			bottom = i
+			continue
+		}
+		if bottom >= 0 && strings.HasPrefix(trimmed, "╭") && strings.HasSuffix(trimmed, "╮") {
+			top = i
+			break
+		}
+	}
+	if top < 0 || bottom <= top {
+		return nil
+	}
+	out := make([]string, 0, bottom-top-1)
+	for i := top + 1; i < bottom; i++ {
+		line := strings.TrimSpace(lines[i])
+		line = strings.TrimPrefix(line, "│")
+		line = strings.TrimSuffix(line, "│")
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
 }

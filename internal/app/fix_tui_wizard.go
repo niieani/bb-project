@@ -442,6 +442,11 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
+	if key.Matches(msg, m.keys.Help) {
+		m.help.ShowAll = !m.help.ShowAll
+		m.syncWizardViewport()
+		return m, nil
+	}
 	switch msg.String() {
 	case "tab":
 		m.wizardMoveFocus(1, true)
@@ -1005,7 +1010,7 @@ func (m *fixTUIModel) wizardHelpHeight() int {
 	if w := m.viewContentWidth(); w > 0 {
 		helpPanel = helpPanel.Width(w)
 	}
-	return lipgloss.Height(helpPanel.Render(m.help.View(m.contextualHelpMap())))
+	return lipgloss.Height(helpPanel.Render(m.footerHelpView(helpPanel)))
 }
 
 func longestANSIWidth(s string) int {

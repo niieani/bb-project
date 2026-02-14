@@ -112,6 +112,8 @@ Text input rule:
 - Order shortcuts by importance for the current context (primary action first, then navigation, then secondary actions).
 - Use compact key labels with symbols and lowercase text (`←/→`, `↑/↓`, `enter`, `esc`, `ctrl+a`).
 - Keep separator formatting consistent as ` • ` between shortcut entries.
+- In collapsed mode, footer help must render as exactly one line; if it overflows, truncate that same line and place `…` at the end (never wrap to a second line).
+- `?` must always toggle expanded/full footer help on every interactive screen/mode (including wizards and summaries).
 
 ## Components & Patterns
 
