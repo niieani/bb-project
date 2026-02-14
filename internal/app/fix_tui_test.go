@@ -1046,6 +1046,7 @@ func TestFixTUIWizardChangedFilesShowsAutoIgnoreBadgeForSuggestedPaths(t *testin
 			Risk: fixRiskSnapshot{
 				MissingRootGitignore:       true,
 				SuggestedGitignorePatterns: []string{"node_modules/"},
+				NoisyChangedPaths:          []string{"node_modules/pkg/index.js"},
 				ChangedFiles: []fixChangedFile{
 					{Path: "node_modules/pkg/index.js", Added: 12, Deleted: 3},
 					{Path: "src/main.go", Added: 1, Deleted: 1},
@@ -1065,6 +1066,68 @@ func TestFixTUIWizardChangedFilesShowsAutoIgnoreBadgeForSuggestedPaths(t *testin
 	normalLine := lineContaining(view, "src/main.go")
 	if strings.Contains(normalLine, "AUTO-IGNORE") {
 		t.Fatalf("did not expect AUTO-IGNORE badge for normal file, got line %q", normalLine)
+	}
+}
+
+func TestFixTUIWizardDoesNotShowGitignoreToggleWhenNoisyPatternsAlreadyCovered(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Risk: fixRiskSnapshot{
+				MissingRootGitignore:       false,
+				NoisyChangedPaths:          []string{"node_modules/pkg/index.js"},
+				SuggestedGitignorePatterns: []string{"node_modules/"},
+				MissingGitignorePatterns:   nil,
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	view := ansi.Strip(m.viewWizardContent())
+	if strings.Contains(view, "Generate .gitignore before commit") || strings.Contains(view, "Append to .gitignore before commit") {
+		t.Fatalf("expected no gitignore toggle when noisy paths are already covered, got %q", view)
+	}
+}
+
+func TestFixTUIWizardShowsAppendGitignoreToggleWhenEntriesMissing(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Risk: fixRiskSnapshot{
+				MissingRootGitignore:     false,
+				NoisyChangedPaths:        []string{"node_modules/pkg/index.js"},
+				MissingGitignorePatterns: []string{"node_modules/"},
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	view := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(view, "Append to .gitignore before commit") {
+		t.Fatalf("expected append-to-gitignore toggle, got %q", view)
+	}
+	if strings.Contains(view, "Only when root .gitignore is missing.") {
+		t.Fatalf("expected gitignore toggle subtext to be removed, got %q", view)
 	}
 }
 

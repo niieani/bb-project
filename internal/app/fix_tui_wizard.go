@@ -142,9 +142,7 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	projectNameInput.SetValue("")
 	projectNameInput.Blur()
 
-	showGitignoreToggle := (decision.Action == FixActionStageCommitPush || decision.Action == FixActionCreateProject) &&
-		repoRisk.MissingRootGitignore &&
-		len(repoRisk.SuggestedGitignorePatterns) > 0
+	showGitignoreToggle := m.shouldShowGitignoreToggle(decision.Action, repoRisk)
 
 	m.wizard.RepoPath = decision.RepoPath
 	m.wizard.RepoName = repoName
@@ -232,8 +230,11 @@ func (m *fixTUIModel) applyWizardCurrent() {
 		opts.CommitMessage = raw
 	}
 	if m.wizard.ShowGitignoreToggle && m.wizard.GenerateGitignore {
-		opts.GenerateGitignore = true
-		opts.GitignorePatterns = append([]string(nil), m.wizard.Risk.SuggestedGitignorePatterns...)
+		patterns := m.wizardGitignoreTogglePatterns()
+		if len(patterns) > 0 {
+			opts.GenerateGitignore = true
+			opts.GitignorePatterns = append([]string(nil), patterns...)
+		}
 	}
 	if m.wizard.Action == FixActionCreateProject &&
 		(m.wizard.Visibility == domain.VisibilityPrivate || m.wizard.Visibility == domain.VisibilityPublic) {
@@ -245,7 +246,11 @@ func (m *fixTUIModel) applyWizardCurrent() {
 	} else {
 		detail := ""
 		if opts.GenerateGitignore {
-			detail = "generated root .gitignore"
+			if m.wizard.Risk.MissingRootGitignore {
+				detail = "generated root .gitignore"
+			} else {
+				detail = "appended noisy patterns to root .gitignore"
+			}
 		}
 		m.appendSummaryResult(m.wizard.Action, "applied", detail)
 	}
@@ -298,6 +303,33 @@ func (m *fixTUIModel) wizardFocusOrder() []fixWizardFocusArea {
 	}
 	order = append(order, fixWizardFocusActions)
 	return order
+}
+
+func (m *fixTUIModel) shouldShowGitignoreToggle(action string, risk fixRiskSnapshot) bool {
+	if action != FixActionStageCommitPush && action != FixActionCreateProject {
+		return false
+	}
+	if len(risk.NoisyChangedPaths) == 0 {
+		return false
+	}
+	if risk.MissingRootGitignore {
+		return len(risk.SuggestedGitignorePatterns) > 0
+	}
+	return len(risk.MissingGitignorePatterns) > 0
+}
+
+func (m *fixTUIModel) wizardGitignoreTogglePatterns() []string {
+	if m.wizard.Risk.MissingRootGitignore {
+		return append([]string(nil), m.wizard.Risk.SuggestedGitignorePatterns...)
+	}
+	return append([]string(nil), m.wizard.Risk.MissingGitignorePatterns...)
+}
+
+func (m *fixTUIModel) wizardGitignoreToggleTitle() string {
+	if m.wizard.Risk.MissingRootGitignore {
+		return "Generate .gitignore before commit"
+	}
+	return "Append to .gitignore before commit"
 }
 
 func (m *fixTUIModel) wizardMoveFocus(delta int, wrap bool) bool {
@@ -608,8 +640,8 @@ func (m *fixTUIModel) viewWizardStaticControls() string {
 	if m.wizard.ShowGitignoreToggle {
 		controls = append(controls, renderToggleField(
 			m.wizard.FocusArea == fixWizardFocusGitignore,
-			"Generate .gitignore before commit",
-			"Only when root .gitignore is missing.",
+			m.wizardGitignoreToggleTitle(),
+			"",
 			m.wizard.GenerateGitignore,
 		))
 	}
@@ -708,17 +740,25 @@ func (m *fixTUIModel) viewWizardContextContent() string {
 			"",
 		))
 	}
-	if m.wizard.Risk.MissingRootGitignore && len(m.wizard.Risk.NoisyChangedPaths) > 0 {
+	if len(m.wizard.Risk.NoisyChangedPaths) > 0 {
 		detail := "Noisy paths were detected in uncommitted changes."
-		if m.wizard.ShowGitignoreToggle {
+		if m.wizard.ShowGitignoreToggle && m.wizard.Risk.MissingRootGitignore {
 			detail += " If you continue, bb can generate a root .gitignore before commit (see toggle below)."
-		} else {
+		} else if m.wizard.ShowGitignoreToggle {
+			detail += " If you continue, bb can append missing noisy-path patterns to root .gitignore (see toggle below)."
+		} else if m.wizard.Risk.MissingRootGitignore {
 			detail += " This step will not generate .gitignore."
+		} else {
+			detail += " Root .gitignore already includes entries for these paths."
 		}
 		b.WriteString("\n\n")
+		title := "Noisy uncommitted paths"
+		if m.wizard.Risk.MissingRootGitignore {
+			title = "Missing root .gitignore"
+		}
 		b.WriteString(renderFieldBlock(
 			false,
-			"Missing root .gitignore",
+			title,
 			detail,
 			strings.Join(m.wizard.Risk.NoisyChangedPaths, "\n"),
 			"",
@@ -935,7 +975,7 @@ func (m *fixTUIModel) renderChangedFilesList() string {
 	autoIgnoreBadge := autoIgnoreBadgeStyle.Render("AUTO-IGNORE")
 	suggestedPatterns := map[string]struct{}{}
 	if m.wizard.ShowGitignoreToggle && m.wizard.GenerateGitignore {
-		for _, pattern := range m.wizard.Risk.SuggestedGitignorePatterns {
+		for _, pattern := range m.wizardGitignoreTogglePatterns() {
 			pattern = strings.TrimSpace(pattern)
 			if pattern == "" {
 				continue

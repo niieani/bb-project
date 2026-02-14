@@ -23,6 +23,7 @@ type fixRiskSnapshot struct {
 	NoisyChangedPaths          []string
 	MissingRootGitignore       bool
 	SuggestedGitignorePatterns []string
+	MissingGitignorePatterns   []string
 }
 
 type fixEligibilityContext struct {
@@ -73,12 +74,15 @@ func collectFixRiskSnapshot(repoPath string, git gitx.Runner) (fixRiskSnapshot, 
 	sort.Strings(secret)
 	sort.Strings(noisy)
 
-	suggested := collectSuggestedGitignorePatterns(repoPath, changed)
+	noisyPatterns := collectNoisyGitignorePatterns(changed)
+	suggested := collectSuggestedGitignorePatterns(repoPath, noisyPatterns)
+	missingPatterns := collectMissingGitignorePatterns(repoPath, noisyPatterns)
 
 	out.ChangedFiles = changed
 	out.SecretLikeChangedPaths = dedupeStrings(secret)
 	out.NoisyChangedPaths = dedupeStrings(noisy)
 	out.SuggestedGitignorePatterns = suggested
+	out.MissingGitignorePatterns = missingPatterns
 	return out, nil
 }
 
@@ -248,12 +252,25 @@ func noisyPatternForPath(path string) string {
 	return ""
 }
 
-func collectSuggestedGitignorePatterns(repoPath string, changed []fixChangedFile) []string {
+func collectNoisyGitignorePatterns(changed []fixChangedFile) []string {
 	patternSet := map[string]struct{}{}
 	for _, file := range changed {
-		if p := noisyPatternForPath(file.Path); p != "" {
-			patternSet[p] = struct{}{}
+		if pattern := noisyPatternForPath(file.Path); pattern != "" {
+			patternSet[pattern] = struct{}{}
 		}
+	}
+	out := make([]string, 0, len(patternSet))
+	for pattern := range patternSet {
+		out = append(out, pattern)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func collectSuggestedGitignorePatterns(repoPath string, noisyPatterns []string) []string {
+	patternSet := map[string]struct{}{}
+	for _, pattern := range noisyPatterns {
+		patternSet[pattern] = struct{}{}
 	}
 
 	rootCandidates := map[string]string{
@@ -279,6 +296,61 @@ func collectSuggestedGitignorePatterns(repoPath string, changed []fixChangedFile
 	}
 	sort.Strings(out)
 	return out
+}
+
+func collectMissingGitignorePatterns(repoPath string, noisyPatterns []string) []string {
+	if len(noisyPatterns) == 0 {
+		return nil
+	}
+	gitignorePath := filepath.Join(repoPath, ".gitignore")
+	raw, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return append([]string(nil), noisyPatterns...)
+		}
+		return nil
+	}
+
+	present := parseRootGitignorePatterns(string(raw))
+	missing := make([]string, 0, len(noisyPatterns))
+	for _, pattern := range noisyPatterns {
+		if !gitignorePatternPresent(present, pattern) {
+			missing = append(missing, pattern)
+		}
+	}
+	return missing
+}
+
+func parseRootGitignorePatterns(raw string) map[string]struct{} {
+	patterns := map[string]struct{}{}
+	for _, line := range strings.Split(raw, "\n") {
+		entry := strings.TrimSpace(line)
+		if entry == "" || strings.HasPrefix(entry, "#") || strings.HasPrefix(entry, "!") {
+			continue
+		}
+		normalized := normalizeGitignorePattern(entry)
+		if normalized == "" {
+			continue
+		}
+		patterns[normalized] = struct{}{}
+	}
+	return patterns
+}
+
+func normalizeGitignorePattern(pattern string) string {
+	pattern = strings.TrimSpace(pattern)
+	pattern = strings.TrimPrefix(pattern, "./")
+	pattern = strings.TrimPrefix(pattern, "/")
+	pattern = strings.TrimSuffix(pattern, "/")
+	return pattern
+}
+
+func gitignorePatternPresent(existing map[string]struct{}, pattern string) bool {
+	if len(existing) == 0 {
+		return false
+	}
+	_, ok := existing[normalizeGitignorePattern(pattern)]
+	return ok
 }
 
 func dedupeStrings(in []string) []string {

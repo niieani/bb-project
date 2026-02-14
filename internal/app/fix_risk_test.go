@@ -107,6 +107,36 @@ func TestCollectFixRiskSnapshotKeepsFirstFilePathAndNumstat(t *testing.T) {
 	}
 }
 
+func TestCollectFixRiskSnapshotDetectsMissingGitignorePatternsForNoisyChanges(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	runner := gitx.Runner{}
+	if _, err := runner.RunGit(repo, "init", "-b", "main"); err != nil {
+		t.Fatalf("git init failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("dist/\n"), 0o644); err != nil {
+		t.Fatalf("write .gitignore failed: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "node_modules", "left-pad"), 0o755); err != nil {
+		t.Fatalf("mkdir noisy path failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "node_modules", "left-pad", "index.js"), []byte("module.exports=1\n"), 0o644); err != nil {
+		t.Fatalf("write noisy file failed: %v", err)
+	}
+
+	risk, err := collectFixRiskSnapshot(repo, runner)
+	if err != nil {
+		t.Fatalf("collectFixRiskSnapshot failed: %v", err)
+	}
+	if risk.MissingRootGitignore {
+		t.Fatal("expected root .gitignore to exist")
+	}
+	if !containsString(risk.MissingGitignorePatterns, "node_modules/") {
+		t.Fatalf("missing patterns = %v, want node_modules/", risk.MissingGitignorePatterns)
+	}
+}
+
 func TestWriteGeneratedGitignoreCreatesMinimalSortedFile(t *testing.T) {
 	t.Parallel()
 
@@ -150,6 +180,35 @@ func TestWriteGeneratedGitignoreDoesNotOverrideExistingFile(t *testing.T) {
 	}
 	if string(raw) != "custom\n" {
 		t.Fatalf("expected existing .gitignore to be preserved, got:\n%s", string(raw))
+	}
+}
+
+func TestWriteOrAppendGitignoreAppendsOnlyMissingPatterns(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	gitignorePath := filepath.Join(repo, ".gitignore")
+	if err := os.WriteFile(gitignorePath, []byte("dist/\n"), 0o644); err != nil {
+		t.Fatalf("seed .gitignore failed: %v", err)
+	}
+
+	if err := writeOrAppendGitignore(repo, []string{"dist/", "node_modules/"}); err != nil {
+		t.Fatalf("writeOrAppendGitignore failed: %v", err)
+	}
+
+	raw, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatalf("read .gitignore failed: %v", err)
+	}
+	got := string(raw)
+	if strings.Count(got, "dist/") != 1 {
+		t.Fatalf("expected existing dist pattern to remain single-entry, got:\n%s", got)
+	}
+	if !strings.Contains(got, "node_modules/") {
+		t.Fatalf("expected missing node_modules pattern to be appended, got:\n%s", got)
+	}
+	if !strings.Contains(got, "# Added by bb fix") {
+		t.Fatalf("expected append marker comment, got:\n%s", got)
 	}
 }
 
