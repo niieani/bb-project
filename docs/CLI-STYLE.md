@@ -135,14 +135,17 @@ Use a reusable field block for all form rows:
 - Avoid nested bordered containers for the same content region (for example list-inside-list-panel) because combined frame widths can trigger wrap artifacts (`─┘`, double-height rows).
 - For custom row delegates, reserve at least one wrap-guard column so rendered row width stays strictly below viewport width.
 - Keep tiering internal for sort/grouping; in the table itself communicate fixability via state wording and color, not a dedicated `Tier` column.
-- `autofixable` may be shown only when available fix actions cover all current unsyncable reasons; otherwise show manual/blocked.
-- Order rows by fixability tier: autofixable unsyncable first, unsyncable manual/blocked second, syncable last.
+- `fixable` may be shown only when available fix actions cover all current unsyncable reasons; otherwise show manual/blocked.
+- Order rows by fixability tier: fixable unsyncable first, unsyncable manual/blocked second, syncable last.
 - Action labels shown in UI must be human-readable (for example `Allow auto-push in sync`) rather than raw internal action IDs (for example `enable-auto-push`).
 - When multiple fix actions are available for a repo, include an explicit `All fixes` option in `Selected Fix`.
 - In selected-row details, always render a concise `Action help` line that explains what the currently selected fix action will do.
 - In selected-row details, avoid field-border glyphs (`│`) to prevent visual merging with table columns.
 - In selected-row details, render labels and values with distinct styles (for example accent label + higher-contrast value + muted path/context).
 - List height must be budgeted from full chrome (header, panel borders, details, footer help) so top panel borders are never clipped off-screen.
+- In confirmation wizards, place progress badges (for example `1/3`) on the same top row as the title and align them to the top-right edge.
+- Changed-files sections in fix wizards should render as explicit lists (one file per row), with colored `+`/`-` counters and a cap + indicator when rows are trimmed.
+- Prefer trimming with explicit `showing first N of M` messaging over overflowing content; never let long file lists collapse surrounding form controls.
 
 ## Interaction + Focus Standards
 
@@ -157,6 +160,7 @@ Use a reusable field block for all form rows:
 - Do not render per-step/per-panel key legends inside content; use only the global sticky footer legend.
 - In list views, `Enter` on a selected row opens contextual edit UI.
 - In button groups and action rows, `Left/Right` moves focus between adjacent actions.
+- When any text input is focused, alphabetic keys must be treated as text input only (never as command shortcuts like quit/navigation).
 
 ## Consistency Checklist
 

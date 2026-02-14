@@ -116,7 +116,10 @@ func newFixTUIModelForTest(repos []fixRepoState) *fixTUIModel {
 
 func actionForVisibleRepo(m *fixTUIModel, idx int) string {
 	repo := m.visible[idx]
-	actions := eligibleFixActions(repo.Record, repo.Meta)
+	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+		Interactive: true,
+		Risk:        repo.Risk,
+	})
 	return m.currentActionForRepo(repo.Record.Path, actions)
 }
 
@@ -251,6 +254,210 @@ func TestFixTUIApplyAllSkipsNoOpSelections(t *testing.T) {
 	}
 }
 
+func TestFixTUIRiskySelectionOpensConfirmationWizard(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	m.cycleCurrentAction(1) // push
+	m.applyCurrentSelection()
+
+	if m.viewMode != fixViewWizard {
+		t.Fatalf("view mode = %v, want wizard mode", m.viewMode)
+	}
+	if m.wizard.Action != FixActionPush {
+		t.Fatalf("wizard action = %q, want %q", m.wizard.Action, FixActionPush)
+	}
+}
+
+func TestFixTUIWizardSkipShowsSummary(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+	m.skipWizardCurrent()
+
+	if m.viewMode != fixViewSummary {
+		t.Fatalf("view mode = %v, want summary mode", m.viewMode)
+	}
+	if len(m.summaryResults) != 1 {
+		t.Fatalf("summary result count = %d, want 1", len(m.summaryResults))
+	}
+	if got := m.summaryResults[0].Status; got != "skipped" {
+		t.Fatalf("summary status = %q, want skipped", got)
+	}
+}
+
+func TestFixTUIWizardCommitInputStartsEmptyWithPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	if got := m.wizard.CommitMessage.Value(); got != "" {
+		t.Fatalf("wizard commit message initial value = %q, want empty", got)
+	}
+	if got := m.wizard.CommitMessage.Placeholder; got != DefaultFixCommitMessage {
+		t.Fatalf("wizard commit message placeholder = %q, want %q", got, DefaultFixCommitMessage)
+	}
+}
+
+func TestFixTUIWizardViewShowsActionButtons(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+
+	view := m.viewWizardContent()
+	if !strings.Contains(view, "Apply") || !strings.Contains(view, "Skip") || !strings.Contains(view, "Cancel") {
+		t.Fatalf("wizard view should render action buttons, got %q", view)
+	}
+}
+
+func TestFixTUIWizardInputAcceptsMappedLetters(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+
+	if got := m.wizard.CommitMessage.Value(); got != "hq" {
+		t.Fatalf("commit input value = %q, want %q", got, "hq")
+	}
+	if m.viewMode != fixViewWizard {
+		t.Fatalf("view mode = %v, want wizard (q should type, not quit)", m.viewMode)
+	}
+}
+
+func TestFixTUIWizardChangedFilesRenderAsListWithStats(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: true},
+			Risk: fixRiskSnapshot{
+				ChangedFiles: []fixChangedFile{
+					{Path: "src/main.go", Added: 12, Deleted: 5},
+				},
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+
+	view := m.viewWizardContent()
+	if !strings.Contains(view, "•") || !strings.Contains(view, "src/main.go") {
+		t.Fatalf("expected bullet list row for changed file, got %q", view)
+	}
+	if !strings.Contains(view, "+12") || !strings.Contains(view, "-5") {
+		t.Fatalf("expected +/- stats in changed file row, got %q", view)
+	}
+}
+
+func TestFixTUIWizardChangedFilesTrimIndicator(t *testing.T) {
+	t.Parallel()
+
+	files := make([]fixChangedFile, 0, 12)
+	for i := 0; i < 12; i++ {
+		files = append(files, fixChangedFile{Path: fmt.Sprintf("src/file-%02d.go", i), Added: i + 1, Deleted: i})
+	}
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: true},
+			Risk: fixRiskSnapshot{
+				ChangedFiles: files,
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+
+	view := m.viewWizardContent()
+	if !strings.Contains(view, "showing first 10 of 12") {
+		t.Fatalf("expected trim indicator in changed file list, got %q", view)
+	}
+}
+
 func TestFixTUIRowsRenderWithoutReplacementRuneAndWithoutDoubleSpacing(t *testing.T) {
 	t.Parallel()
 
@@ -370,7 +577,7 @@ func TestFixTUIOrdersReposByTier(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 
 	if got := m.visible[0].Record.Name; got != "mmm-auto" {
-		t.Fatalf("first row = %q, want autofixable repo first", got)
+		t.Fatalf("first row = %q, want fixable repo first", got)
 	}
 	if got := m.visible[1].Record.Name; got != "aaa-blocked" {
 		t.Fatalf("second row = %q, want unsyncable blocked repo second", got)
@@ -565,7 +772,10 @@ func TestClassifyFixRepoRequiresFullReasonCoverage(t *testing.T) {
 		},
 		Meta: &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: false},
 	}
-	actions := eligibleFixActions(repo.Record, repo.Meta)
+	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+		Interactive: true,
+		Risk:        repo.Risk,
+	})
 
 	if got := classifyFixRepo(repo, actions); got != fixRepoTierUnsyncableBlocked {
 		t.Fatalf("tier = %v, want unsyncable blocked when not all reasons are coverable", got)

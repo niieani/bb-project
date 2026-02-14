@@ -65,6 +65,50 @@ func TestFixCases(t *testing.T) {
 		}
 	})
 
+	t.Run("stage commit push blocked when uncommitted .env exists", func(t *testing.T) {
+		_, m, catalogRoot := setupSingleMachine(t)
+		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+
+		m.MustWriteFile(filepath.Join(repoPath, ".env"), "TOKEN=secret\n")
+		out, err := m.RunBB(now.Add(1*time.Minute), "fix", "demo")
+		if err == nil {
+			t.Fatalf("expected fix list mode to report unsyncable state, output=%s", out)
+		}
+		if strings.Contains(out, "stage-commit-push") {
+			t.Fatalf("did not expect stage-commit-push action while .env is uncommitted, got: %s", out)
+		}
+
+		out, err = m.RunBB(now.Add(2*time.Minute), "fix", "demo", "stage-commit-push")
+		if err == nil {
+			t.Fatalf("expected stage-commit-push to be blocked when .env is uncommitted, output=%s", out)
+		}
+		if !strings.Contains(out, "secret-like") {
+			t.Fatalf("expected secret-like block reason, got: %s", out)
+		}
+	})
+
+	t.Run("non-interactive stage commit push blocked for node_modules when root gitignore missing", func(t *testing.T) {
+		_, m, catalogRoot := setupSingleMachine(t)
+		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+
+		m.MustWriteFile(filepath.Join(repoPath, "node_modules", "left-pad", "index.js"), "module.exports = 1\n")
+		out, err := m.RunBB(now.Add(1*time.Minute), "fix", "demo")
+		if err == nil {
+			t.Fatalf("expected fix list mode to report unsyncable state, output=%s", out)
+		}
+		if strings.Contains(out, "stage-commit-push") {
+			t.Fatalf("did not expect stage-commit-push when .gitignore is missing and node_modules is dirty, got: %s", out)
+		}
+
+		out, err = m.RunBB(now.Add(2*time.Minute), "fix", "demo", "stage-commit-push")
+		if err == nil {
+			t.Fatalf("expected stage-commit-push to be blocked for noisy paths without .gitignore, output=%s", out)
+		}
+		if !strings.Contains(out, ".gitignore") {
+			t.Fatalf("expected .gitignore guidance in output, got: %s", out)
+		}
+	})
+
 	t.Run("set upstream push", func(t *testing.T) {
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)

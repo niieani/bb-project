@@ -158,6 +158,12 @@ Forms:
 - `bb fix <project>` prints repo state and currently eligible fixes.
 - `bb fix <project> <action>` applies one action and re-observes state.
 
+Interactive apply behavior:
+
+- Risky fixes (`push`, `set-upstream-push`, `stage-commit-push`, `create-project`) open a confirmation wizard before execution.
+- Wizard shows changed files with `+/-` stats, target branch context, and a per-repo skip option.
+- For `stage-commit-push`, wizard includes commit message input and can generate a minimal root `.gitignore` when missing.
+
 Selector resolution for `<project>`:
 
 - exact local path
@@ -179,6 +185,11 @@ Actions:
 - `enable-auto-push`
 - `abort-operation`
 - `ignore` (interactive mode only, session-only)
+
+Safety gating:
+
+- `stage-commit-push` is blocked when secret-like uncommitted files are detected (for example `.env`).
+- In non-interactive flow, `stage-commit-push` is also blocked when root `.gitignore` is missing and noisy uncommitted paths are detected (for example `node_modules`).
 
 ### `bb repo policy <repo> --auto-push=<true|false>`
 

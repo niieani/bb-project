@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -21,7 +22,7 @@ const (
 	FixActionSetUpstreamPush = "set-upstream-push"
 	FixActionEnableAutoPush  = "enable-auto-push"
 
-	AutoFixCommitMessage = "bb: checkpoint local changes before sync"
+	DefaultFixCommitMessage = "bb: checkpoint local changes before sync"
 )
 
 var errFixActionNotEligible = errors.New("fix action not eligible")
@@ -29,6 +30,34 @@ var errFixActionNotEligible = errors.New("fix action not eligible")
 type fixRepoState struct {
 	Record domain.MachineRepoRecord
 	Meta   *domain.RepoMetadataFile
+	Risk   fixRiskSnapshot
+}
+
+type fixApplyOptions struct {
+	Interactive             bool
+	CommitMessage           string
+	CreateProjectVisibility domain.Visibility
+	GenerateGitignore       bool
+	GitignorePatterns       []string
+}
+
+type fixIneligibleError struct {
+	Action string
+	Reason string
+}
+
+func (e *fixIneligibleError) Error() string {
+	if e == nil {
+		return errFixActionNotEligible.Error()
+	}
+	if strings.TrimSpace(e.Reason) == "" {
+		return errFixActionNotEligible.Error()
+	}
+	return fmt.Sprintf("%s: %s", errFixActionNotEligible.Error(), e.Reason)
+}
+
+func (e *fixIneligibleError) Unwrap() error {
+	return errFixActionNotEligible
 }
 
 func (a *App) runFix(opts FixOptions) (int, error) {
@@ -49,7 +78,8 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 		return 2, err
 	}
 
-	eligible := eligibleFixActions(target.Record, target.Meta)
+	eligibility := fixEligibilityContext{Interactive: false, Risk: target.Risk}
+	eligible := eligibleFixActions(target.Record, target.Meta, eligibility)
 	if strings.TrimSpace(opts.Action) == "" {
 		a.renderFixStatus(target.Record, eligible)
 		if target.Record.Syncable {
@@ -66,11 +96,21 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 	if !containsAction(eligible, action) {
 		a.renderFixStatus(target.Record, eligible)
 		fmt.Fprintf(a.Stdout, "action %q is not eligible for %s\n", action, target.Record.Name)
+		if reason := ineligibleFixReason(action, eligibility); reason != "" {
+			fmt.Fprintln(a.Stdout, reason)
+		}
 		return 1, nil
 	}
 
-	updated, err := a.applyFixAction(opts.IncludeCatalogs, target.Record.Path, action, opts.CommitMessage)
+	updated, err := a.applyFixAction(opts.IncludeCatalogs, target.Record.Path, action, fixApplyOptions{
+		Interactive:   false,
+		CommitMessage: opts.CommitMessage,
+	})
 	if errors.Is(err, errFixActionNotEligible) {
+		var ineligibleErr *fixIneligibleError
+		if errors.As(err, &ineligibleErr) && strings.TrimSpace(ineligibleErr.Reason) != "" {
+			fmt.Fprintln(a.Stdout, ineligibleErr.Reason)
+		}
 		return 1, nil
 	}
 	if err != nil {
@@ -78,7 +118,10 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 	}
 
 	fmt.Fprintf(a.Stdout, "applied %s to %s\n", action, updated.Record.Name)
-	a.renderFixStatus(updated.Record, eligibleFixActions(updated.Record, updated.Meta))
+	a.renderFixStatus(updated.Record, eligibleFixActions(updated.Record, updated.Meta, fixEligibilityContext{
+		Interactive: false,
+		Risk:        updated.Risk,
+	}))
 	if updated.Record.Syncable {
 		return 0, nil
 	}
@@ -116,7 +159,7 @@ func containsAction(actions []string, action string) bool {
 	return false
 }
 
-func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataFile) []string {
+func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataFile, ctx fixEligibilityContext) []string {
 	if rec.OperationInProgress != domain.OperationNone && rec.OperationInProgress != "" {
 		return []string{FixActionAbortOperation}
 	}
@@ -128,7 +171,9 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	if rec.OriginURL != "" && rec.Upstream != "" && rec.Ahead > 0 && !rec.Diverged {
 		actions = append(actions, FixActionPush)
 	}
-	if rec.OriginURL != "" && (rec.HasDirtyTracked || rec.HasUntracked) && !rec.Diverged {
+	if rec.OriginURL != "" && (rec.HasDirtyTracked || rec.HasUntracked) && !rec.Diverged &&
+		!ctx.Risk.hasSecretLikeChanges() &&
+		!(ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive) {
 		actions = append(actions, FixActionStageCommitPush)
 	}
 	if rec.Upstream != "" && rec.Behind > 0 && rec.Ahead == 0 && !rec.Diverged && !rec.HasDirtyTracked && !rec.HasUntracked {
@@ -141,6 +186,22 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 		actions = append(actions, FixActionEnableAutoPush)
 	}
 	return actions
+}
+
+func ineligibleFixReason(action string, ctx fixEligibilityContext) string {
+	if action != FixActionStageCommitPush {
+		return ""
+	}
+	if ctx.Risk.hasSecretLikeChanges() {
+		return fmt.Sprintf(
+			"stage-commit-push is blocked: secret-like uncommitted files detected (%s)",
+			strings.Join(ctx.Risk.SecretLikeChangedPaths, ", "),
+		)
+	}
+	if ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive {
+		return "stage-commit-push is blocked: root .gitignore is missing and noisy uncommitted paths were detected; run interactive `bb fix` to review/generate .gitignore or add it manually"
+	}
+	return ""
 }
 
 func resolveFixTarget(selector string, repos []fixRepoState) (fixRepoState, error) {
@@ -221,9 +282,14 @@ func (a *App) loadFixRepos(includeCatalogs []string, refresh bool) ([]fixRepoSta
 
 	out := make([]fixRepoState, 0, len(machine.Repos))
 	for _, rec := range machine.Repos {
+		risk, riskErr := collectFixRiskSnapshot(rec.Path, a.Git)
+		if riskErr != nil && !errors.Is(riskErr, os.ErrNotExist) {
+			a.logf("fix: risk scan failed for %s: %v", rec.Path, riskErr)
+		}
 		out = append(out, fixRepoState{
 			Record: rec,
 			Meta:   metaByRepoID[rec.RepoID],
+			Risk:   risk,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -239,7 +305,7 @@ func (a *App) loadFixRepos(includeCatalogs []string, refresh bool) ([]fixRepoSta
 	return out, nil
 }
 
-func (a *App) applyFixAction(includeCatalogs []string, repoPath string, action string, commitMessage string) (fixRepoState, error) {
+func (a *App) applyFixAction(includeCatalogs []string, repoPath string, action string, opts fixApplyOptions) (fixRepoState, error) {
 	a.logf("fix: acquiring global lock for action %s", action)
 	lock, err := state.AcquireLock(a.Paths)
 	if err != nil {
@@ -266,12 +332,19 @@ func (a *App) applyFixAction(includeCatalogs []string, repoPath string, action s
 	if err != nil {
 		return fixRepoState{}, err
 	}
-	eligible := eligibleFixActions(target.Record, target.Meta)
+	eligibility := fixEligibilityContext{
+		Interactive: opts.Interactive,
+		Risk:        target.Risk,
+	}
+	eligible := eligibleFixActions(target.Record, target.Meta, eligibility)
 	if !containsAction(eligible, action) {
-		return target, errFixActionNotEligible
+		return target, &fixIneligibleError{
+			Action: action,
+			Reason: ineligibleFixReason(action, eligibility),
+		}
 	}
 
-	if err := a.executeFixAction(cfg, target, action, commitMessage); err != nil {
+	if err := a.executeFixAction(cfg, target, action, opts); err != nil {
 		return fixRepoState{}, err
 	}
 	if _, err := a.scanAndPublish(cfg, &machine, ScanOptions{IncludeCatalogs: includeCatalogs, AllowPush: false}); err != nil {
@@ -297,15 +370,20 @@ func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, 
 
 	out := make([]fixRepoState, 0, len(machine.Repos))
 	for _, rec := range machine.Repos {
+		risk, riskErr := collectFixRiskSnapshot(rec.Path, a.Git)
+		if riskErr != nil && !errors.Is(riskErr, os.ErrNotExist) {
+			a.logf("fix: risk scan failed for %s: %v", rec.Path, riskErr)
+		}
 		out = append(out, fixRepoState{
 			Record: rec,
 			Meta:   metaByRepoID[rec.RepoID],
+			Risk:   risk,
 		})
 	}
 	return out, nil
 }
 
-func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, action string, commitMessage string) error {
+func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, action string, opts fixApplyOptions) error {
 	path := target.Record.Path
 	preferredRemote := ""
 	if target.Meta != nil {
@@ -328,11 +406,16 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 	case FixActionPush:
 		return a.Git.Push(path)
 	case FixActionCreateProject:
-		return a.createProjectFromFix(cfg, target)
+		return a.createProjectFromFix(cfg, target, opts.CreateProjectVisibility)
 	case FixActionStageCommitPush:
-		msg := strings.TrimSpace(commitMessage)
+		if opts.GenerateGitignore && len(opts.GitignorePatterns) > 0 {
+			if err := writeGeneratedGitignore(path, opts.GitignorePatterns); err != nil {
+				return err
+			}
+		}
+		msg := strings.TrimSpace(opts.CommitMessage)
 		if msg == "" || msg == "auto" {
-			msg = AutoFixCommitMessage
+			msg = DefaultFixCommitMessage
 		}
 		if err := a.Git.AddAll(path); err != nil {
 			return err
@@ -382,7 +465,7 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 	}
 }
 
-func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState) error {
+func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, visibilityOverride domain.Visibility) error {
 	owner := strings.TrimSpace(cfg.GitHub.Owner)
 	if owner == "" {
 		return errors.New("github.owner is required; run 'bb config' and set github.owner")
@@ -399,7 +482,7 @@ func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState) e
 		return errors.New("project name is required for create-project")
 	}
 
-	visibility := domain.VisibilityPrivate
+	visibility := resolveCreateProjectVisibility(cfg, visibilityOverride)
 	expectedOrigin, expectedRepoID, err := a.expectedOrigin(owner, projectName, cfg.GitHub.RemoteProtocol)
 	if err != nil {
 		return err
@@ -450,4 +533,48 @@ func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState) e
 	}
 
 	return nil
+}
+
+func resolveCreateProjectVisibility(cfg domain.ConfigFile, override domain.Visibility) domain.Visibility {
+	if override == domain.VisibilityPrivate || override == domain.VisibilityPublic {
+		return override
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.GitHub.DefaultVisibility)) {
+	case string(domain.VisibilityPublic):
+		return domain.VisibilityPublic
+	default:
+		return domain.VisibilityPrivate
+	}
+}
+
+func writeGeneratedGitignore(repoPath string, patterns []string) error {
+	if len(patterns) == 0 {
+		return nil
+	}
+	gitignorePath := filepath.Join(repoPath, ".gitignore")
+	if _, err := os.Stat(gitignorePath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	cleaned := make([]string, 0, len(patterns))
+	seen := map[string]struct{}{}
+	for _, raw := range patterns {
+		pattern := strings.TrimSpace(raw)
+		if pattern == "" {
+			continue
+		}
+		if _, ok := seen[pattern]; ok {
+			continue
+		}
+		seen[pattern] = struct{}{}
+		cleaned = append(cleaned, pattern)
+	}
+	if len(cleaned) == 0 {
+		return nil
+	}
+	sort.Strings(cleaned)
+	content := "# Generated by bb fix\n" + strings.Join(cleaned, "\n") + "\n"
+	return os.WriteFile(gitignorePath, []byte(content), 0o644)
 }

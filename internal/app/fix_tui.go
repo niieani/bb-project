@@ -12,7 +12,6 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -24,6 +23,7 @@ type fixTUIKeyMap struct {
 	Left     key.Binding
 	Right    key.Binding
 	Apply    key.Binding
+	Skip     key.Binding
 	ApplyAll key.Binding
 	Refresh  key.Binding
 	Ignore   key.Binding
@@ -54,6 +54,10 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 		Apply: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "apply selected fix"),
+		),
+		Skip: key.NewBinding(
+			key.WithKeys("ctrl+x"),
+			key.WithHelp("ctrl+x", "skip in wizard"),
 		),
 		ApplyAll: key.NewBinding(
 			key.WithKeys("ctrl+a"),
@@ -87,13 +91,13 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 }
 
 func (k fixTUIKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Left, k.Apply, k.ApplyAll, k.Refresh, k.Quit}
+	return []key.Binding{k.Up, k.Left, k.Apply, k.Skip, k.ApplyAll, k.Quit}
 }
 
 func (k fixTUIKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right},
-		{k.Apply, k.ApplyAll, k.Refresh, k.Ignore, k.Unignore},
+		{k.Apply, k.Skip, k.ApplyAll, k.Refresh, k.Ignore, k.Unignore},
 		{k.Help, k.Cancel, k.Quit},
 	}
 }
@@ -117,9 +121,10 @@ type fixTUIModel struct {
 	status  string
 	errText string
 
-	messagePrompt bool
-	messageInput  textinput.Model
-	pendingPath   string
+	viewMode fixViewMode
+	wizard   fixWizardState
+
+	summaryResults []fixSummaryResult
 }
 
 type fixListItem struct {
@@ -373,15 +378,18 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resizeRepoList()
 		return m, nil
 	case tea.KeyMsg:
+		if m.viewMode == fixViewWizard {
+			return m.updateWizard(msg)
+		}
+		if m.viewMode == fixViewSummary {
+			return m.updateSummary(msg)
+		}
 		if key.Matches(msg, m.keys.Quit) {
 			return m, tea.Quit
 		}
 		if key.Matches(msg, m.keys.Help) {
 			m.help.ShowAll = !m.help.ShowAll
 			return m, nil
-		}
-		if m.messagePrompt {
-			return m.updateMessagePrompt(msg)
 		}
 		switch {
 		case key.Matches(msg, m.keys.Left):
@@ -433,7 +441,14 @@ func (m *fixTUIModel) View() string {
 	if w := m.viewContentWidth(); w > 0 {
 		contentPanel = contentPanel.Width(w)
 	}
-	b.WriteString(contentPanel.Render(m.viewMainContent()))
+	content := m.viewMainContent()
+	switch m.viewMode {
+	case fixViewWizard:
+		content = m.viewWizardContent()
+	case fixViewSummary:
+		content = m.viewSummaryContent()
+	}
+	b.WriteString(contentPanel.Render(content))
 
 	if m.status != "" {
 		b.WriteString("\n")
@@ -475,7 +490,7 @@ func (m *fixTUIModel) viewMainContent() string {
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Select per-repo fixes. Default selection is '-' (no action)."))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("List order: autofixable unsyncable, unsyncable manual, then syncable."))
+	b.WriteString(hintStyle.Render("List order: fixable unsyncable, unsyncable manual, then syncable."))
 	b.WriteString("\n\n")
 	b.WriteString(m.viewFixSummary())
 	b.WriteString("\n\n")
@@ -492,16 +507,6 @@ func (m *fixTUIModel) viewMainContent() string {
 		}
 	}
 
-	if m.messagePrompt {
-		b.WriteString("\n\n")
-		b.WriteString(renderFieldBlock(
-			true,
-			"Commit message",
-			"Used for stage-commit-push. Leave default value to auto-generate.",
-			renderInputContainer(m.messageInput.View(), true),
-			"",
-		))
-	}
 	return b.String()
 }
 
@@ -543,7 +548,10 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	if !ok {
 		return ""
 	}
-	actions := eligibleFixActions(repo.Record, repo.Meta)
+	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+		Interactive: true,
+		Risk:        repo.Risk,
+	})
 	action := m.currentActionForRepo(repo.Record.Path, actions)
 	actionLabelValue := fixActionLabel(action)
 
@@ -562,7 +570,7 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	tier := classifyFixRepo(repo, actions)
 	switch tier {
 	case fixRepoTierAutofixable:
-		state = "unsyncable (autofixable)"
+		state = "unsyncable (fixable)"
 		stateStyle = fixStateAutofixableStyle
 	case fixRepoTierUnsyncableBlocked:
 		state = "unsyncable (manual)"
@@ -604,17 +612,20 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 func (m *fixTUIModel) viewFixSummary() string {
 	total := len(m.visible)
 	pending := 0
-	autofixable := 0
+	fixable := 0
 	blocked := 0
 	syncable := 0
 	for _, repo := range m.visible {
 		if m.selectedAction[repo.Record.Path] >= 0 {
 			pending++
 		}
-		tier := classifyFixRepo(repo, eligibleFixActions(repo.Record, repo.Meta))
+		tier := classifyFixRepo(repo, eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+			Interactive: true,
+			Risk:        repo.Risk,
+		}))
 		switch tier {
 		case fixRepoTierAutofixable:
-			autofixable++
+			fixable++
 		case fixRepoTierUnsyncableBlocked:
 			blocked++
 		case fixRepoTierSyncable:
@@ -623,7 +634,7 @@ func (m *fixTUIModel) viewFixSummary() string {
 	}
 	totalStyle := renderStatusPill(fmt.Sprintf("%d repos", total))
 	pendingStyle := renderStatusPill(fmt.Sprintf("%d selected", pending))
-	autoStyle := renderFixSummaryPill(fmt.Sprintf("%d autofixable", autofixable), lipgloss.Color("214"))
+	autoStyle := renderFixSummaryPill(fmt.Sprintf("%d fixable", fixable), lipgloss.Color("214"))
 	blockedStyle := renderFixSummaryPill(fmt.Sprintf("%d unsyncable manual", blocked), errorFgColor)
 	syncStyle := renderFixSummaryPill(fmt.Sprintf("%d syncable", syncable), successColor)
 	return lipgloss.JoinHorizontal(lipgloss.Top, totalStyle, " ", pendingStyle, "  ", autoStyle, " ", blockedStyle, " ", syncStyle)
@@ -662,16 +673,6 @@ func (m *fixTUIModel) resizeRepoList() {
 	if m.errText != "" {
 		reserved++
 	}
-	if m.messagePrompt {
-		prompt := renderFieldBlock(
-			true,
-			"Commit message",
-			"Used for stage-commit-push. Leave default value to auto-generate.",
-			renderInputContainer(m.messageInput.View(), true),
-			"",
-		)
-		reserved += 2 + lipgloss.Height(prompt)
-	}
 	height := m.height - reserved
 	if height < 6 {
 		height = 6
@@ -685,41 +686,6 @@ func (m *fixTUIModel) resizeRepoList() {
 		listWidth = 52
 	}
 	m.repoList.SetSize(listWidth, height)
-}
-
-func (m *fixTUIModel) updateMessagePrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.Matches(msg, m.keys.Cancel) {
-		m.messagePrompt = false
-		m.pendingPath = ""
-		m.status = "stage-commit-push cancelled"
-		m.errText = ""
-		m.resizeRepoList()
-		return m, nil
-	}
-	if key.Matches(msg, m.keys.Apply) {
-		raw := strings.TrimSpace(m.messageInput.Value())
-		commitMessage := raw
-		if raw == "" || raw == AutoFixCommitMessage {
-			commitMessage = "auto"
-		}
-		if _, err := m.app.applyFixAction(m.includeCatalogs, m.pendingPath, FixActionStageCommitPush, commitMessage); err != nil {
-			m.errText = err.Error()
-		} else {
-			m.status = fmt.Sprintf("applied %s", FixActionStageCommitPush)
-			m.errText = ""
-		}
-		m.messagePrompt = false
-		m.pendingPath = ""
-		if err := m.refreshRepos(true); err != nil {
-			m.errText = err.Error()
-		}
-		m.resizeRepoList()
-		return m, nil
-	}
-
-	var cmd tea.Cmd
-	m.messageInput, cmd = m.messageInput.Update(msg)
-	return m, cmd
 }
 
 func (m *fixTUIModel) refreshRepos(refresh bool) error {
@@ -755,7 +721,10 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			continue
 		}
 
-		actions := eligibleFixActions(repo.Record, repo.Meta)
+		actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+			Interactive: true,
+			Risk:        repo.Risk,
+		})
 		options := selectableFixActions(actions)
 		if idx, ok := m.selectedAction[path]; !ok || idx < -1 || idx >= len(options) {
 			m.selectedAction[path] = -1
@@ -794,7 +763,7 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 		state := "syncable"
 		switch entry.tier {
 		case fixRepoTierAutofixable:
-			state = "unsyncable (autofixable)"
+			state = "unsyncable (fixable)"
 		case fixRepoTierUnsyncableBlocked:
 			state = "unsyncable (manual)"
 		}
@@ -861,7 +830,10 @@ func (m *fixTUIModel) cycleCurrentAction(delta int) {
 	if !ok {
 		return
 	}
-	actions := eligibleFixActions(repo.Record, repo.Meta)
+	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+		Interactive: true,
+		Risk:        repo.Risk,
+	})
 	options := selectableFixActions(actions)
 	key := repo.Record.Path
 	optionCount := len(options) + 1 // include "-" no-op option
@@ -886,7 +858,10 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		m.status = "no repository selected"
 		return
 	}
-	actions := eligibleFixActions(repo.Record, repo.Meta)
+	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+		Interactive: true,
+		Risk:        repo.Risk,
+	})
 	options := selectableFixActions(actions)
 	idx := m.selectedAction[repo.Record.Path]
 	if idx < 0 {
@@ -900,44 +875,58 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		return
 	}
 	action := options[idx]
+	m.summaryResults = nil
 
+	queue := make([]fixWizardDecision, 0, 2)
+	selections := []string{action}
 	if action == fixAllActions {
-		applied, skipped, err := m.applyRepoActions(repo.Record.Path, actions, "auto")
-		if err != nil {
+		selections = actions
+	}
+
+	applied := 0
+	failed := 0
+	for _, selection := range selections {
+		if isRiskyFixAction(selection) {
+			queue = append(queue, fixWizardDecision{
+				RepoPath: repo.Record.Path,
+				Action:   selection,
+			})
+			continue
+		}
+		if err := m.applyImmediateAction(repo, selection); err != nil {
+			m.summaryResults = append(m.summaryResults, fixSummaryResult{
+				RepoName: repo.Record.Name,
+				Action:   fixActionLabel(selection),
+				Status:   "failed",
+				Detail:   err.Error(),
+			})
+			failed++
+			continue
+		}
+		m.summaryResults = append(m.summaryResults, fixSummaryResult{
+			RepoName: repo.Record.Name,
+			Action:   fixActionLabel(selection),
+			Status:   "applied",
+		})
+		applied++
+	}
+
+	if len(queue) > 0 {
+		m.startWizardQueue(queue)
+		return
+	}
+	if m.app != nil && applied > 0 {
+		if err := m.refreshRepos(true); err != nil {
 			m.errText = err.Error()
 			return
 		}
-		m.status = fmt.Sprintf("applied %d fix(es) to %s, skipped %d", applied, repo.Record.Name, skipped)
+	}
+	if failed > 0 {
+		m.errText = "one or more fixes failed"
+	} else {
 		m.errText = ""
-		if err := m.refreshRepos(true); err != nil {
-			m.errText = err.Error()
-		}
-		return
 	}
-
-	if action == FixActionStageCommitPush {
-		ti := textinput.New()
-		ti.Placeholder = "commit message"
-		ti.SetValue(AutoFixCommitMessage)
-		ti.Focus()
-		m.messagePrompt = true
-		m.messageInput = ti
-		m.pendingPath = repo.Record.Path
-		m.status = ""
-		m.errText = ""
-		m.resizeRepoList()
-		return
-	}
-
-	if _, err := m.app.applyFixAction(m.includeCatalogs, repo.Record.Path, action, ""); err != nil {
-		m.errText = err.Error()
-		return
-	}
-	m.status = fmt.Sprintf("applied %s to %s", fixActionLabel(action), repo.Record.Name)
-	m.errText = ""
-	if err := m.refreshRepos(true); err != nil {
-		m.errText = err.Error()
-	}
+	m.status = fmt.Sprintf("applied %d, skipped %d, failed %d", applied, 0, failed)
 }
 
 func (m *fixTUIModel) applyAllSelections() {
@@ -946,12 +935,17 @@ func (m *fixTUIModel) applyAllSelections() {
 		return
 	}
 
+	m.summaryResults = nil
 	applied := 0
 	skipped := 0
 	failures := make([]string, 0, 3)
+	queue := make([]fixWizardDecision, 0, 8)
 
 	for _, repo := range m.visible {
-		actions := eligibleFixActions(repo.Record, repo.Meta)
+		actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+			Interactive: true,
+			Risk:        repo.Risk,
+		})
 		options := selectableFixActions(actions)
 		idx := m.selectedAction[repo.Record.Path]
 		if idx < 0 {
@@ -965,23 +959,33 @@ func (m *fixTUIModel) applyAllSelections() {
 		}
 
 		selection := options[idx]
-		switch selection {
-		case fixAllActions:
-			repoApplied, _, err := m.applyRepoActions(repo.Record.Path, actions, "auto")
-			if err != nil {
-				failures = append(failures, fmt.Sprintf("%s (%s)", repo.Record.Name, fixActionLabel(selection)))
+		selections := []string{selection}
+		if selection == fixAllActions {
+			selections = actions
+		}
+		for _, selected := range selections {
+			if isRiskyFixAction(selected) {
+				queue = append(queue, fixWizardDecision{
+					RepoPath: repo.Record.Path,
+					Action:   selected,
+				})
 				continue
 			}
-			applied += repoApplied
-		default:
-			commitMessage := ""
-			if selection == FixActionStageCommitPush {
-				commitMessage = "auto"
-			}
-			if _, err := m.app.applyFixAction(m.includeCatalogs, repo.Record.Path, selection, commitMessage); err != nil {
-				failures = append(failures, fmt.Sprintf("%s (%s)", repo.Record.Name, fixActionLabel(selection)))
+			if err := m.applyImmediateAction(repo, selected); err != nil {
+				failures = append(failures, fmt.Sprintf("%s (%s)", repo.Record.Name, fixActionLabel(selected)))
+				m.summaryResults = append(m.summaryResults, fixSummaryResult{
+					RepoName: repo.Record.Name,
+					Action:   fixActionLabel(selected),
+					Status:   "failed",
+					Detail:   err.Error(),
+				})
 				continue
 			}
+			m.summaryResults = append(m.summaryResults, fixSummaryResult{
+				RepoName: repo.Record.Name,
+				Action:   fixActionLabel(selected),
+				Status:   "applied",
+			})
 			applied++
 		}
 	}
@@ -1001,7 +1005,21 @@ func (m *fixTUIModel) applyAllSelections() {
 	} else {
 		m.errText = ""
 	}
+	if len(queue) > 0 {
+		m.startWizardQueue(queue)
+		return
+	}
 	m.status = fmt.Sprintf("applied %d, skipped %d, failed %d", applied, skipped, len(failures))
+}
+
+func (m *fixTUIModel) applyImmediateAction(repo fixRepoState, action string) error {
+	if m.app == nil {
+		return errors.New("internal: app is not configured")
+	}
+	_, err := m.app.applyFixAction(m.includeCatalogs, repo.Record.Path, action, fixApplyOptions{
+		Interactive: true,
+	})
+	return err
 }
 
 func (m *fixTUIModel) ignoreCurrentRepo() {
@@ -1047,29 +1065,6 @@ func selectableFixActions(actions []string) []string {
 	out = append(out, actions...)
 	out = append(out, fixAllActions)
 	return out
-}
-
-func (m *fixTUIModel) applyRepoActions(path string, actions []string, stageCommitMessage string) (int, int, error) {
-	if m.app == nil {
-		return 0, 0, errors.New("internal: app is not configured")
-	}
-	applied := 0
-	skipped := 0
-	for _, action := range actions {
-		commitMessage := ""
-		if action == FixActionStageCommitPush {
-			commitMessage = stageCommitMessage
-		}
-		if _, err := m.app.applyFixAction(m.includeCatalogs, path, action, commitMessage); err != nil {
-			if errors.Is(err, errFixActionNotEligible) {
-				skipped++
-				continue
-			}
-			return applied, skipped, err
-		}
-		applied++
-	}
-	return applied, skipped, nil
 }
 
 func fixListColumnsForWidth(listWidth int) fixColumnLayout {
