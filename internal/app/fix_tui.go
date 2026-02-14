@@ -1556,7 +1556,7 @@ func fixActionDescription(action string) string {
 	case FixActionPush:
 		return "Push local commits that are ahead of upstream."
 	case FixActionStageCommitPush:
-		return "Stage all local changes, create a commit, then push."
+		return "Stage all local changes and create a commit; push when a remote target is configured."
 	case FixActionPullFFOnly:
 		return "Fast-forward your branch to upstream without creating a merge commit."
 	case FixActionSetUpstreamPush:

@@ -69,6 +69,18 @@ func TestEligibleFixActions(t *testing.T) {
 			actions: []string{FixActionCreateProject},
 		},
 		{
+			name: "missing origin with dirty worktree allows create project and stage commit",
+			rec: func() domain.MachineRepoRecord {
+				r := base
+				r.OriginURL = ""
+				r.Upstream = ""
+				r.HasUntracked = true
+				return r
+			}(),
+			ctx:     fixEligibilityContext{},
+			actions: []string{FixActionCreateProject, FixActionStageCommitPush},
+		},
+		{
 			name:    "auto push disabled allows enable action",
 			rec:     base,
 			meta:    &domain.RepoMetadataFile{RepoKey: "software/api", AutoPush: false},

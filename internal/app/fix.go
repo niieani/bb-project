@@ -190,7 +190,7 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	if rec.OriginURL != "" && rec.Upstream != "" && rec.Ahead > 0 && !rec.Diverged {
 		actions = append(actions, FixActionPush)
 	}
-	if rec.OriginURL != "" && (rec.HasDirtyTracked || rec.HasUntracked) && !rec.Diverged &&
+	if (rec.HasDirtyTracked || rec.HasUntracked) && !rec.Diverged &&
 		!ctx.Risk.hasSecretLikeChanges() &&
 		!(ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive) {
 		actions = append(actions, FixActionStageCommitPush)
@@ -454,6 +454,9 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 		}
 		if err := a.Git.Commit(path, msg); err != nil {
 			return err
+		}
+		if strings.TrimSpace(target.Record.OriginURL) == "" {
+			return nil
 		}
 		if target.Record.Upstream == "" {
 			branch := target.Record.Branch

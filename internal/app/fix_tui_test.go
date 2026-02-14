@@ -857,6 +857,75 @@ func TestFixTUIWizardCreateProjectVisibilityUsesLeftRightWhenFocused(t *testing.
 	}
 }
 
+func TestFixTUIWizardMissingGitignoreExplainsGenerationForStageCommit(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Risk: fixRiskSnapshot{
+				MissingRootGitignore:       true,
+				NoisyChangedPaths:          []string{"node_modules/pkg/index.js"},
+				SuggestedGitignorePatterns: []string{"node_modules/"},
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	view := m.viewWizardContent()
+	if !strings.Contains(view, "bb can generate a root .gitignore before commit") {
+		t.Fatalf("expected explicit .gitignore generation note, got %q", view)
+	}
+	if !strings.Contains(view, "Generate .gitignore before commit") {
+		t.Fatalf("expected .gitignore toggle in stage-commit wizard, got %q", view)
+	}
+}
+
+func TestFixTUIWizardCreateProjectMissingGitignoreMentionsLaterStageStep(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{
+				MissingRootGitignore:       true,
+				NoisyChangedPaths:          []string{"dist/app.js"},
+				SuggestedGitignorePatterns: []string{"dist/"},
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{
+		{RepoPath: "/repos/api", Action: FixActionCreateProject},
+		{RepoPath: "/repos/api", Action: FixActionStageCommitPush},
+	})
+
+	view := m.viewWizardContent()
+	if !strings.Contains(view, "create-project step will not generate .gitignore") {
+		t.Fatalf("expected create-project clarification about .gitignore behavior, got %q", view)
+	}
+	if !strings.Contains(view, "later \"Stage, commit & push\" step can generate it before commit") {
+		t.Fatalf("expected note about later stage-commit step, got %q", view)
+	}
+	if strings.Contains(view, "Generate .gitignore before commit") {
+		t.Fatalf("create-project page should not render .gitignore toggle, got %q", view)
+	}
+}
+
 func TestFixTUIRowsRenderWithoutReplacementRuneAndWithoutDoubleSpacing(t *testing.T) {
 	t.Parallel()
 
@@ -1211,6 +1280,39 @@ func TestClassifyFixRepoMarksUnsyncableWhenReasonsAreNotCoverable(t *testing.T) 
 
 	if got := classifyFixRepo(repo, actions); got != fixRepoTierUnsyncableBlocked {
 		t.Fatalf("tier = %v, want unsyncable when no bb fix covers all reasons", got)
+	}
+}
+
+func TestClassifyFixRepoMarksCreateProjectDirtyMissingOriginAsFixable(t *testing.T) {
+	t.Parallel()
+
+	repo := fixRepoState{
+		Record: domain.MachineRepoRecord{
+			RepoKey:      "software/api",
+			Name:         "api",
+			Path:         "/repos/api",
+			OriginURL:    "",
+			Upstream:     "",
+			Syncable:     false,
+			HasUntracked: true,
+			UnsyncableReasons: []domain.UnsyncableReason{
+				domain.ReasonDirtyUntracked,
+				domain.ReasonMissingOrigin,
+				domain.ReasonMissingUpstream,
+			},
+		},
+		Meta: nil,
+	}
+	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+		Interactive: true,
+		Risk:        repo.Risk,
+	})
+
+	if !containsAction(actions, FixActionCreateProject) {
+		t.Fatalf("expected %q action, got %v", FixActionCreateProject, actions)
+	}
+	if got := classifyFixRepo(repo, actions); got != fixRepoTierAutofixable {
+		t.Fatalf("tier = %v, want fixable when create-project can resolve all reasons", got)
 	}
 }
 

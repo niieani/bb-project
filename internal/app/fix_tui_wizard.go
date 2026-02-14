@@ -483,11 +483,19 @@ func (m *fixTUIModel) viewWizardContent() string {
 		))
 	}
 	if m.wizard.Risk.MissingRootGitignore && len(m.wizard.Risk.NoisyChangedPaths) > 0 {
+		detail := "Noisy paths were detected in uncommitted changes."
+		if m.wizard.ShowGitignoreToggle {
+			detail += " If you continue, bb can generate a root .gitignore before commit (see toggle below)."
+		} else if m.wizard.Action == FixActionCreateProject && m.wizardQueueHasActionAfterCurrent(FixActionStageCommitPush) {
+			detail += " This create-project step will not generate .gitignore. A later \"Stage, commit & push\" step can generate it before commit."
+		} else {
+			detail += " This step will not generate .gitignore."
+		}
 		b.WriteString("\n\n")
 		b.WriteString(renderFieldBlock(
 			false,
 			"Missing root .gitignore",
-			"Noisy paths were detected in uncommitted changes.",
+			detail,
 			strings.Join(m.wizard.Risk.NoisyChangedPaths, "\n"),
 			"",
 		))
@@ -634,6 +642,15 @@ func (m *fixTUIModel) wizardInnerWidth() int {
 		return 0
 	}
 	return inner
+}
+
+func (m *fixTUIModel) wizardQueueHasActionAfterCurrent(action string) bool {
+	for i := m.wizard.Index + 1; i < len(m.wizard.Queue); i++ {
+		if m.wizard.Queue[i].Action == action {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *fixTUIModel) renderChangedFilesList() string {
