@@ -48,7 +48,7 @@ func TestEligibleFixActions(t *testing.T) {
 		{
 			name:    "missing upstream allows set upstream push",
 			rec:     func() domain.MachineRepoRecord { r := base; r.Upstream = ""; r.Ahead = 2; return r }(),
-			actions: []string{FixActionSetUpstreamPush},
+			actions: []string{FixActionCreateProject, FixActionSetUpstreamPush},
 		},
 		{
 			name:    "auto push disabled allows enable action",

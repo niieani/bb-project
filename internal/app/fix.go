@@ -14,6 +14,7 @@ import (
 const (
 	FixActionIgnore          = "ignore"
 	FixActionAbortOperation  = "abort-operation"
+	FixActionCreateProject   = "create-project"
 	FixActionPush            = "push"
 	FixActionStageCommitPush = "stage-commit-push"
 	FixActionPullFFOnly      = "pull-ff-only"
@@ -121,6 +122,9 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	}
 
 	actions := make([]string, 0, 5)
+	if rec.Upstream == "" {
+		actions = append(actions, FixActionCreateProject)
+	}
 	if rec.OriginURL != "" && rec.Upstream != "" && rec.Ahead > 0 && !rec.Diverged {
 		actions = append(actions, FixActionPush)
 	}
@@ -323,6 +327,8 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 		}
 	case FixActionPush:
 		return a.Git.Push(path)
+	case FixActionCreateProject:
+		return a.createProjectFromFix(cfg, target)
 	case FixActionStageCommitPush:
 		msg := strings.TrimSpace(commitMessage)
 		if msg == "" || msg == "auto" {
@@ -374,4 +380,74 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 	default:
 		return fmt.Errorf("unknown fix action %q", action)
 	}
+}
+
+func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState) error {
+	owner := strings.TrimSpace(cfg.GitHub.Owner)
+	if owner == "" {
+		return errors.New("github.owner is required; run 'bb config' and set github.owner")
+	}
+	if strings.TrimSpace(target.Record.Catalog) == "" {
+		return errors.New("catalog is required for create-project")
+	}
+
+	projectName := strings.TrimSpace(target.Record.Name)
+	if projectName == "" {
+		projectName = filepath.Base(target.Record.Path)
+	}
+	if strings.TrimSpace(projectName) == "" {
+		return errors.New("project name is required for create-project")
+	}
+
+	visibility := domain.VisibilityPrivate
+	expectedOrigin, expectedRepoID, err := a.expectedOrigin(owner, projectName, cfg.GitHub.RemoteProtocol)
+	if err != nil {
+		return err
+	}
+
+	origin, err := a.Git.RepoOrigin(target.Record.Path)
+	if err != nil {
+		return err
+	}
+	if origin != "" {
+		originID, err := domain.NormalizeOriginToRepoID(origin)
+		if err != nil {
+			return fmt.Errorf("invalid existing origin: %w", err)
+		}
+		if originID != expectedRepoID {
+			return fmt.Errorf("conflicting origin: existing %q does not match expected %q", origin, expectedOrigin)
+		}
+	} else {
+		createdOrigin, err := a.createRemoteRepo(owner, projectName, visibility, cfg.GitHub.RemoteProtocol, target.Record.Path)
+		if err != nil {
+			return err
+		}
+		if err := a.Git.AddOrigin(target.Record.Path, createdOrigin); err != nil {
+			return fmt.Errorf("set origin failed: %w", err)
+		}
+		origin = createdOrigin
+	}
+
+	repoID, err := domain.NormalizeOriginToRepoID(origin)
+	if err != nil {
+		return fmt.Errorf("normalize origin: %w", err)
+	}
+	meta, _, err := a.ensureRepoMetadata(cfg, repoID, projectName, origin, visibility, target.Record.Catalog)
+	if err != nil {
+		return err
+	}
+
+	branch, _ := a.Git.CurrentBranch(target.Record.Path)
+	headSHA, _ := a.Git.HeadSHA(target.Record.Path)
+	upstream, _ := a.Git.Upstream(target.Record.Path)
+	if headSHA != "" && upstream == "" {
+		if branch == "" {
+			branch = "main"
+		}
+		if err := a.Git.PushUpstreamWithPreferredRemote(target.Record.Path, branch, meta.PreferredRemote); err != nil {
+			return fmt.Errorf("initial push failed: %w", err)
+		}
+	}
+
+	return nil
 }

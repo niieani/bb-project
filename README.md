@@ -172,6 +172,7 @@ Flags:
 Actions:
 
 - `push`
+- `create-project`
 - `stage-commit-push`
 - `pull-ff-only`
 - `set-upstream-push`

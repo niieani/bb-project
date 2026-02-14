@@ -156,6 +156,36 @@ func TestFixCases(t *testing.T) {
 		}
 	})
 
+	t.Run("create project from missing upstream", func(t *testing.T) {
+		_, m, catalogRoot := setupSingleMachine(t)
+		repoPath := filepath.Join(catalogRoot, "demo")
+		m.MustRunGit(now, catalogRoot, "init", "-b", "main", repoPath)
+		m.MustWriteFile(filepath.Join(repoPath, "README.md"), "hello\n")
+		m.MustRunGit(now, repoPath, "add", "README.md")
+		m.MustRunGit(now, repoPath, "commit", "-m", "init local")
+
+		out, err := m.RunBB(now.Add(1*time.Minute), "fix", "demo")
+		if err == nil {
+			t.Fatalf("expected unsyncable list mode before create-project, output=%s", out)
+		}
+		if !strings.Contains(out, "create-project") {
+			t.Fatalf("expected create-project action in output, got: %s", out)
+		}
+
+		if out, err := m.RunBB(now.Add(2*time.Minute), "fix", "demo", "create-project"); err != nil {
+			t.Fatalf("create-project failed: %v\n%s", err, out)
+		}
+
+		origin := strings.TrimSpace(m.MustRunGit(now, repoPath, "remote", "get-url", "origin"))
+		if origin == "" {
+			t.Fatal("expected origin to be configured by create-project")
+		}
+		upstream := strings.TrimSpace(m.MustRunGit(now, repoPath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"))
+		if upstream != "origin/main" {
+			t.Fatalf("upstream = %q, want origin/main", upstream)
+		}
+	})
+
 	t.Run("project selector accepts repo_id and path", func(t *testing.T) {
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
