@@ -149,6 +149,18 @@ Use a reusable field block for all form rows:
 - Create-project visibility pickers should be two-option horizontal controls (`private`, `public`) with explicit default labeling (for example `private (default)`), and left/right should change value when that control is focused.
 - In create-project confirmations, include a dedicated editable repository-name field with an empty value and placeholder fallback to current folder/repo name.
 
+## Startup/Loading Standards
+
+- Never show a blank interactive terminal with only a blinking cursor while work is in progress.
+- For any interactive screen that performs startup work before the main UI is usable, render a loading view immediately on entry.
+- Loading view must include:
+  - A spinner (or equivalent animated progress indicator).
+  - A stable one-line context sentence describing what is happening overall.
+  - A live status line that updates in real time with the current startup step.
+- The live status line should come from real execution events (for example internal progress/log steps), not synthetic timers.
+- The latest observed step should always replace the previous line so users can see forward progress.
+- Keep verbose/stderr log noise out of the TUI surface; in interactive mode, map those progress events into the loading UI instead of printing raw logs.
+
 ## Interaction + Focus Standards
 
 - Only one element group may be visually focused at a time (for example tabs, table row set, button row, or editor controls).

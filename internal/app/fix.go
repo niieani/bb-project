@@ -140,7 +140,7 @@ func (a *App) runFixInteractiveWithMutedLogs(includeCatalogs []string, noRefresh
 		runInteractive = a.runFixInteractiveFn
 	}
 
-	previousVerbose := a.Verbose
+	previousVerbose := a.isVerbose()
 	a.SetVerbose(false)
 	defer a.SetVerbose(previousVerbose)
 

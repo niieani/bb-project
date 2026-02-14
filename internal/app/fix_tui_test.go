@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -284,11 +285,63 @@ func TestFixTUIBootViewShowsLoadingStatus(t *testing.T) {
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
 
 	view := m.View()
-	if !strings.Contains(view, "Preparing Interactive View") {
+	if !strings.Contains(view, "Preparing interactive fix startup") {
 		t.Fatalf("expected boot heading in view, got %q", view)
 	}
 	if !strings.Contains(view, "Loading repositories and risk checks for interactive fix") {
 		t.Fatalf("expected loading explanation in view, got %q", view)
+	}
+}
+
+func TestFixTUIBootViewUsesLatestProgressLine(t *testing.T) {
+	t.Parallel()
+
+	m := newFixTUIBootModel(nil, nil, false)
+	m.setProgress("scan: snapshot is stale, refreshing")
+
+	view := m.View()
+	if !strings.Contains(view, "scan: snapshot is stale, refreshing") {
+		t.Fatalf("expected current progress line in boot view, got %q", view)
+	}
+}
+
+func TestFixTUIBootLoadCmdCapturesAppLogProgress(t *testing.T) {
+	t.Parallel()
+
+	app := &App{Stderr: io.Discard, Verbose: false}
+	boot := newFixTUIBootModel(app, nil, false)
+	loaded := newFixTUIModelForTest([]fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+		},
+	})
+
+	boot.loadFn = func() (*fixTUIModel, error) {
+		app.logf("scan: snapshot is stale, refreshing")
+		app.logf("fix: selected 1 repository")
+		return loaded, nil
+	}
+
+	msg := boot.loadReposCmd()()
+	loadedMsg, ok := msg.(fixTUILoadedMsg)
+	if !ok {
+		t.Fatalf("load command message type = %T, want fixTUILoadedMsg", msg)
+	}
+	if loadedMsg.err != nil {
+		t.Fatalf("load command error = %v, want nil", loadedMsg.err)
+	}
+	if loadedMsg.model != loaded {
+		t.Fatal("expected load command to return loaded model")
+	}
+	if got := boot.currentProgress(); got != "fix: selected 1 repository" {
+		t.Fatalf("current progress = %q, want latest startup log line", got)
 	}
 }
 

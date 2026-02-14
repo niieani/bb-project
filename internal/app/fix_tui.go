@@ -6,6 +6,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 
 	"bb-project/internal/domain"
 
@@ -366,6 +367,9 @@ type fixTUIBootModel struct {
 	spin    spinner.Model
 	loadFn  func() (*fixTUIModel, error)
 	loadErr error
+
+	progressMu   sync.RWMutex
+	progressLine string
 }
 
 type fixTUILoadedMsg struct {
@@ -382,15 +386,11 @@ func newFixTUIBootModel(app *App, includeCatalogs []string, noRefresh bool) *fix
 		includeCatalogs: append([]string(nil), includeCatalogs...),
 		noRefresh:       noRefresh,
 		spin:            spin,
+		progressLine:    "Preparing interactive fix startup",
 	}
 }
 
 func (m *fixTUIBootModel) Init() tea.Cmd {
-	if m.loadFn == nil {
-		m.loadFn = func() (*fixTUIModel, error) {
-			return newFixTUIModel(m.app, m.includeCatalogs, m.noRefresh)
-		}
-	}
 	return tea.Batch(m.spin.Tick, m.loadReposCmd())
 }
 
@@ -432,7 +432,7 @@ func (m *fixTUIBootModel) View() string {
 	subtitle := hintStyle.Render("Interactive remediation for unsyncable repositories")
 
 	message := fmt.Sprintf("%s %s", m.spin.View(), "Loading repositories and risk checks for interactive fix...")
-	detail := hintStyle.Render("This runs scan refresh checks, loads repo state, and computes eligible fix actions.")
+	detail := hintStyle.Render("Interactive UI opens automatically when startup checks complete.")
 
 	contentPanel := panelStyle
 	if w := m.viewContentWidth(); w > 0 {
@@ -440,7 +440,7 @@ func (m *fixTUIBootModel) View() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(labelStyle.Render("Preparing Interactive View"))
+	b.WriteString(labelStyle.Render(m.currentProgress()))
 	b.WriteString("\n")
 	b.WriteString(message)
 	b.WriteString("\n")
@@ -452,7 +452,20 @@ func (m *fixTUIBootModel) View() string {
 
 func (m *fixTUIBootModel) loadReposCmd() tea.Cmd {
 	return func() tea.Msg {
-		model, err := m.loadFn()
+		load := m.loadFn
+		if load == nil {
+			load = func() (*fixTUIModel, error) {
+				return newFixTUIModel(m.app, m.includeCatalogs, m.noRefresh)
+			}
+		}
+
+		restoreLogObserver := func() {}
+		if m.app != nil {
+			restoreLogObserver = m.app.setLogObserver(m.setProgress)
+		}
+		defer restoreLogObserver()
+
+		model, err := load()
 		return fixTUILoadedMsg{model: model, err: err}
 	}
 }
@@ -473,6 +486,25 @@ func (m *fixTUIBootModel) viewContentWidth() int {
 		return 0
 	}
 	return contentWidth
+}
+
+func (m *fixTUIBootModel) setProgress(line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	m.progressMu.Lock()
+	m.progressLine = line
+	m.progressMu.Unlock()
+}
+
+func (m *fixTUIBootModel) currentProgress() string {
+	m.progressMu.RLock()
+	defer m.progressMu.RUnlock()
+	if strings.TrimSpace(m.progressLine) == "" {
+		return "Preparing interactive fix startup"
+	}
+	return m.progressLine
 }
 
 func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUIModel, error) {

@@ -34,6 +34,8 @@ type App struct {
 	repoMetadataMu      sync.Mutex
 	observeRepoHook     func(cfg domain.ConfigFile, repo discoveredRepo, allowPush bool) (domain.MachineRepoRecord, error)
 	runFixInteractiveFn func(includeCatalogs []string, noRefresh bool) (int, error)
+	logMu               sync.RWMutex
+	logObserver         func(string)
 }
 
 type InitOptions struct {
@@ -99,14 +101,46 @@ func New(paths state.Paths, stdout io.Writer, stderr io.Writer) *App {
 }
 
 func (a *App) SetVerbose(verbose bool) {
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
 	a.Verbose = verbose
 }
 
 func (a *App) logf(format string, args ...any) {
-	if !a.Verbose {
+	line := fmt.Sprintf(format, args...)
+
+	a.logMu.RLock()
+	verbose := a.Verbose
+	stderr := a.Stderr
+	observer := a.logObserver
+	a.logMu.RUnlock()
+
+	if observer != nil {
+		observer(line)
+	}
+	if !verbose {
 		return
 	}
-	fmt.Fprintf(a.Stderr, "bb: "+format+"\n", args...)
+	fmt.Fprintf(stderr, "bb: %s\n", line)
+}
+
+func (a *App) setLogObserver(observer func(string)) func() {
+	a.logMu.Lock()
+	previous := a.logObserver
+	a.logObserver = observer
+	a.logMu.Unlock()
+
+	return func() {
+		a.logMu.Lock()
+		a.logObserver = previous
+		a.logMu.Unlock()
+	}
+}
+
+func (a *App) isVerbose() bool {
+	a.logMu.RLock()
+	defer a.logMu.RUnlock()
+	return a.Verbose
 }
 
 func (a *App) loadContext() (domain.ConfigFile, domain.MachineFile, error) {
