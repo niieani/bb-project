@@ -25,6 +25,7 @@ type fixTUIKeyMap struct {
 	Left     key.Binding
 	Right    key.Binding
 	Apply    key.Binding
+	Setting  key.Binding
 	Skip     key.Binding
 	ApplyAll key.Binding
 	Refresh  key.Binding
@@ -56,6 +57,10 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 		Apply: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "apply selected fix"),
+		),
+		Setting: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "toggle auto-push"),
 		),
 		Skip: key.NewBinding(
 			key.WithKeys("ctrl+x"),
@@ -93,13 +98,13 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 }
 
 func (k fixTUIKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Left, k.Apply, k.Skip, k.ApplyAll, k.Quit}
+	return []key.Binding{k.Up, k.Left, k.Apply, k.Setting, k.ApplyAll, k.Quit}
 }
 
 func (k fixTUIKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right},
-		{k.Apply, k.Skip, k.ApplyAll, k.Refresh, k.Ignore, k.Unignore},
+		{k.Apply, k.Setting, k.Skip, k.ApplyAll, k.Refresh, k.Ignore, k.Unignore},
 		{k.Help, k.Cancel, k.Quit},
 	}
 }
@@ -139,6 +144,7 @@ type fixListItem struct {
 	Name      string
 	Branch    string
 	State     string
+	AutoPush  bool
 	Reasons   string
 	Action    string
 	ActionKey string
@@ -161,6 +167,7 @@ type fixColumnLayout struct {
 	Repo    int
 	Branch  int
 	State   int
+	Auto    int
 	Reasons int
 	Action  int
 }
@@ -225,6 +232,14 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		stateStyle = stateStyle.Copy().Bold(true)
 	}
 	stateCell := renderFixColumnCell(row.State, layout.State, stateStyle)
+	autoPushStyle := fixAutoPushOffStyle
+	if row.AutoPush {
+		autoPushStyle = fixAutoPushOnStyle
+	}
+	if selected {
+		autoPushStyle = autoPushStyle.Copy().Bold(true)
+	}
+	autoPushCell := renderFixColumnCell(onOffLabel(row.AutoPush), layout.Auto, autoPushStyle)
 	reasonsCell := renderFixColumnCell(row.Reasons, layout.Reasons, fixReasonsStyle)
 	actionStyle := fixActionStyleFor(row.ActionKey)
 	if selected {
@@ -238,6 +253,8 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		branchCell,
 		fixListColumnGap,
 		stateCell,
+		fixListColumnGap,
+		autoPushCell,
 		fixListColumnGap,
 		reasonsCell,
 		fixListColumnGap,
@@ -260,7 +277,7 @@ const fixAllActions = "__all__"
 
 const (
 	fixListDefaultWidth = 120
-	fixListReservedCols = 8
+	fixListReservedCols = 10
 )
 
 var (
@@ -337,6 +354,12 @@ var (
 
 	fixActionAbortStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("203"))
+
+	fixAutoPushOnStyle = lipgloss.NewStyle().
+				Foreground(successColor)
+
+	fixAutoPushOffStyle = lipgloss.NewStyle().
+				Foreground(mutedTextColor)
 
 	fixPageStyle = lipgloss.NewStyle().Padding(0, 2)
 )
@@ -599,6 +622,9 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Apply):
 			m.applyCurrentSelection()
 			return m, nil
+		case key.Matches(msg, m.keys.Setting):
+			m.toggleCurrentRepoAutoPush()
+			return m, nil
 		case key.Matches(msg, m.keys.ApplyAll):
 			m.applyAllSelections()
 			return m, nil
@@ -688,7 +714,7 @@ func (m *fixTUIModel) viewMainContent() string {
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Select per-repo fixes. Default selection is '-' (no action)."))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Grouped by catalog (default catalog first), then fixable unsyncable, unsyncable manual, and syncable."))
+	b.WriteString(hintStyle.Render("Grouped by catalog (default catalog first), then fixable, unsyncable, and syncable."))
 	b.WriteString("\n\n")
 	b.WriteString(m.viewFixSummary())
 	b.WriteString("\n\n")
@@ -733,6 +759,8 @@ func (m *fixTUIModel) viewRepoHeader() string {
 		fixListColumnGap,
 		renderFixColumnCell("State", layout.State, fixHeaderCellStyle),
 		fixListColumnGap,
+		renderFixColumnCell("Auto-push", layout.Auto, fixHeaderCellStyle),
+		fixListColumnGap,
 		renderFixColumnCell("Reasons", layout.Reasons, fixHeaderCellStyle),
 		fixListColumnGap,
 		renderFixColumnCell("Selected Fix", layout.Action, fixHeaderCellStyle),
@@ -750,7 +778,7 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 		Interactive: true,
 		Risk:        repo.Risk,
 	})
-	action := m.currentActionForRepo(repo.Record.Path, actions)
+	action := m.currentActionForRepo(repo.Record.Path, fixActionsForSelection(actions))
 	actionLabelValue := fixActionLabel(action)
 
 	reasonText := "none"
@@ -768,10 +796,10 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	tier := classifyFixRepo(repo, actions)
 	switch tier {
 	case fixRepoTierAutofixable:
-		state = "unsyncable (fixable)"
+		state = "fixable"
 		stateStyle = fixStateAutofixableStyle
 	case fixRepoTierUnsyncableBlocked:
-		state = "unsyncable (manual)"
+		state = "unsyncable"
 		stateStyle = fixStateUnsyncableStyle
 	}
 
@@ -785,12 +813,21 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	))
 	b.WriteString("\n")
 	stateLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("State:")
+	autoPushLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Auto-push:")
 	actionLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Action:")
 	branchLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Branch:")
+	autoPushValueStyle := fixAutoPushOffStyle
+	if repoMetaAutoPush(repo.Meta) {
+		autoPushValueStyle = fixAutoPushOnStyle
+	}
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top,
 		stateLabel,
 		" ",
 		stateStyle.Render(state),
+		"   ",
+		autoPushLabel,
+		" ",
+		autoPushValueStyle.Render(onOffLabel(repoMetaAutoPush(repo.Meta))),
 		"   ",
 		actionLabel,
 		" ",
@@ -833,7 +870,7 @@ func (m *fixTUIModel) viewFixSummary() string {
 	totalStyle := renderStatusPill(fmt.Sprintf("%d repos", total))
 	pendingStyle := renderStatusPill(fmt.Sprintf("%d selected", pending))
 	autoStyle := renderFixSummaryPill(fmt.Sprintf("%d fixable", fixable), lipgloss.Color("214"))
-	blockedStyle := renderFixSummaryPill(fmt.Sprintf("%d unsyncable manual", blocked), errorFgColor)
+	blockedStyle := renderFixSummaryPill(fmt.Sprintf("%d unsyncable", blocked), errorFgColor)
 	syncStyle := renderFixSummaryPill(fmt.Sprintf("%d syncable", syncable), successColor)
 	return lipgloss.JoinHorizontal(lipgloss.Top, totalStyle, " ", pendingStyle, "  ", autoStyle, " ", blockedStyle, " ", syncStyle)
 }
@@ -925,7 +962,7 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			Interactive: true,
 			Risk:        repo.Risk,
 		})
-		options := selectableFixActions(actions)
+		options := selectableFixActions(fixActionsForSelection(actions))
 		if idx, ok := m.selectedAction[path]; !ok || idx < -1 || idx >= len(options) {
 			m.selectedAction[path] = -1
 		}
@@ -998,12 +1035,12 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 		state := "syncable"
 		switch entry.tier {
 		case fixRepoTierAutofixable:
-			state = "unsyncable (fixable)"
+			state = "fixable"
 		case fixRepoTierUnsyncableBlocked:
-			state = "unsyncable (manual)"
+			state = "unsyncable"
 		}
 
-		selected := m.currentActionForRepo(path, entry.actions)
+		selected := m.currentActionForRepo(path, fixActionsForSelection(entry.actions))
 		repoIndex := len(m.visible)
 		items = append(items, fixListItem{
 			Kind:      fixListItemRepo,
@@ -1013,6 +1050,7 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			Name:      formatRepoDisplayName(repo),
 			Branch:    repo.Record.Branch,
 			State:     state,
+			AutoPush:  repoMetaAutoPush(repo.Meta),
 			Reasons:   reasons,
 			Action:    fixActionLabel(selected),
 			ActionKey: selected,
@@ -1105,7 +1143,7 @@ func (m *fixTUIModel) cycleCurrentAction(delta int) {
 		Interactive: true,
 		Risk:        repo.Risk,
 	})
-	options := selectableFixActions(actions)
+	options := selectableFixActions(fixActionsForSelection(actions))
 	key := repo.Record.Path
 	optionCount := len(options) + 1 // include "-" no-op option
 	pos := m.selectedAction[key] + 1
@@ -1133,7 +1171,8 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		Interactive: true,
 		Risk:        repo.Risk,
 	})
-	options := selectableFixActions(actions)
+	selectionActions := fixActionsForSelection(actions)
+	options := selectableFixActions(selectionActions)
 	idx := m.selectedAction[repo.Record.Path]
 	if idx < 0 {
 		m.status = fmt.Sprintf("no action selected for %s", repo.Record.Name)
@@ -1151,7 +1190,7 @@ func (m *fixTUIModel) applyCurrentSelection() {
 	queue := make([]fixWizardDecision, 0, 2)
 	selections := []string{action}
 	if action == fixAllActions {
-		selections = actions
+		selections = selectionActions
 	}
 
 	applied := 0
@@ -1217,7 +1256,8 @@ func (m *fixTUIModel) applyAllSelections() {
 			Interactive: true,
 			Risk:        repo.Risk,
 		})
-		options := selectableFixActions(actions)
+		selectionActions := fixActionsForSelection(actions)
+		options := selectableFixActions(selectionActions)
 		idx := m.selectedAction[repo.Record.Path]
 		if idx < 0 {
 			skipped++
@@ -1232,7 +1272,7 @@ func (m *fixTUIModel) applyAllSelections() {
 		selection := options[idx]
 		selections := []string{selection}
 		if selection == fixAllActions {
-			selections = actions
+			selections = selectionActions
 		}
 		for _, selected := range selections {
 			if isRiskyFixAction(selected) {
@@ -1293,6 +1333,49 @@ func (m *fixTUIModel) applyImmediateAction(repo fixRepoState, action string) err
 	return err
 }
 
+func (m *fixTUIModel) toggleCurrentRepoAutoPush() {
+	repo, ok := m.currentRepo()
+	if !ok {
+		m.status = "no repository selected"
+		return
+	}
+	repoKey := strings.TrimSpace(repo.Record.RepoKey)
+	if repoKey == "" {
+		m.errText = fmt.Sprintf("%s has no repo_key; cannot toggle auto-push", repo.Record.Name)
+		return
+	}
+	next := !repoMetaAutoPush(repo.Meta)
+
+	if m.app != nil {
+		code, err := m.app.RunRepoPolicy(repoKey, next)
+		if err != nil {
+			m.errText = err.Error()
+			return
+		}
+		if code != 0 {
+			m.errText = fmt.Sprintf("repo policy returned non-zero exit code %d", code)
+			return
+		}
+	}
+	m.setLocalRepoAutoPush(repo.Record.Path, next)
+
+	m.errText = ""
+	m.status = fmt.Sprintf("auto-push %s for %s", onOffLabel(next), repo.Record.Name)
+}
+
+func (m *fixTUIModel) setLocalRepoAutoPush(path string, autoPush bool) {
+	for i := range m.repos {
+		if m.repos[i].Record.Path != path {
+			continue
+		}
+		if m.repos[i].Meta == nil {
+			m.repos[i].Meta = &domain.RepoMetadataFile{RepoKey: m.repos[i].Record.RepoKey}
+		}
+		m.repos[i].Meta.AutoPush = autoPush
+	}
+	m.rebuildList(path)
+}
+
 func (m *fixTUIModel) ignoreCurrentRepo() {
 	repo, ok := m.currentRepo()
 	if !ok {
@@ -1338,11 +1421,26 @@ func selectableFixActions(actions []string) []string {
 	return out
 }
 
+func fixActionsForSelection(actions []string) []string {
+	if len(actions) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(actions))
+	for _, action := range actions {
+		if action == FixActionEnableAutoPush {
+			continue
+		}
+		out = append(out, action)
+	}
+	return out
+}
+
 func fixListColumnsForWidth(listWidth int) fixColumnLayout {
 	const (
 		repoMin    = 7
 		branchMin  = 7
-		stateMin   = 18
+		stateMin   = 10
+		autoMin    = 9
 		reasonsMin = 12
 		actionMin  = 10
 	)
@@ -1351,25 +1449,28 @@ func fixListColumnsForWidth(listWidth int) fixColumnLayout {
 		Repo:    repoMin,
 		Branch:  branchMin,
 		State:   stateMin,
+		Auto:    autoMin,
 		Reasons: reasonsMin,
 		Action:  actionMin,
 	}
 
-	minTotal := repoMin + branchMin + stateMin + reasonsMin + actionMin
+	minTotal := repoMin + branchMin + stateMin + autoMin + reasonsMin + actionMin
 	budget := listWidth - fixListReservedCols
 	if budget < minTotal {
 		budget = minTotal
 	}
 	extra := budget - minTotal
 	if extra > 0 {
-		repoExtra := extra * 16 / 100
+		repoExtra := extra * 14 / 100
 		branchExtra := extra * 14 / 100
-		stateExtra := extra * 10 / 100
-		reasonsExtra := extra * 30 / 100
-		actionExtra := extra - repoExtra - branchExtra - stateExtra - reasonsExtra
+		stateExtra := extra * 8 / 100
+		autoExtra := extra * 8 / 100
+		reasonsExtra := extra * 28 / 100
+		actionExtra := extra - repoExtra - branchExtra - stateExtra - autoExtra - reasonsExtra
 		layout.Repo += repoExtra
 		layout.Branch += branchExtra
 		layout.State += stateExtra
+		layout.Auto += autoExtra
 		layout.Reasons += reasonsExtra
 		layout.Action += actionExtra
 	}
@@ -1531,21 +1632,25 @@ func filepathBaseFallback(path string) string {
 	return last
 }
 
+func repoMetaAutoPush(meta *domain.RepoMetadataFile) bool {
+	if meta == nil {
+		return false
+	}
+	return meta.AutoPush
+}
+
 func classifyFixRepo(repo fixRepoState, actions []string) fixRepoTier {
 	if repo.Record.Syncable {
 		return fixRepoTierSyncable
 	}
-	if unsyncableReasonsFullyCoverable(repo.Record.UnsyncableReasons, actions) {
+	if unsyncableReasonsFullyCoverable(repo.Record.UnsyncableReasons, fixActionsForSelection(actions)) {
 		return fixRepoTierAutofixable
 	}
-	if !repo.Record.Syncable {
-		return fixRepoTierUnsyncableBlocked
-	}
-	return fixRepoTierSyncable
+	return fixRepoTierUnsyncableBlocked
 }
 
 func unsyncableReasonsFullyCoverable(reasons []domain.UnsyncableReason, actions []string) bool {
-	if len(reasons) == 0 {
+	if len(reasons) == 0 || len(actions) == 0 {
 		return false
 	}
 	has := map[string]bool{}
@@ -1555,16 +1660,18 @@ func unsyncableReasonsFullyCoverable(reasons []domain.UnsyncableReason, actions 
 
 	covers := func(reason domain.UnsyncableReason) bool {
 		switch reason {
+		case domain.ReasonMissingOrigin:
+			return has[FixActionCreateProject]
 		case domain.ReasonOperationInProgress:
 			return has[FixActionAbortOperation]
 		case domain.ReasonDirtyTracked, domain.ReasonDirtyUntracked:
 			return has[FixActionStageCommitPush]
 		case domain.ReasonMissingUpstream:
-			return has[FixActionSetUpstreamPush] || has[FixActionStageCommitPush]
+			return has[FixActionSetUpstreamPush] || has[FixActionStageCommitPush] || has[FixActionCreateProject]
 		case domain.ReasonPushPolicyBlocked:
-			return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush] || has[FixActionEnableAutoPush]
+			return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush] || has[FixActionCreateProject]
 		case domain.ReasonPushFailed:
-			return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush]
+			return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush] || has[FixActionCreateProject]
 		case domain.ReasonPullFailed:
 			return has[FixActionPullFFOnly]
 		default:

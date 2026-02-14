@@ -66,12 +66,13 @@ func TestFixTUISelectionFallbackAfterEligibilityChange(t *testing.T) {
 	repos := []fixRepoState{
 		{
 			Record: domain.MachineRepoRecord{
-				RepoKey:   "software/api",
-				Name:      "api",
-				Path:      "/repos/api",
-				OriginURL: "git@github.com:you/api.git",
-				Upstream:  "origin/main",
-				Ahead:     1,
+				RepoKey:         "software/api",
+				Name:            "api",
+				Path:            "/repos/api",
+				OriginURL:       "git@github.com:you/api.git",
+				Upstream:        "origin/main",
+				Ahead:           1,
+				HasDirtyTracked: true,
 			},
 			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: false},
 		},
@@ -82,8 +83,8 @@ func TestFixTUISelectionFallbackAfterEligibilityChange(t *testing.T) {
 	m.cycleCurrentAction(1)
 	m.cycleCurrentAction(1)
 	before := actionForVisibleRepo(m, 0)
-	if !strings.Contains(before, FixActionEnableAutoPush) {
-		t.Fatalf("expected second cycle to pick %q, got %q", FixActionEnableAutoPush, before)
+	if !strings.Contains(before, FixActionStageCommitPush) {
+		t.Fatalf("expected second cycle to pick %q, got %q", FixActionStageCommitPush, before)
 	}
 
 	m.repos[0].Record = domain.MachineRepoRecord{
@@ -249,7 +250,7 @@ func actionForVisibleRepo(m *fixTUIModel, idx int) string {
 		Interactive: true,
 		Risk:        repo.Risk,
 	})
-	return m.currentActionForRepo(repo.Record.Path, actions)
+	return m.currentActionForRepo(repo.Record.Path, fixActionsForSelection(actions))
 }
 
 func TestFixTUIViewUsesCanonicalChromeWithoutInlineKeyLegend(t *testing.T) {
@@ -441,6 +442,80 @@ func TestFixTUIActionCycleIncludesNoAction(t *testing.T) {
 	}
 }
 
+func TestFixTUIActionCycleExcludesAutoPushSetting(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				RepoKey:   "software/api",
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: false},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	m.cycleCurrentAction(1)
+	if got := actionForVisibleRepo(m, 0); got != FixActionPush {
+		t.Fatalf("selected action = %q, want %q", got, FixActionPush)
+	}
+
+	m.cycleCurrentAction(1)
+	if got := actionForVisibleRepo(m, 0); got != fixNoAction {
+		t.Fatalf("selected action after second cycle = %q, want %q", got, fixNoAction)
+	}
+}
+
+func TestFixTUISettingToggleKeyUpdatesAutoPush(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				RepoKey:   "software/api",
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Syncable:  false,
+				Ahead:     1,
+				UnsyncableReasons: []domain.UnsyncableReason{
+					domain.ReasonPushPolicyBlocked,
+				},
+			},
+			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: false},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+
+	if !repoMetaAutoPush(m.visible[0].Meta) {
+		t.Fatal("expected auto-push to be enabled after pressing s")
+	}
+	if !strings.Contains(m.status, "auto-push on") {
+		t.Fatalf("status = %q, want auto-push on message", m.status)
+	}
+
+	rowItems := m.repoList.Items()
+	for _, item := range rowItems {
+		row, ok := item.(fixListItem)
+		if !ok || row.Kind != fixListItemRepo {
+			continue
+		}
+		if row.Path == "/repos/api" && !row.AutoPush {
+			t.Fatal("expected list row auto-push column to be on")
+		}
+	}
+}
+
 func TestFixTUIViewportTracksCursor(t *testing.T) {
 	t.Parallel()
 
@@ -515,6 +590,38 @@ func TestFixTUIRiskySelectionOpensConfirmationWizard(t *testing.T) {
 	}
 	if m.wizard.Action != FixActionPush {
 		t.Fatalf("wizard action = %q, want %q", m.wizard.Action, FixActionPush)
+	}
+}
+
+func TestFixTUIAbortSelectionOpensConfirmationWizard(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:                "api",
+				Path:                "/repos/api",
+				RepoKey:             "software/api",
+				OriginURL:           "git@github.com:you/api.git",
+				OperationInProgress: domain.OperationRebase,
+			},
+			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	m.cycleCurrentAction(1)
+	if got := actionForVisibleRepo(m, 0); got != FixActionAbortOperation {
+		t.Fatalf("selected action = %q, want %q", got, FixActionAbortOperation)
+	}
+
+	m.applyCurrentSelection()
+	if m.viewMode != fixViewWizard {
+		t.Fatalf("view mode = %v, want wizard mode", m.viewMode)
+	}
+	if m.wizard.Action != FixActionAbortOperation {
+		t.Fatalf("wizard action = %q, want %q", m.wizard.Action, FixActionAbortOperation)
 	}
 }
 
@@ -1046,23 +1153,56 @@ func TestFixTUISelectedDetailsHeaderHasNoFieldBorderAndUsesSelectedLabel(t *test
 	}
 }
 
-func TestClassifyFixRepoRequiresFullReasonCoverage(t *testing.T) {
+func TestClassifyFixRepoMarksUnsyncableRepoAsFixableWhenReasonsAreCoverable(t *testing.T) {
 	t.Parallel()
 
 	repo := fixRepoState{
 		Record: domain.MachineRepoRecord{
 			Name:      "api",
 			Path:      "/repos/api",
-			OriginURL: "git@github.com:you/api.git",
-			Upstream:  "origin/main",
+			OriginURL: "",
+			Upstream:  "",
 			Syncable:  false,
-			Diverged:  true,
 			UnsyncableReasons: []domain.UnsyncableReason{
+				domain.ReasonMissingOrigin,
+			},
+		},
+		Meta: nil,
+	}
+	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+		Interactive: true,
+		Risk:        repo.Risk,
+	})
+
+	if got := classifyFixRepo(repo, actions); got != fixRepoTierAutofixable {
+		t.Fatalf("tier = %v, want fixable when there are eligible bb actions", got)
+	}
+}
+
+func TestClassifyFixRepoMarksUnsyncableWhenReasonsAreNotCoverable(t *testing.T) {
+	t.Parallel()
+
+	repo := fixRepoState{
+		Record: domain.MachineRepoRecord{
+			RepoKey:      "software/api",
+			Name:         "api",
+			Path:         "/repos/api",
+			OriginURL:    "git@github.com:you/api.git",
+			Upstream:     "origin/main",
+			Syncable:     false,
+			Diverged:     true,
+			Ahead:        1,
+			HasUntracked: true,
+			UnsyncableReasons: []domain.UnsyncableReason{
+				domain.ReasonDirtyUntracked,
 				domain.ReasonDiverged,
 				domain.ReasonPushPolicyBlocked,
 			},
 		},
-		Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+		Meta: &domain.RepoMetadataFile{
+			RepoKey:  "software/api",
+			AutoPush: false,
+		},
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
 		Interactive: true,
@@ -1070,14 +1210,14 @@ func TestClassifyFixRepoRequiresFullReasonCoverage(t *testing.T) {
 	})
 
 	if got := classifyFixRepo(repo, actions); got != fixRepoTierUnsyncableBlocked {
-		t.Fatalf("tier = %v, want unsyncable blocked when not all reasons are coverable", got)
+		t.Fatalf("tier = %v, want unsyncable when no bb fix covers all reasons", got)
 	}
 }
 
 func TestSelectableFixActionsAddsAllFixesOptionForMultiple(t *testing.T) {
 	t.Parallel()
 
-	options := selectableFixActions([]string{FixActionPush, FixActionEnableAutoPush})
+	options := selectableFixActions([]string{FixActionPush, FixActionStageCommitPush})
 	if len(options) != 3 {
 		t.Fatalf("options len = %d, want 3", len(options))
 	}
