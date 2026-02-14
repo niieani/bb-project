@@ -1661,6 +1661,86 @@ func TestFixTUIFooterDoesNotLeaveExtraTrailingBlankRows(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardStatusToFooterGapIsCompact(t *testing.T) {
+	t.Parallel()
+
+	m := newFixTUIModelForTest([]fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	})
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+
+	view := ansi.Strip(m.View())
+	lines := strings.Split(view, "\n")
+
+	statusIdx := -1
+	for i, line := range lines {
+		if strings.Contains(line, "reviewing 1 risky fix(es)") {
+			statusIdx = i
+			break
+		}
+	}
+	if statusIdx < 0 {
+		t.Fatalf("status line not found in wizard view: %q", view)
+	}
+
+	helpTopIdx := -1
+	for i := statusIdx + 1; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "╭") && strings.HasSuffix(trimmed, "╮") {
+			helpTopIdx = i
+			break
+		}
+	}
+	if helpTopIdx < 0 {
+		t.Fatalf("footer help panel top border not found after status line: %q", view)
+	}
+
+	emptyBetween := 0
+	for i := statusIdx + 1; i < helpTopIdx; i++ {
+		if strings.TrimSpace(lines[i]) == "" {
+			emptyBetween++
+		}
+	}
+	if emptyBetween > 1 {
+		t.Fatalf("expected at most one separator line between status and footer, got %d in view: %q", emptyBetween, view)
+	}
+}
+
+func TestFixTUIWizardFooterDoesNotLeaveExtraTrailingBlankRows(t *testing.T) {
+	t.Parallel()
+
+	m := newFixTUIModelForTest([]fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	})
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+
+	view := ansi.Strip(m.View())
+	trailing := trailingEmptyLineCount(view)
+	if trailing != 0 {
+		t.Fatalf("expected zero trailing empty lines after wizard footer, got %d", trailing)
+	}
+}
+
 func TestFixActionLabelAndDescriptionIncludeCreateProject(t *testing.T) {
 	t.Parallel()
 

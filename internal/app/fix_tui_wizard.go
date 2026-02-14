@@ -703,9 +703,16 @@ func (m *fixTUIModel) syncWizardViewport() {
 	controls := m.viewWizardStaticControls()
 	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus), m.wizardBodyLineWidth())
 	hint := m.wizardFooterHint()
-	staticLines := lipgloss.Height(actions) + lipgloss.Height(hint) + 5 // top/bottom indicator rows + 2 blank lines before actions + newline before hint
+	// Non-scrollable rows:
+	// - top indicator row
+	// - bottom indicator row
+	// - one spacer line before actions (or controls/actions block)
+	// - action row + hint row
+	staticLines := lipgloss.Height(actions) + lipgloss.Height(hint) + 3
 	if controls != "" {
-		staticLines += lipgloss.Height(controls) + 2 // blank lines between viewport and controls
+		// With controls shown, the single spacer before actions becomes:
+		// one spacer before controls + one spacer before actions.
+		staticLines += lipgloss.Height(controls) + 1
 	}
 	width, height := m.wizardViewportSize(lipgloss.Height(content), longestANSIWidth(content), staticLines)
 	if width < 1 {
@@ -762,9 +769,6 @@ func (m *fixTUIModel) wizardViewportSize(contentHeight int, contentWidth int, st
 	height := panelInner - staticLines
 	if height < 1 {
 		height = 1
-	}
-	if height > contentHeight {
-		height = contentHeight
 	}
 	return width, height
 }
