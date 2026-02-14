@@ -36,6 +36,7 @@ type fixRepoState struct {
 type fixApplyOptions struct {
 	Interactive             bool
 	CommitMessage           string
+	CreateProjectName       string
 	CreateProjectVisibility domain.Visibility
 	GenerateGitignore       bool
 	GitignorePatterns       []string
@@ -406,7 +407,7 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 	case FixActionPush:
 		return a.Git.Push(path)
 	case FixActionCreateProject:
-		return a.createProjectFromFix(cfg, target, opts.CreateProjectVisibility)
+		return a.createProjectFromFix(cfg, target, opts.CreateProjectName, opts.CreateProjectVisibility)
 	case FixActionStageCommitPush:
 		if opts.GenerateGitignore && len(opts.GitignorePatterns) > 0 {
 			if err := writeGeneratedGitignore(path, opts.GitignorePatterns); err != nil {
@@ -465,7 +466,7 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 	}
 }
 
-func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, visibilityOverride domain.Visibility) error {
+func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, projectNameOverride string, visibilityOverride domain.Visibility) error {
 	owner := strings.TrimSpace(cfg.GitHub.Owner)
 	if owner == "" {
 		return errors.New("github.owner is required; run 'bb config' and set github.owner")
@@ -474,7 +475,10 @@ func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, v
 		return errors.New("catalog is required for create-project")
 	}
 
-	projectName := strings.TrimSpace(target.Record.Name)
+	projectName := strings.TrimSpace(projectNameOverride)
+	if projectName == "" {
+		projectName = strings.TrimSpace(target.Record.Name)
+	}
 	if projectName == "" {
 		projectName = filepath.Base(target.Record.Path)
 	}

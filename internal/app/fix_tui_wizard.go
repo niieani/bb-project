@@ -42,10 +42,15 @@ type fixWizardState struct {
 	CommitMessage       textinput.Model
 	CommitFocused       bool
 
+	EnableProjectName bool
+	ProjectName       textinput.Model
+
 	ShowGitignoreToggle bool
 	GenerateGitignore   bool
 
 	Visibility  domain.Visibility
+	DefaultVis  domain.Visibility
+	FocusArea   fixWizardFocusArea
 	ActionFocus int
 }
 
@@ -60,6 +65,15 @@ const (
 	fixWizardActionApply = iota
 	fixWizardActionSkip
 	fixWizardActionCancel
+)
+
+type fixWizardFocusArea int
+
+const (
+	fixWizardFocusActions fixWizardFocusArea = iota
+	fixWizardFocusCommit
+	fixWizardFocusProjectName
+	fixWizardFocusVisibility
 )
 
 func isRiskyFixAction(action string) bool {
@@ -113,7 +127,16 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	commitInput := textinput.New()
 	commitInput.Placeholder = DefaultFixCommitMessage
 	commitInput.SetValue("")
-	commitInput.Focus()
+	commitInput.Blur()
+
+	projectNamePlaceholder := strings.TrimSpace(repoName)
+	if projectNamePlaceholder == "" {
+		projectNamePlaceholder = filepath.Base(decision.RepoPath)
+	}
+	projectNameInput := textinput.New()
+	projectNameInput.Placeholder = projectNamePlaceholder
+	projectNameInput.SetValue("")
+	projectNameInput.Blur()
 
 	showGitignoreToggle := decision.Action == FixActionStageCommitPush &&
 		repoRisk.MissingRootGitignore &&
@@ -127,10 +150,21 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	m.wizard.Risk = repoRisk
 	m.wizard.EnableCommitMessage = decision.Action == FixActionStageCommitPush
 	m.wizard.CommitMessage = commitInput
-	m.wizard.CommitFocused = decision.Action == FixActionStageCommitPush
+	m.wizard.CommitFocused = false
+	m.wizard.EnableProjectName = decision.Action == FixActionCreateProject
+	m.wizard.ProjectName = projectNameInput
 	m.wizard.ShowGitignoreToggle = showGitignoreToggle
 	m.wizard.GenerateGitignore = showGitignoreToggle
-	m.wizard.Visibility = domain.VisibilityUnknown
+	m.wizard.DefaultVis = m.detectDefaultVisibility()
+	m.wizard.Visibility = m.wizard.DefaultVis
+	m.wizard.FocusArea = fixWizardFocusActions
+	if m.wizard.EnableCommitMessage {
+		m.wizard.FocusArea = fixWizardFocusCommit
+	}
+	if m.wizard.EnableProjectName {
+		m.wizard.FocusArea = fixWizardFocusProjectName
+	}
+	m.syncWizardFieldFocus()
 	m.wizard.ActionFocus = fixWizardActionApply
 }
 
@@ -182,6 +216,9 @@ func (m *fixTUIModel) applyWizardCurrent() {
 		return
 	}
 	opts := fixApplyOptions{Interactive: true}
+	if m.wizard.EnableProjectName {
+		opts.CreateProjectName = strings.TrimSpace(m.wizard.ProjectName.Value())
+	}
 	if m.wizard.EnableCommitMessage {
 		raw := strings.TrimSpace(m.wizard.CommitMessage.Value())
 		if raw == "" || raw == DefaultFixCommitMessage {
@@ -213,6 +250,65 @@ func (m *fixTUIModel) applyWizardCurrent() {
 	m.advanceWizard()
 }
 
+func (m *fixTUIModel) detectDefaultVisibility() domain.Visibility {
+	if m.app == nil {
+		return domain.VisibilityPrivate
+	}
+	cfg, _, err := m.app.loadContext()
+	if err != nil {
+		return domain.VisibilityPrivate
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.GitHub.DefaultVisibility), string(domain.VisibilityPublic)) {
+		return domain.VisibilityPublic
+	}
+	return domain.VisibilityPrivate
+}
+
+func (m *fixTUIModel) syncWizardFieldFocus() {
+	m.wizard.CommitFocused = false
+	m.wizard.CommitMessage.Blur()
+	m.wizard.ProjectName.Blur()
+	switch m.wizard.FocusArea {
+	case fixWizardFocusCommit:
+		m.wizard.CommitFocused = true
+		m.wizard.CommitMessage.Focus()
+	case fixWizardFocusProjectName:
+		m.wizard.ProjectName.Focus()
+	}
+}
+
+func (m *fixTUIModel) wizardFocusMoveNext() {
+	switch m.wizard.FocusArea {
+	case fixWizardFocusCommit, fixWizardFocusProjectName, fixWizardFocusVisibility:
+		m.wizard.FocusArea = fixWizardFocusActions
+	default:
+		if m.wizard.EnableProjectName {
+			m.wizard.FocusArea = fixWizardFocusProjectName
+		} else if m.wizard.EnableCommitMessage {
+			m.wizard.FocusArea = fixWizardFocusCommit
+		} else if m.wizard.Action == FixActionCreateProject {
+			m.wizard.FocusArea = fixWizardFocusVisibility
+		}
+	}
+	m.syncWizardFieldFocus()
+}
+
+func (m *fixTUIModel) wizardFocusMovePrev() {
+	switch m.wizard.FocusArea {
+	case fixWizardFocusActions:
+		if m.wizard.Action == FixActionCreateProject {
+			m.wizard.FocusArea = fixWizardFocusVisibility
+		} else if m.wizard.EnableCommitMessage {
+			m.wizard.FocusArea = fixWizardFocusCommit
+		}
+	case fixWizardFocusVisibility:
+		if m.wizard.EnableProjectName {
+			m.wizard.FocusArea = fixWizardFocusProjectName
+		}
+	}
+	m.syncWizardFieldFocus()
+}
+
 func (m *fixTUIModel) shiftWizardVisibility(delta int) {
 	options := []string{"default", "private", "public"}
 	current := "default"
@@ -237,7 +333,7 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
-	if m.wizard.EnableCommitMessage && m.wizard.CommitFocused {
+	if m.wizard.FocusArea == fixWizardFocusCommit {
 		if key.Matches(msg, m.keys.Cancel) {
 			m.viewMode = fixViewList
 			m.status = "cancelled remaining risky confirmations"
@@ -245,11 +341,28 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "enter", "tab", "down":
-			m.wizard.CommitFocused = false
+			m.wizard.FocusArea = fixWizardFocusActions
+			m.syncWizardFieldFocus()
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.wizard.CommitMessage, cmd = m.wizard.CommitMessage.Update(msg)
+		return m, cmd
+	}
+	if m.wizard.FocusArea == fixWizardFocusProjectName {
+		if key.Matches(msg, m.keys.Cancel) {
+			m.viewMode = fixViewList
+			m.status = "cancelled remaining risky confirmations"
+			return m, nil
+		}
+		switch msg.String() {
+		case "down", "tab", "enter":
+			m.wizard.FocusArea = fixWizardFocusVisibility
+			m.syncWizardFieldFocus()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.wizard.ProjectName, cmd = m.wizard.ProjectName.Update(msg)
 		return m, cmd
 	}
 
@@ -275,35 +388,34 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch msg.String() {
-	case "up", "tab":
-		if m.wizard.EnableCommitMessage {
-			m.wizard.CommitFocused = true
+	case "up":
+		m.wizardFocusMovePrev()
+		return m, nil
+	case "down", "tab":
+		m.wizardFocusMoveNext()
+		return m, nil
+	}
+	if msg.String() == "left" {
+		if m.wizard.FocusArea == fixWizardFocusVisibility {
+			m.shiftWizardVisibility(-1)
 			return m, nil
 		}
-	}
-	if key.Matches(msg, m.keys.Left) {
 		m.wizard.ActionFocus--
 		if m.wizard.ActionFocus < fixWizardActionApply {
 			m.wizard.ActionFocus = fixWizardActionCancel
 		}
 		return m, nil
 	}
-	if key.Matches(msg, m.keys.Right) {
+	if msg.String() == "right" {
+		if m.wizard.FocusArea == fixWizardFocusVisibility {
+			m.shiftWizardVisibility(+1)
+			return m, nil
+		}
 		m.wizard.ActionFocus++
 		if m.wizard.ActionFocus > fixWizardActionCancel {
 			m.wizard.ActionFocus = fixWizardActionApply
 		}
 		return m, nil
-	}
-	if m.wizard.Action == FixActionCreateProject && !m.wizard.EnableCommitMessage {
-		switch msg.String() {
-		case "up":
-			m.shiftWizardVisibility(-1)
-			return m, nil
-		case "down":
-			m.shiftWizardVisibility(+1)
-			return m, nil
-		}
 	}
 	if msg.String() == " " && m.wizard.ShowGitignoreToggle {
 		m.wizard.GenerateGitignore = !m.wizard.GenerateGitignore
@@ -384,10 +496,20 @@ func (m *fixTUIModel) viewWizardContent() string {
 	if m.wizard.EnableCommitMessage {
 		b.WriteString("\n\n")
 		b.WriteString(renderFieldBlock(
-			m.wizard.CommitFocused,
+			m.wizard.FocusArea == fixWizardFocusCommit,
 			"Commit message",
 			"Leave empty to auto-generate. Enter/Tab moves to action buttons.",
-			renderInputContainer(m.wizard.CommitMessage.View(), m.wizard.CommitFocused),
+			renderInputContainer(m.wizard.CommitMessage.View(), m.wizard.FocusArea == fixWizardFocusCommit),
+			"",
+		))
+	}
+	if m.wizard.EnableProjectName {
+		b.WriteString("\n\n")
+		b.WriteString(renderFieldBlock(
+			m.wizard.FocusArea == fixWizardFocusProjectName,
+			"Repository name on GitHub",
+			"Leave empty to use the current folder/repo name.",
+			renderInputContainer(m.wizard.ProjectName.View(), m.wizard.FocusArea == fixWizardFocusProjectName),
 			"",
 		))
 	}
@@ -402,18 +524,11 @@ func (m *fixTUIModel) viewWizardContent() string {
 	}
 	if m.wizard.Action == FixActionCreateProject {
 		b.WriteString("\n\n")
-		current := "default"
-		switch m.wizard.Visibility {
-		case domain.VisibilityPrivate:
-			current = "private"
-		case domain.VisibilityPublic:
-			current = "public"
-		}
 		b.WriteString(renderFieldBlock(
-			false,
+			m.wizard.FocusArea == fixWizardFocusVisibility,
 			"Project visibility",
-			"Use up/down to change.",
-			renderEnumLine(current, []string{"default", "private", "public"}),
+			"Left/right changes this field when focused.",
+			renderCreateVisibilityLine(m.wizard.Visibility, m.wizard.DefaultVis),
 			"",
 		))
 	}
@@ -421,10 +536,10 @@ func (m *fixTUIModel) viewWizardContent() string {
 	b.WriteString("\n\n")
 	b.WriteString(renderWizardActionButtons(m.wizard.ActionFocus))
 	b.WriteString("\n")
-	if m.wizard.EnableCommitMessage && m.wizard.CommitFocused {
-		b.WriteString(hintStyle.Render("Typing mode: text input captures all letters. Enter/Tab to buttons. Esc cancels remaining."))
+	if m.wizard.FocusArea == fixWizardFocusCommit || m.wizard.FocusArea == fixWizardFocusProjectName {
+		b.WriteString(hintStyle.Render("Typing mode: text input captures all letters. Tab/down moves focus. Esc cancels remaining."))
 	} else {
-		b.WriteString(hintStyle.Render("Left/right: choose button   enter: activate   up/tab: back to input   esc: cancel remaining"))
+		b.WriteString(hintStyle.Render("Left/right: enum or buttons   up/down: move focus   enter: activate   esc: cancel remaining"))
 	}
 	return b.String()
 }
@@ -477,6 +592,36 @@ func renderWizardActionButtons(focus int) string {
 		skipStyle.Render("Skip"),
 		cancelStyle.Render("Cancel"),
 	)
+}
+
+func renderCreateVisibilityLine(current domain.Visibility, defaultVis domain.Visibility) string {
+	makeLabel := func(vis domain.Visibility) string {
+		name := string(vis)
+		if vis == defaultVis {
+			return name + " (default)"
+		}
+		return name
+	}
+	options := []struct {
+		Visibility domain.Visibility
+		Label      string
+	}{
+		{Visibility: domain.VisibilityPrivate, Label: makeLabel(domain.VisibilityPrivate)},
+		{Visibility: domain.VisibilityPublic, Label: makeLabel(domain.VisibilityPublic)},
+	}
+	if current != domain.VisibilityPublic {
+		current = domain.VisibilityPrivate
+	}
+
+	parts := make([]string, 0, len(options))
+	for _, option := range options {
+		style := enumOptionStyle
+		if option.Visibility == current {
+			style = enumOptionActiveStyle
+		}
+		parts = append(parts, style.Render(option.Label))
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
 func (m *fixTUIModel) wizardInnerWidth() int {

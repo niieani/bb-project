@@ -458,6 +458,69 @@ func TestFixTUIWizardChangedFilesTrimIndicator(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardCreateProjectNameStartsEmptyWithPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:   "repo-from-folder",
+				Path:   "/repos/repo-from-folder",
+				RepoID: "",
+			},
+			Meta: nil,
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/repo-from-folder", Action: FixActionCreateProject}})
+
+	if !m.wizard.EnableProjectName {
+		t.Fatal("expected project name input to be enabled for create-project")
+	}
+	if got := m.wizard.ProjectName.Value(); got != "" {
+		t.Fatalf("project name initial value = %q, want empty", got)
+	}
+	if got := m.wizard.ProjectName.Placeholder; got != "repo-from-folder" {
+		t.Fatalf("project name placeholder = %q, want %q", got, "repo-from-folder")
+	}
+}
+
+func TestFixTUIWizardCreateProjectVisibilityUsesLeftRightWhenFocused(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:   "api",
+				Path:   "/repos/api",
+				RepoID: "",
+			},
+			Meta: nil,
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+
+	if m.wizard.Visibility != domain.VisibilityPrivate {
+		t.Fatalf("initial visibility = %q, want private default", m.wizard.Visibility)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // project name -> visibility
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight}) // visibility private -> public
+
+	if m.wizard.Visibility != domain.VisibilityPublic {
+		t.Fatalf("visibility = %q, want public after right arrow on focused visibility", m.wizard.Visibility)
+	}
+
+	view := m.viewWizardContent()
+	if !strings.Contains(view, "private (default)") || !strings.Contains(view, "public") {
+		t.Fatalf("expected two-option visibility picker with default label, got %q", view)
+	}
+	if strings.Contains(view, "default") && !strings.Contains(view, "private (default)") {
+		t.Fatalf("expected no third default option, got %q", view)
+	}
+}
+
 func TestFixTUIRowsRenderWithoutReplacementRuneAndWithoutDoubleSpacing(t *testing.T) {
 	t.Parallel()
 

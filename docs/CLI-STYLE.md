@@ -146,6 +146,8 @@ Use a reusable field block for all form rows:
 - In confirmation wizards, place progress badges (for example `1/3`) on the same top row as the title and align them to the top-right edge.
 - Changed-files sections in fix wizards should render as explicit lists (one file per row), with colored `+`/`-` counters and a cap + indicator when rows are trimmed.
 - Prefer trimming with explicit `showing first N of M` messaging over overflowing content; never let long file lists collapse surrounding form controls.
+- Create-project visibility pickers should be two-option horizontal controls (`private`, `public`) with explicit default labeling (for example `private (default)`), and left/right should change value when that control is focused.
+- In create-project confirmations, include a dedicated editable repository-name field with an empty value and placeholder fallback to current folder/repo name.
 
 ## Interaction + Focus Standards
 
@@ -161,6 +163,7 @@ Use a reusable field block for all form rows:
 - In list views, `Enter` on a selected row opens contextual edit UI.
 - In button groups and action rows, `Left/Right` moves focus between adjacent actions.
 - When any text input is focused, alphabetic keys must be treated as text input only (never as command shortcuts like quit/navigation).
+- In multi-control wizards, use explicit focus movement (`up/down` or `tab`) between input fields, enum pickers, and action buttons; left/right should only operate on the currently focused horizontal control.
 
 ## Consistency Checklist
 
