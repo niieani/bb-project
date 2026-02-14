@@ -617,7 +617,7 @@ func normalizedRepoMetadata(meta domain.RepoMetadataFile) domain.RepoMetadataFil
 	return meta
 }
 
-func (a *App) loadRepoMetadataWithPushAccess(repoPath string, repoKey string) (domain.RepoMetadataFile, bool, error) {
+func (a *App) loadRepoMetadataWithPushAccess(repoPath string, repoKey string, originURL string, shouldProbe bool) (domain.RepoMetadataFile, bool, error) {
 	if strings.TrimSpace(repoKey) == "" {
 		return domain.RepoMetadataFile{}, false, nil
 	}
@@ -632,10 +632,18 @@ func (a *App) loadRepoMetadataWithPushAccess(repoPath string, repoKey string) (d
 		}
 		return domain.RepoMetadataFile{}, false, err
 	}
+	loaded := meta
+	normalized := normalizedRepoMetadata(meta)
+	changed := normalized != loaded
 
-	updated, changed, err := a.probeAndUpdateRepoPushAccess(repoPath, normalizedRepoMetadata(meta), false)
-	if err != nil {
-		return domain.RepoMetadataFile{}, false, err
+	updated := normalized
+	if shouldProbe {
+		var probeChanged bool
+		updated, probeChanged, err = a.probeAndUpdateRepoPushAccess(repoPath, originURL, normalized, false)
+		if err != nil {
+			return domain.RepoMetadataFile{}, false, err
+		}
+		changed = changed || probeChanged
 	}
 	if changed {
 		if err := state.SaveRepoMetadata(a.Paths, updated); err != nil {
@@ -645,7 +653,7 @@ func (a *App) loadRepoMetadataWithPushAccess(repoPath string, repoKey string) (d
 	return updated, true, nil
 }
 
-func (a *App) probeAndUpdateRepoPushAccess(repoPath string, meta domain.RepoMetadataFile, force bool) (domain.RepoMetadataFile, bool, error) {
+func (a *App) probeAndUpdateRepoPushAccess(repoPath string, originURL string, meta domain.RepoMetadataFile, force bool) (domain.RepoMetadataFile, bool, error) {
 	original := meta
 	meta = normalizedRepoMetadata(meta)
 
@@ -668,6 +676,16 @@ func (a *App) probeAndUpdateRepoPushAccess(repoPath string, meta domain.RepoMeta
 	if strings.TrimSpace(remote) == "" {
 		meta.PushAccess = domain.PushAccessUnknown
 		meta.PushAccessCheckedRemote = ""
+		meta.PushAccessCheckedAt = a.Now()
+		if force {
+			meta.PushAccessManualOverride = false
+		}
+		return meta, meta != original, nil
+	}
+
+	if !shouldProbePushAccessForOrigin(originURL) {
+		meta.PushAccess = domain.PushAccessUnknown
+		meta.PushAccessCheckedRemote = strings.TrimSpace(remote)
 		meta.PushAccessCheckedAt = a.Now()
 		if force {
 			meta.PushAccessManualOverride = false
@@ -698,6 +716,26 @@ func (a *App) probeAndUpdateRepoPushAccess(repoPath string, meta domain.RepoMeta
 
 func pushAccessAllowsAutoPush(access domain.PushAccess) bool {
 	return domain.NormalizePushAccess(access) != domain.PushAccessReadOnly
+}
+
+func shouldProbePushAccessForOrigin(originURL string) bool {
+	originURL = strings.TrimSpace(originURL)
+	if originURL == "" {
+		return false
+	}
+	identity, err := domain.NormalizeOriginIdentity(originURL)
+	if err != nil {
+		return false
+	}
+	host, _, ok := strings.Cut(identity, "/")
+	if !ok {
+		return false
+	}
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "file" {
+		return true
+	}
+	return host == "github.com" || strings.HasSuffix(host, ".github.com")
 }
 
 type discoveredRepo struct {
@@ -930,7 +968,8 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	preferredRemote := ""
 	pushAccess := domain.PushAccessUnknown
 	if strings.TrimSpace(repo.RepoKey) != "" {
-		if meta, hasMeta, err := a.loadRepoMetadataWithPushAccess(repo.Path, repo.RepoKey); err != nil {
+		shouldProbePushAccess := ahead > 0
+		if meta, hasMeta, err := a.loadRepoMetadataWithPushAccess(repo.Path, repo.RepoKey, origin, shouldProbePushAccess); err != nil {
 			return domain.MachineRepoRecord{}, err
 		} else if hasMeta {
 			autoPush = meta.AutoPush
@@ -1471,7 +1510,7 @@ func (a *App) RunRepoPushAccessRefresh(repoSelector string) (int, error) {
 	}
 
 	repo.PushAccessManualOverride = false
-	updated, changed, err := a.probeAndUpdateRepoPushAccess(repoPath, repo, true)
+	updated, changed, err := a.probeAndUpdateRepoPushAccess(repoPath, repo.OriginURL, repo, true)
 	if err != nil {
 		return 2, err
 	}

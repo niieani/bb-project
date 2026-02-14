@@ -575,7 +575,7 @@ func (a *App) forkAndRetargetFromFix(cfg domain.ConfigFile, target fixRepoState)
 	meta.PushAccessCheckedRemote = ""
 	meta.PushAccessManualOverride = false
 
-	updated, _, err := a.probeAndUpdateRepoPushAccess(repoPath, meta, true)
+	updated, _, err := a.probeAndUpdateRepoPushAccess(repoPath, target.Record.OriginURL, meta, true)
 	if err != nil {
 		return err
 	}

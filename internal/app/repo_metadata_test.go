@@ -225,3 +225,61 @@ func TestRunRepoPushAccessSetRejectsInvalidValue(t *testing.T) {
 		t.Fatalf("code = %d, want 2", code)
 	}
 }
+
+func TestShouldProbePushAccessForOrigin(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		origin string
+		want   bool
+	}{
+		{name: "github ssh", origin: "git@github.com:you/demo.git", want: true},
+		{name: "github https", origin: "https://github.com/you/demo.git", want: true},
+		{name: "github alias host", origin: "git@niieani.github.com:niieani/condu.git", want: true},
+		{name: "file path remote", origin: "/tmp/remotes/you/demo.git", want: true},
+		{name: "non github host", origin: "https://gitflic.ru/project/demo.git", want: false},
+		{name: "empty", origin: "", want: false},
+		{name: "invalid", origin: "::not-a-url::", want: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := shouldProbePushAccessForOrigin(tt.origin); got != tt.want {
+				t.Fatalf("shouldProbePushAccessForOrigin(%q) = %v, want %v", tt.origin, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadRepoMetadataWithPushAccessSkipsProbeWhenNotRequested(t *testing.T) {
+	t.Parallel()
+
+	paths := state.NewPaths(t.TempDir())
+	a := New(paths, io.Discard, io.Discard)
+	repoKey := "software/demo"
+
+	meta := domain.RepoMetadataFile{
+		RepoKey:    repoKey,
+		Name:       "demo",
+		OriginURL:  "https://github.com/you/demo.git",
+		PushAccess: domain.PushAccessUnknown,
+	}
+	if err := state.SaveRepoMetadata(paths, meta); err != nil {
+		t.Fatalf("save metadata: %v", err)
+	}
+
+	loaded, hasMeta, err := a.loadRepoMetadataWithPushAccess("/tmp/does-not-matter", repoKey, meta.OriginURL, false)
+	if err != nil {
+		t.Fatalf("loadRepoMetadataWithPushAccess error: %v", err)
+	}
+	if !hasMeta {
+		t.Fatal("expected metadata to be loaded")
+	}
+	if !loaded.PushAccessCheckedAt.IsZero() {
+		t.Fatalf("expected no push-access probe when shouldProbe=false, checked_at=%s", loaded.PushAccessCheckedAt)
+	}
+}

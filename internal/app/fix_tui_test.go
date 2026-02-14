@@ -1121,6 +1121,73 @@ func TestFixTUIWizardActionsDownScrollsContextAtFocusEdge(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardScrollIndicatorShowsBelowAtTop(t *testing.T) {
+	t.Parallel()
+
+	noisy := make([]string, 0, 40)
+	for i := 0; i < 40; i++ {
+		noisy = append(noisy, fmt.Sprintf("tmp/noisy-%02d.log", i))
+	}
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{
+				NoisyChangedPaths: noisy,
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
+
+	view := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(view, "More context below") {
+		t.Fatalf("expected bottom scroll indicator near top of context, got %q", view)
+	}
+	if strings.Contains(view, "More context above") {
+		t.Fatalf("top indicator should not show while context at top, got %q", view)
+	}
+}
+
+func TestFixTUIWizardScrollIndicatorShowsAboveAfterScroll(t *testing.T) {
+	t.Parallel()
+
+	noisy := make([]string, 0, 40)
+	for i := 0; i < 40; i++ {
+		noisy = append(noisy, fmt.Sprintf("tmp/noisy-%02d.log", i))
+	}
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{
+				NoisyChangedPaths: noisy,
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project -> visibility
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // visibility -> actions
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // actions edge -> scroll context down
+
+	view := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(view, "More context above") {
+		t.Fatalf("expected top scroll indicator after scrolling, got %q", view)
+	}
+}
+
 func TestFixTUIWizardUpDownCanReachProjectNameWithoutTab(t *testing.T) {
 	t.Parallel()
 

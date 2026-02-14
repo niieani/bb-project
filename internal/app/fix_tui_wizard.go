@@ -511,9 +511,15 @@ func (m *fixTUIModel) viewWizardContent() string {
 	controls := m.viewWizardStaticControls()
 	hint := m.wizardFooterHint()
 	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus), m.wizardBodyLineWidth())
+	topIndicator := m.wizardScrollIndicatorTop()
+	bottomIndicator := m.wizardScrollIndicatorBottom()
 
 	var b strings.Builder
+	b.WriteString(topIndicator)
+	b.WriteString("\n")
 	b.WriteString(m.wizard.BodyViewport.View())
+	b.WriteString("\n")
+	b.WriteString(bottomIndicator)
 	if controls != "" {
 		b.WriteString("\n\n")
 		b.WriteString(controls)
@@ -523,6 +529,26 @@ func (m *fixTUIModel) viewWizardContent() string {
 	b.WriteString("\n")
 	b.WriteString(hint)
 	return b.String()
+}
+
+func (m *fixTUIModel) wizardHasContextOverflow() bool {
+	return !(m.wizard.BodyViewport.AtTop() && m.wizard.BodyViewport.AtBottom())
+}
+
+func (m *fixTUIModel) wizardScrollIndicatorTop() string {
+	if !m.wizardHasContextOverflow() || m.wizard.BodyViewport.AtTop() {
+		return ""
+	}
+	const text = "↑ More context above (scroll up)"
+	return hintStyle.Render(m.clampSingleLine(text, m.wizardBodyLineWidth()))
+}
+
+func (m *fixTUIModel) wizardScrollIndicatorBottom() string {
+	if !m.wizardHasContextOverflow() || m.wizard.BodyViewport.AtBottom() {
+		return ""
+	}
+	const text = "↓ More context below (scroll down)"
+	return hintStyle.Render(m.clampSingleLine(text, m.wizardBodyLineWidth()))
 }
 
 func (m *fixTUIModel) viewWizardStaticControls() string {
@@ -674,7 +700,7 @@ func (m *fixTUIModel) syncWizardViewport() {
 	controls := m.viewWizardStaticControls()
 	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus), m.wizardBodyLineWidth())
 	hint := m.wizardFooterHint()
-	staticLines := lipgloss.Height(actions) + lipgloss.Height(hint) + 3 // 2 blank lines before actions + newline before hint
+	staticLines := lipgloss.Height(actions) + lipgloss.Height(hint) + 5 // top/bottom indicator rows + 2 blank lines before actions + newline before hint
 	if controls != "" {
 		staticLines += lipgloss.Height(controls) + 2 // blank lines between viewport and controls
 	}
