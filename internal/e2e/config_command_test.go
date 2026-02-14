@@ -7,6 +7,7 @@ import (
 )
 
 func TestConfigCommandRequiresInteractiveTTY(t *testing.T) {
+	t.Parallel()
 	_, m, _ := setupSingleMachine(t)
 	now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 

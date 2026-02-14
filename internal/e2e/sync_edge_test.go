@@ -12,7 +12,9 @@ import (
 )
 
 func TestSyncEdgeCases(t *testing.T) {
+	t.Parallel()
 	t.Run("TC-SYNC-007", func(t *testing.T) {
+		t.Parallel()
 		h, mA, mB, repoA, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 		tieTime := now.Add(10 * time.Minute)
 
@@ -60,6 +62,7 @@ func TestSyncEdgeCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-008", func(t *testing.T) {
+		t.Parallel()
 		h, mA, mB, repoA, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 
 		mA.MustRunGit(now, repoA, "checkout", "-b", "local-a")
@@ -77,6 +80,7 @@ func TestSyncEdgeCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-009", func(t *testing.T) {
+		t.Parallel()
 		_, mA, mB, repoA, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 
 		mB.MustWriteFile(filepath.Join(repoB, "b.txt"), "b\n")
@@ -98,6 +102,7 @@ func TestSyncEdgeCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-010", func(t *testing.T) {
+		t.Parallel()
 		tests := []struct {
 			name   string
 			marker string
@@ -112,6 +117,7 @@ func TestSyncEdgeCases(t *testing.T) {
 		for _, tt := range tests {
 			tt := tt
 			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
 				_, _, mB, _, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 				gitDir := filepath.Join(repoB, ".git", tt.marker)
 				if tt.dir {
@@ -135,6 +141,7 @@ func TestSyncEdgeCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-011", func(t *testing.T) {
+		t.Parallel()
 		_, _, mB, _, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 		mB.MustRunGit(now, repoB, "checkout", "-b", "missing-upstream")
 		if _, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err == nil {
@@ -147,7 +154,9 @@ func TestSyncEdgeCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-016", func(t *testing.T) {
+		t.Parallel()
 		t.Run("pull_failed", func(t *testing.T) {
+			t.Parallel()
 			_, _, mB, _, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 			mB.MustRunGit(now, repoB, "remote", "set-url", "origin", "/nonexistent/remote.git")
 			if _, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err == nil {
@@ -160,6 +169,7 @@ func TestSyncEdgeCases(t *testing.T) {
 		})
 
 		t.Run("push_failed", func(t *testing.T) {
+			t.Parallel()
 			_, _, mB, _, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 			remote := stringTrim(mB.MustRunGit(now, repoB, "remote", "get-url", "origin"))
 			hookPath := filepath.Join(remote, "hooks", "pre-receive")
@@ -182,6 +192,7 @@ func TestSyncEdgeCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-017", func(t *testing.T) {
+		t.Parallel()
 		_, m, _ := setupSingleMachine(t)
 		if out, err := m.RunBB(time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC), "scan"); err != nil && out == "" {
 			// ignore; lock test only needs machine paths initialized
@@ -201,6 +212,7 @@ func TestSyncEdgeCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-018", func(t *testing.T) {
+		t.Parallel()
 		_, m, _ := setupSingleMachine(t)
 		base := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 		if out, err := m.RunBB(base, "scan"); err != nil {
@@ -228,6 +240,7 @@ func TestSyncEdgeCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-019", func(t *testing.T) {
+		t.Parallel()
 		_, m, _ := setupSingleMachine(t)
 		base := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 		if out, err := m.RunBB(base, "scan"); err != nil {

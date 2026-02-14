@@ -22,9 +22,11 @@ func setupTwoCatalogMachine(t *testing.T) (*testharness.Harness, *testharness.Ma
 }
 
 func TestCatalogCases(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 
 	t.Run("TC-CATALOG-001", func(t *testing.T) {
+		t.Parallel()
 		_, m, softwareRoot, _ := setupTwoCatalogMachine(t)
 		if out, err := m.RunBB(now, "init", "api"); err != nil {
 			t.Fatalf("init failed: %v\n%s", err, out)
@@ -35,6 +37,7 @@ func TestCatalogCases(t *testing.T) {
 	})
 
 	t.Run("TC-CATALOG-002", func(t *testing.T) {
+		t.Parallel()
 		_, m, _, referencesRoot := setupTwoCatalogMachine(t)
 		if out, err := m.RunBB(now, "init", "api", "--catalog", "references"); err != nil {
 			t.Fatalf("init failed: %v\n%s", err, out)
@@ -45,6 +48,7 @@ func TestCatalogCases(t *testing.T) {
 	})
 
 	t.Run("TC-CATALOG-003", func(t *testing.T) {
+		t.Parallel()
 		_, m, softwareRoot, referencesRoot := setupTwoCatalogMachine(t)
 		createRepoWithOrigin(t, m, softwareRoot, "s-repo", now)
 		createRepoWithOrigin(t, m, referencesRoot, "r-repo", now)
@@ -59,6 +63,7 @@ func TestCatalogCases(t *testing.T) {
 	})
 
 	t.Run("TC-CATALOG-004", func(t *testing.T) {
+		t.Parallel()
 		_, m, softwareRoot, referencesRoot := setupTwoCatalogMachine(t)
 		createRepoWithOrigin(t, m, softwareRoot, "s-repo", now)
 		createRepoWithOrigin(t, m, referencesRoot, "r-repo", now)
@@ -73,6 +78,7 @@ func TestCatalogCases(t *testing.T) {
 	})
 
 	t.Run("TC-CATALOG-005", func(t *testing.T) {
+		t.Parallel()
 		h := testharness.NewHarness(t)
 		rootA := filepath.Join(h.Root, "machines", "a", "catalogs", "software")
 		refsA := filepath.Join(h.Root, "machines", "a", "catalogs", "references")
@@ -102,6 +108,7 @@ func TestCatalogCases(t *testing.T) {
 	})
 
 	t.Run("TC-CATALOG-006", func(t *testing.T) {
+		t.Parallel()
 		_, m, _, _ := setupTwoCatalogMachine(t)
 		out, err := m.RunBB(now, "init", "api", "--catalog", "missing")
 		if err == nil {

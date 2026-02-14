@@ -33,7 +33,9 @@ func firstRepoMetadataPath(t *testing.T, m *testharness.Machine) string {
 }
 
 func TestInitCases(t *testing.T) {
+	t.Parallel()
 	t.Run("TC-INIT-001", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 
 		out, err := m.RunBB(fixedNow, "init", "demo")
@@ -58,6 +60,7 @@ func TestInitCases(t *testing.T) {
 	})
 
 	t.Run("TC-INIT-002", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath := filepath.Join(catalogRoot, "demo")
 		m.MustWriteFile(filepath.Join(repoPath, "README.md"), "hello")
@@ -72,6 +75,7 @@ func TestInitCases(t *testing.T) {
 	})
 
 	t.Run("TC-INIT-003", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath := filepath.Join(catalogRoot, "demo")
 		if out, err := m.RunBB(fixedNow, "init", "demo"); err != nil {
@@ -88,6 +92,7 @@ func TestInitCases(t *testing.T) {
 	})
 
 	t.Run("TC-INIT-004", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath := filepath.Join(catalogRoot, "demo")
 		if _, err := m.RunGit(fixedNow, catalogRoot, "init", "-b", "main", repoPath); err != nil {
@@ -105,6 +110,7 @@ func TestInitCases(t *testing.T) {
 	})
 
 	t.Run("TC-INIT-005", func(t *testing.T) {
+		t.Parallel()
 		_, m, _ := setupSingleMachine(t)
 		if out, err := m.RunBB(fixedNow, "init", "demo", "--public"); err != nil {
 			t.Fatalf("init failed: %v\n%s", err, out)
@@ -116,6 +122,7 @@ func TestInitCases(t *testing.T) {
 	})
 
 	t.Run("TC-INIT-006", func(t *testing.T) {
+		t.Parallel()
 		_, m, _ := setupSingleMachine(t)
 		if out, err := m.RunBB(fixedNow, "init", "demo"); err != nil {
 			t.Fatalf("init failed: %v\n%s", err, out)
@@ -127,6 +134,7 @@ func TestInitCases(t *testing.T) {
 	})
 
 	t.Run("TC-INIT-007", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath := filepath.Join(catalogRoot, "demo")
 		m.MustRunGit(fixedNow, catalogRoot, "init", "-b", "main", repoPath)
@@ -144,6 +152,7 @@ func TestInitCases(t *testing.T) {
 	})
 
 	t.Run("TC-INIT-008", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath := filepath.Join(catalogRoot, "demo")
 		m.MustRunGit(fixedNow, catalogRoot, "init", "-b", "main", repoPath)
@@ -161,6 +170,7 @@ func TestInitCases(t *testing.T) {
 	})
 
 	t.Run("TC-INIT-009", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		cwd := filepath.Join(catalogRoot, "demo", "nested")
 		if err := os.MkdirAll(cwd, 0o755); err != nil {
@@ -177,6 +187,7 @@ func TestInitCases(t *testing.T) {
 	})
 
 	t.Run("TC-INIT-010", func(t *testing.T) {
+		t.Parallel()
 		_, m, _ := setupSingleMachine(t)
 		out, err := m.RunBBAt(fixedNow, m.Home, "init")
 		if err == nil {
@@ -188,6 +199,7 @@ func TestInitCases(t *testing.T) {
 	})
 
 	t.Run("TC-INIT-011", func(t *testing.T) {
+		t.Parallel()
 		_, m, _ := setupSingleMachine(t)
 		cfg := strings.Replace(m.MustReadFile(m.ConfigPath()), "owner: you", "owner: \"\"", 1)
 		m.MustWriteFile(m.ConfigPath(), cfg)

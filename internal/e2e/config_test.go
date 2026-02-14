@@ -9,9 +9,11 @@ import (
 )
 
 func TestConfigCases(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 
 	t.Run("TC-CONFIG-001", func(t *testing.T) {
+		t.Parallel()
 		_, m, _ := setupSingleMachine(t)
 		bad := strings.TrimSpace(`
 version: 1
@@ -42,6 +44,7 @@ notify:
 	})
 
 	t.Run("TC-CONFIG-002", func(t *testing.T) {
+		t.Parallel()
 		_, m, _ := setupSingleMachine(t)
 		machinePath := m.ConfigMachinePath()
 		if err := os.Remove(machinePath); err != nil {
@@ -61,6 +64,7 @@ notify:
 	})
 
 	t.Run("TC-CONFIG-003", func(t *testing.T) {
+		t.Parallel()
 		_, m, _ := setupSingleMachine(t)
 		m.MustWriteFile(m.ConfigPath(), "version: [\n")
 		out, err := m.RunBB(now, "sync")

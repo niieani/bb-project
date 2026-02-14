@@ -8,9 +8,11 @@ import (
 )
 
 func TestNotifyCases(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 
 	t.Run("TC-NOTIFY-001", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "api", now)
 		m.MustWriteFile(filepath.Join(repoPath, "README.md"), "dirty\n")
@@ -25,6 +27,7 @@ func TestNotifyCases(t *testing.T) {
 	})
 
 	t.Run("TC-NOTIFY-002", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "api", now)
 		m.MustWriteFile(filepath.Join(repoPath, "README.md"), "dirty\n")
@@ -40,6 +43,7 @@ func TestNotifyCases(t *testing.T) {
 	})
 
 	t.Run("TC-NOTIFY-003", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "api", now)
 		m.MustWriteFile(filepath.Join(repoPath, "README.md"), "dirty\n")
@@ -58,6 +62,7 @@ func TestNotifyCases(t *testing.T) {
 	})
 
 	t.Run("TC-NOTIFY-004", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		_, _ = createRepoWithOrigin(t, m, catalogRoot, "api", now)
 		out, err := m.RunBB(now.Add(1*time.Minute), "sync", "--notify")
@@ -70,6 +75,7 @@ func TestNotifyCases(t *testing.T) {
 	})
 
 	t.Run("TC-NOTIFY-005", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoOne := filepath.Join(catalogRoot, "api-one")
 		repoTwo := filepath.Join(catalogRoot, "api-two")
@@ -89,6 +95,7 @@ func TestNotifyCases(t *testing.T) {
 	})
 
 	t.Run("TC-NOTIFY-006", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "api", now)
 		m.MustWriteFile(filepath.Join(repoPath, "README.md"), "dirty\n")
@@ -107,6 +114,7 @@ func TestNotifyCases(t *testing.T) {
 	})
 
 	t.Run("TC-NOTIFY-007", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		cfg := strings.Replace(m.MustReadFile(m.ConfigPath()), "throttle_minutes: 60", "throttle_minutes: 0", 1)
 		m.MustWriteFile(m.ConfigPath(), cfg)

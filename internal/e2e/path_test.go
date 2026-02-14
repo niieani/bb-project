@@ -30,7 +30,9 @@ func setupSourceRepoForClone(t *testing.T) (*testharness.Harness, *testharness.M
 }
 
 func TestPathCases(t *testing.T) {
+	t.Parallel()
 	t.Run("TC-PATH-001", func(t *testing.T) {
+		t.Parallel()
 		_, _, mB, _, targetPath, now := setupSourceRepoForClone(t)
 		if err := os.MkdirAll(targetPath, 0o755); err != nil {
 			t.Fatalf("mkdir target: %v", err)
@@ -44,6 +46,7 @@ func TestPathCases(t *testing.T) {
 	})
 
 	t.Run("TC-PATH-002", func(t *testing.T) {
+		t.Parallel()
 		_, _, mB, _, targetPath, now := setupSourceRepoForClone(t)
 		if err := os.MkdirAll(targetPath, 0o755); err != nil {
 			t.Fatalf("mkdir target: %v", err)
@@ -62,6 +65,7 @@ func TestPathCases(t *testing.T) {
 	})
 
 	t.Run("TC-PATH-003", func(t *testing.T) {
+		t.Parallel()
 		_, _, mB, _, targetPath, now := setupSourceRepoForClone(t)
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			t.Fatalf("mkdir parent: %v", err)
@@ -86,6 +90,7 @@ func TestPathCases(t *testing.T) {
 	})
 
 	t.Run("TC-PATH-004", func(t *testing.T) {
+		t.Parallel()
 		_, mA, mB, repoA, targetPath, now := setupSourceRepoForClone(t)
 		origin := stringTrim(mA.MustRunGit(now, repoA, "remote", "get-url", "origin"))
 		mB.MustRunGit(now, "", "clone", origin, targetPath)
@@ -101,6 +106,7 @@ func TestPathCases(t *testing.T) {
 	})
 
 	t.Run("TC-PATH-005", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 		repo1, remote := createRepoWithOrigin(t, m, catalogRoot, "one", now)
@@ -121,6 +127,7 @@ func TestPathCases(t *testing.T) {
 	})
 
 	t.Run("TC-PATH-006", func(t *testing.T) {
+		t.Parallel()
 		_, _, mB, _, targetPath, now := setupSourceRepoForClone(t)
 		if err := os.MkdirAll(targetPath, 0o755); err != nil {
 			t.Fatalf("mkdir target: %v", err)

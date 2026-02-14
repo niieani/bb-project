@@ -11,9 +11,11 @@ import (
 )
 
 func TestScanCases(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 
 	t.Run("TC-SCAN-001", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		createRepoWithOrigin(t, m, catalogRoot, "demo", now)
 
@@ -29,6 +31,7 @@ func TestScanCases(t *testing.T) {
 	})
 
 	t.Run("TC-SCAN-002", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		if err := os.MkdirAll(filepath.Join(catalogRoot, "not-a-repo"), 0o755); err != nil {
 			t.Fatalf("mkdir: %v", err)
@@ -45,6 +48,7 @@ func TestScanCases(t *testing.T) {
 	})
 
 	t.Run("TC-SCAN-003", func(t *testing.T) {
+		t.Parallel()
 		h := testHarnessTwoCatalogs(t)
 		now2 := now.Add(10 * time.Minute)
 		createRepoWithOrigin(t, h.m, h.softwareRoot, "software-repo", now2)
@@ -64,6 +68,7 @@ func TestScanCases(t *testing.T) {
 	})
 
 	t.Run("TC-SCAN-004", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
 		worktreePath := filepath.Join(catalogRoot, "demo-worktree")
@@ -88,6 +93,7 @@ func TestScanCases(t *testing.T) {
 	})
 
 	t.Run("TC-SCAN-005", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
 		m.MustRunGit(now, repoPath, "remote", "rename", "origin", "upstream")

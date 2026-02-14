@@ -10,7 +10,9 @@ import (
 )
 
 func TestAdoptCases(t *testing.T) {
+	t.Parallel()
 	t.Run("TC-ADOPT-001", func(t *testing.T) {
+		t.Parallel()
 		h, mA, mB, rootA, rootB := setupTwoMachines(t)
 		now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 		repoA, remote := createRepoWithOrigin(t, mA, rootA, "api", now)
@@ -45,6 +47,7 @@ func TestAdoptCases(t *testing.T) {
 	})
 
 	t.Run("TC-ADOPT-002", func(t *testing.T) {
+		t.Parallel()
 		h, mA, mB, rootA, rootB := setupTwoMachines(t)
 		now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 		repoA, remote := createRepoWithOrigin(t, mA, rootA, "api", now)
@@ -85,6 +88,7 @@ func TestAdoptCases(t *testing.T) {
 	})
 
 	t.Run("TC-ADOPT-003", func(t *testing.T) {
+		t.Parallel()
 		h, mA, mB, rootA, rootB := setupTwoMachines(t)
 		now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 		_, _ = createRepoWithOrigin(t, mA, rootA, "api", now)

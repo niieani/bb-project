@@ -8,9 +8,11 @@ import (
 )
 
 func TestFixCases(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 
 	t.Run("requires interactive terminal for table mode", func(t *testing.T) {
+		t.Parallel()
 		_, m, _ := setupSingleMachine(t)
 		out, err := m.RunBB(now, "fix")
 		if err == nil {
@@ -22,6 +24,7 @@ func TestFixCases(t *testing.T) {
 	})
 
 	t.Run("lists and applies push", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
 
@@ -47,6 +50,7 @@ func TestFixCases(t *testing.T) {
 	})
 
 	t.Run("stage commit push with auto message", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
 
@@ -66,6 +70,7 @@ func TestFixCases(t *testing.T) {
 	})
 
 	t.Run("stage commit push blocked when uncommitted .env exists", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
 
@@ -88,6 +93,7 @@ func TestFixCases(t *testing.T) {
 	})
 
 	t.Run("non-interactive stage commit push blocked for node_modules when root gitignore missing", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
 
@@ -110,6 +116,7 @@ func TestFixCases(t *testing.T) {
 	})
 
 	t.Run("set upstream push", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
 
@@ -133,6 +140,7 @@ func TestFixCases(t *testing.T) {
 	})
 
 	t.Run("set upstream push works with non-origin remote", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
 		m.MustRunGit(now, repoPath, "remote", "rename", "origin", "upstream")
@@ -150,6 +158,7 @@ func TestFixCases(t *testing.T) {
 	})
 
 	t.Run("preferred remote override is honored", func(t *testing.T) {
+		t.Parallel()
 		h, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
 		secondaryRemote := filepath.Join(h.RemotesRoot, "you", "demo-secondary.git")
@@ -175,6 +184,7 @@ func TestFixCases(t *testing.T) {
 	})
 
 	t.Run("enable auto push action", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		_, _ = createRepoWithOrigin(t, m, catalogRoot, "demo", now)
 
@@ -201,6 +211,7 @@ func TestFixCases(t *testing.T) {
 	})
 
 	t.Run("create project from missing upstream", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath := filepath.Join(catalogRoot, "demo")
 		m.MustRunGit(now, catalogRoot, "init", "-b", "main", repoPath)
@@ -231,6 +242,7 @@ func TestFixCases(t *testing.T) {
 	})
 
 	t.Run("project selector accepts repo_id and path", func(t *testing.T) {
+		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
 

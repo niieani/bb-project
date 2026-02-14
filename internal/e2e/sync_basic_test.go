@@ -32,7 +32,9 @@ func bootstrapRepoAcrossTwoMachines(t *testing.T) (*testharness.Harness, *testha
 }
 
 func TestSyncBasicCases(t *testing.T) {
+	t.Parallel()
 	t.Run("TC-SYNC-001", func(t *testing.T) {
+		t.Parallel()
 		h, mA, mB, repoA, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 
 		mA.MustRunGit(now, repoA, "checkout", "-b", "feature/x")
@@ -55,6 +57,7 @@ func TestSyncBasicCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-002", func(t *testing.T) {
+		t.Parallel()
 		h, mA, mB, repoA, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 
 		mA.MustRunGit(now, repoA, "checkout", "-b", "feature/y")
@@ -82,6 +85,7 @@ func TestSyncBasicCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-003", func(t *testing.T) {
+		t.Parallel()
 		h, mA, mB, repoA, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 
 		mA.MustRunGit(now, repoA, "checkout", "-b", "feature/z")
@@ -109,6 +113,7 @@ func TestSyncBasicCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-004", func(t *testing.T) {
+		t.Parallel()
 		h, mA, mB, repoA, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 
 		mA.MustRunGit(now, repoA, "checkout", "-b", "feature/clean")
@@ -142,6 +147,7 @@ func TestSyncBasicCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-005", func(t *testing.T) {
+		t.Parallel()
 		_, mA, _, _, _, now := bootstrapRepoAcrossTwoMachines(t)
 		if out, err := mA.RunBB(now.Add(2*time.Minute), "sync"); err != nil {
 			t.Fatalf("first sync failed: %v\n%s", err, out)
@@ -160,6 +166,7 @@ func TestSyncBasicCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-006", func(t *testing.T) {
+		t.Parallel()
 		_, mA, _, repoA, _, now := bootstrapRepoAcrossTwoMachines(t)
 		if out, err := mA.RunBB(now.Add(2*time.Minute), "sync"); err != nil {
 			t.Fatalf("baseline sync failed: %v\n%s", err, out)
@@ -184,6 +191,7 @@ func TestSyncBasicCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-012", func(t *testing.T) {
+		t.Parallel()
 		h, mA, mB, repoA, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 
 		mA.MustWriteFile(filepath.Join(repoA, "pull.txt"), "pull\n")
@@ -207,6 +215,7 @@ func TestSyncBasicCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-013", func(t *testing.T) {
+		t.Parallel()
 		_, _, mB, _, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 
 		mB.MustWriteFile(filepath.Join(repoB, "ahead.txt"), "ahead\n")
@@ -223,6 +232,7 @@ func TestSyncBasicCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-013A", func(t *testing.T) {
+		t.Parallel()
 		_, _, mB, _, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 		privateBlocked := false
 		setCatalogDefaultBranchAutoPushPolicy(t, mB, "software", &privateBlocked, nil)
@@ -241,6 +251,7 @@ func TestSyncBasicCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-014", func(t *testing.T) {
+		t.Parallel()
 		h, mA, mB, rootA, rootB := setupTwoMachines(t)
 		now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 		if out, err := mA.RunBB(now, "init", "api", "--public"); err != nil {
@@ -274,6 +285,7 @@ func TestSyncBasicCases(t *testing.T) {
 	})
 
 	t.Run("TC-SYNC-015", func(t *testing.T) {
+		t.Parallel()
 		h, mA, mB, _, rootB := setupTwoMachines(t)
 		now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 		if out, err := mA.RunBB(now, "init", "api", "--public"); err != nil {
