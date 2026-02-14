@@ -781,8 +781,11 @@ func TestFixTUIWizardViewIncludesApplyingPlanBlock(t *testing.T) {
 	if !strings.Contains(view, "Review before applying") {
 		t.Fatalf("expected applying-plan block heading, got %q", view)
 	}
-	if !strings.Contains(view, "Applying this fix will run these commands:") || !strings.Contains(view, "It will also perform these side effects:") {
-		t.Fatalf("expected command/action sections in applying-plan block, got %q", view)
+	if !strings.Contains(view, "Applying this fix will run these commands:") {
+		t.Fatalf("expected command section in applying-plan block, got %q", view)
+	}
+	if strings.Contains(view, "It will also perform these side effects:") {
+		t.Fatalf("did not expect side-effects section for push action, got %q", view)
 	}
 	if !strings.Contains(view, "git push") {
 		t.Fatalf("expected push command in applying-plan block, got %q", view)
@@ -899,6 +902,36 @@ func TestFixTUIWizardChangedFilesDescriptionDependsOnAction(t *testing.T) {
 	stageCommitView := ansi.Strip(m.viewWizardContent())
 	if !strings.Contains(stageCommitView, "These uncommitted files will be staged and committed by this fix.") {
 		t.Fatalf("expected stage/commit changed-files description for stage-commit-push, got %q", stageCommitView)
+	}
+}
+
+func TestFixTUIWizardHidesNoOpChangedFilesSection(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Risk: fixRiskSnapshot{
+				ChangedFiles: nil,
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+
+	view := ansi.Strip(m.viewWizardContent())
+	if strings.Contains(view, "Uncommitted changed files") {
+		t.Fatalf("did not expect changed-files section with no changed files, got %q", view)
+	}
+	if strings.Contains(view, "No uncommitted changes detected.") {
+		t.Fatalf("did not expect no-op changed-files placeholder, got %q", view)
 	}
 }
 

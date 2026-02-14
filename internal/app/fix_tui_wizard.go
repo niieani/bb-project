@@ -774,13 +774,12 @@ func (m *fixTUIModel) viewWizardContextContent() string {
 		fmt.Sprintf("Target branch: %s", targetLabel),
 	}, "\n")
 	b.WriteString(fieldStyle.Render(context))
-	b.WriteString("\n\n")
-	title, description := m.wizardChangedFilesFieldMeta()
-	b.WriteString(renderFieldBlock(false, title, description, m.renderChangedFilesList(), ""))
-
+	sections := make([]string, 0, 4)
+	if changedFilesBlock := m.renderWizardChangedFilesBlock(); changedFilesBlock != "" {
+		sections = append(sections, changedFilesBlock)
+	}
 	if len(m.wizard.Risk.SecretLikeChangedPaths) > 0 {
-		b.WriteString("\n\n")
-		b.WriteString(renderFieldBlock(
+		sections = append(sections, renderFieldBlock(
 			false,
 			"Secret-like changes detected",
 			"Review carefully before any push/commit operation.",
@@ -799,12 +798,11 @@ func (m *fixTUIModel) viewWizardContextContent() string {
 		} else {
 			detail += " Root .gitignore already includes entries for these paths."
 		}
-		b.WriteString("\n\n")
 		title := "Noisy uncommitted paths"
 		if m.wizard.Risk.MissingRootGitignore {
 			title = "Missing root .gitignore"
 		}
-		b.WriteString(renderFieldBlock(
+		sections = append(sections, renderFieldBlock(
 			false,
 			title,
 			detail,
@@ -812,8 +810,13 @@ func (m *fixTUIModel) viewWizardContextContent() string {
 			"",
 		))
 	}
-	b.WriteString("\n\n")
-	b.WriteString(m.renderWizardApplyPlan())
+	if applyPlanBlock := m.renderWizardApplyPlan(); applyPlanBlock != "" {
+		sections = append(sections, applyPlanBlock)
+	}
+	if len(sections) > 0 {
+		b.WriteString("\n\n")
+		b.WriteString(strings.Join(sections, "\n\n"))
+	}
 	return b.String()
 }
 
@@ -864,16 +867,20 @@ func (m *fixTUIModel) renderWizardApplyPlan() string {
 		actionRows = append(actionRows, "• "+summary)
 	}
 
-	lines := []string{"Applying this fix will run these commands:"}
-	if len(commandRows) == 0 {
-		lines = append(lines, "• none")
-	} else {
+	if len(commandRows) == 0 && len(actionRows) == 0 {
+		return ""
+	}
+
+	lines := make([]string, 0, len(commandRows)+len(actionRows)+4)
+	if len(commandRows) > 0 {
+		lines = append(lines, "Applying this fix will run these commands:")
 		lines = append(lines, commandRows...)
 	}
-	lines = append(lines, "", "It will also perform these side effects:")
-	if len(actionRows) == 0 {
-		lines = append(lines, "• none")
-	} else {
+	if len(actionRows) > 0 {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, "It will also perform these side effects:")
 		lines = append(lines, actionRows...)
 	}
 
@@ -893,6 +900,14 @@ func (m *fixTUIModel) wizardChangedFilesFieldMeta() (string, string) {
 	default:
 		return "Uncommitted changed files", "Shown for review only. This fix does not stage or commit uncommitted files."
 	}
+}
+
+func (m *fixTUIModel) renderWizardChangedFilesBlock() string {
+	if len(m.wizard.Risk.ChangedFiles) == 0 {
+		return ""
+	}
+	title, description := m.wizardChangedFilesFieldMeta()
+	return renderFieldBlock(false, title, description, m.renderChangedFilesList(), "")
 }
 
 func renderWizardCommandLine(command string) string {
@@ -1092,10 +1107,6 @@ func (m *fixTUIModel) wizardInnerWidth() int {
 }
 
 func (m *fixTUIModel) renderChangedFilesList() string {
-	if len(m.wizard.Risk.ChangedFiles) == 0 {
-		return hintStyle.Render("No uncommitted changes detected.")
-	}
-
 	const maxRows = 10
 	limit := len(m.wizard.Risk.ChangedFiles)
 	if limit > maxRows {

@@ -14,6 +14,7 @@ Applies to:
 - Safe by default: mutating actions require explicit intent.
 - Vertical space is precious: prefer 1-line chrome and compact field headers.
 - Works at small sizes: test at ~`80x24` and degrade gracefully down to ~`60` columns.
+- Relevance over completeness: hide non-applicable/no-op sections instead of rendering placeholder copy.
 
 ## Layout (Chrome)
 
@@ -236,6 +237,13 @@ Empty states should never be blank. Include:
 - A one-sentence explanation of what the screen manages.
 - The immediate next action (keys included).
 - A concrete example.
+
+### Conditional Sections (No-op Omission Rule)
+
+- Render a section only when it contains relevant, actionable information for the current item/action.
+- If a section has zero relevant entries, omit the entire section (title + description + body).
+- Do not render placeholder filler like "none", "not applicable", or "no changes detected" inside optional detail blocks.
+- Apply this consistently in wizards, details panes, and previews (for example commands/effects previews, changed-file lists, warnings).
 
 ### Loading / Startup
 
