@@ -999,7 +999,7 @@ func TestFixTUIWizardCreateProjectVisibilityUsesLeftRightWhenFocused(t *testing.
 	}
 }
 
-func TestFixTUIWizardDownScrollsBeforeChangingNonInputFocus(t *testing.T) {
+func TestFixTUIWizardDownMovesFocusBeforeScrollingNonInputControls(t *testing.T) {
 	t.Parallel()
 
 	noisy := make([]string, 0, 40)
@@ -1032,13 +1032,13 @@ func TestFixTUIWizardDownScrollsBeforeChangingNonInputFocus(t *testing.T) {
 		t.Fatalf("focus area after first down = %v, want visibility", m.wizard.FocusArea)
 	}
 	startOffset := m.wizard.BodyViewport.YOffset
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // should scroll, not jump to actions
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // should move focus to actions first
 
-	if m.wizard.FocusArea != fixWizardFocusVisibility {
-		t.Fatalf("focus area changed while viewport could scroll: got %v", m.wizard.FocusArea)
+	if m.wizard.FocusArea != fixWizardFocusActions {
+		t.Fatalf("focus area after second down = %v, want actions", m.wizard.FocusArea)
 	}
-	if m.wizard.BodyViewport.YOffset <= startOffset {
-		t.Fatalf("expected viewport to scroll down, yoffset %d -> %d", startOffset, m.wizard.BodyViewport.YOffset)
+	if m.wizard.BodyViewport.YOffset != startOffset {
+		t.Fatalf("viewport should not scroll before focus reaches edge, yoffset %d -> %d", startOffset, m.wizard.BodyViewport.YOffset)
 	}
 }
 
@@ -1071,13 +1071,84 @@ func TestFixTUIWizardFocusMoveRevealsVisibilityFieldContent(t *testing.T) {
 		t.Fatalf("focus area after down = %v, want visibility", m.wizard.FocusArea)
 	}
 
-	_ = m.viewWizardContent() // sync viewport layout for assertions
-	visible := ansi.Strip(m.wizard.BodyViewport.View())
+	visible := ansi.Strip(m.viewWizardContent())
 	if !strings.Contains(visible, "Project visibility") {
-		t.Fatalf("focused visibility field should be visible in viewport, got %q", visible)
+		t.Fatalf("focused visibility field should be visible in static controls, got %q", visible)
 	}
 	if !strings.Contains(visible, "private (default)") {
-		t.Fatalf("visibility options should be visible in viewport, got %q", visible)
+		t.Fatalf("visibility options should be visible in static controls, got %q", visible)
+	}
+}
+
+func TestFixTUIWizardActionsDownScrollsContextAtFocusEdge(t *testing.T) {
+	t.Parallel()
+
+	noisy := make([]string, 0, 50)
+	for i := 0; i < 50; i++ {
+		noisy = append(noisy, fmt.Sprintf("tmp/noisy-%02d.log", i))
+	}
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{
+				NoisyChangedPaths: noisy,
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project -> visibility
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // visibility -> actions
+	if m.wizard.FocusArea != fixWizardFocusActions {
+		t.Fatalf("focus area before edge scroll = %v, want actions", m.wizard.FocusArea)
+	}
+
+	startOffset := m.wizard.BodyViewport.YOffset
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // at focus edge => scroll context
+
+	if m.wizard.FocusArea != fixWizardFocusActions {
+		t.Fatalf("focus area should stay on actions while scrolling context, got %v", m.wizard.FocusArea)
+	}
+	if m.wizard.BodyViewport.YOffset <= startOffset {
+		t.Fatalf("expected context viewport to scroll down, yoffset %d -> %d", startOffset, m.wizard.BodyViewport.YOffset)
+	}
+}
+
+func TestFixTUIWizardUpDownCanReachProjectNameWithoutTab(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
+
+	if m.wizard.FocusArea != fixWizardFocusProjectName {
+		t.Fatalf("initial focus area = %v, want project-name", m.wizard.FocusArea)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project -> visibility
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // visibility -> actions
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})   // actions -> visibility
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})   // visibility -> project
+
+	if m.wizard.FocusArea != fixWizardFocusProjectName {
+		t.Fatalf("expected up/down path to return to project-name focus, got %v", m.wizard.FocusArea)
 	}
 }
 

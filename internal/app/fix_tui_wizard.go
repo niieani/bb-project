@@ -64,16 +64,6 @@ type fixSummaryResult struct {
 	Detail   string
 }
 
-type wizardLineRange struct {
-	Start int
-	End   int
-}
-
-type wizardContentLayout struct {
-	Content     string
-	FocusRanges map[fixWizardFocusArea]wizardLineRange
-}
-
 const (
 	fixWizardActionApply = iota
 	fixWizardActionSkip
@@ -457,16 +447,16 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "up":
-		if m.scrollWizardUp(1) {
+		if m.wizardMoveFocus(-1, false) {
 			return m, nil
 		}
-		m.wizardMoveFocus(-1, false)
+		m.scrollWizardUp(1)
 		return m, nil
 	case "down":
-		if m.scrollWizardDown(1) {
+		if m.wizardMoveFocus(1, false) {
 			return m, nil
 		}
-		m.wizardMoveFocus(1, false)
+		m.scrollWizardDown(1)
 		return m, nil
 	case "pgdown":
 		m.scrollWizardDown(max(1, m.wizard.BodyViewport.Height-1))
@@ -518,16 +508,61 @@ func (m *fixTUIModel) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *fixTUIModel) viewWizardContent() string {
 	m.syncWizardViewport()
 
+	controls := m.viewWizardStaticControls()
 	hint := m.wizardFooterHint()
 	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus), m.wizardBodyLineWidth())
 
 	var b strings.Builder
 	b.WriteString(m.wizard.BodyViewport.View())
-	b.WriteString("\n")
+	if controls != "" {
+		b.WriteString("\n\n")
+		b.WriteString(controls)
+	}
+	b.WriteString("\n\n")
 	b.WriteString(actions)
 	b.WriteString("\n")
 	b.WriteString(hint)
 	return b.String()
+}
+
+func (m *fixTUIModel) viewWizardStaticControls() string {
+	controls := make([]string, 0, 4)
+	if m.wizard.EnableCommitMessage {
+		controls = append(controls, renderFieldBlock(
+			m.wizard.FocusArea == fixWizardFocusCommit,
+			"Commit message",
+			"Leave empty to auto-generate.",
+			renderInputContainer(m.wizard.CommitMessage.View(), m.wizard.FocusArea == fixWizardFocusCommit),
+			"",
+		))
+	}
+	if m.wizard.EnableProjectName {
+		controls = append(controls, renderFieldBlock(
+			m.wizard.FocusArea == fixWizardFocusProjectName,
+			"Repository name on GitHub",
+			"Leave empty to use the current folder/repo name.",
+			renderInputContainer(m.wizard.ProjectName.View(), m.wizard.FocusArea == fixWizardFocusProjectName),
+			"",
+		))
+	}
+	if m.wizard.ShowGitignoreToggle {
+		controls = append(controls, renderToggleField(
+			false,
+			"Generate .gitignore before commit",
+			"Only when root .gitignore is missing.",
+			m.wizard.GenerateGitignore,
+		))
+	}
+	if m.wizard.Action == FixActionCreateProject {
+		controls = append(controls, renderFieldBlock(
+			m.wizard.FocusArea == fixWizardFocusVisibility,
+			"Project visibility",
+			"Left/right changes this field when focused.",
+			renderCreateVisibilityLine(m.wizard.Visibility, m.wizard.DefaultVis),
+			"",
+		))
+	}
+	return strings.Join(controls, "\n\n")
 }
 
 func (m *fixTUIModel) viewWizardTopLine() string {
@@ -582,25 +617,8 @@ func (m *fixTUIModel) clampSingleLine(text string, width int) string {
 	return ansi.Truncate(line, width, "…")
 }
 
-func (m *fixTUIModel) buildWizardContentLayout() wizardContentLayout {
+func (m *fixTUIModel) viewWizardContextContent() string {
 	var b strings.Builder
-	lineCount := 0
-	focusRanges := map[fixWizardFocusArea]wizardLineRange{}
-
-	appendBlock := func(block string) wizardLineRange {
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-			lineCount += 2
-		}
-		start := lineCount
-		b.WriteString(block)
-		height := lipgloss.Height(block)
-		if height < 1 {
-			height = 1
-		}
-		lineCount += height
-		return wizardLineRange{Start: start, End: lineCount}
-	}
 
 	targetBranch := m.wizard.Branch
 	if targetBranch == "" {
@@ -616,11 +634,13 @@ func (m *fixTUIModel) buildWizardContentLayout() wizardContentLayout {
 		fmt.Sprintf("Action: %s", fixActionLabel(m.wizard.Action)),
 		fmt.Sprintf("Target branch: %s", targetLabel),
 	}, "\n")
-	appendBlock(fieldStyle.Render(context))
-	appendBlock(renderFieldBlock(false, "Changed files", "Files that will be included by this fix.", m.renderChangedFilesList(), ""))
+	b.WriteString(fieldStyle.Render(context))
+	b.WriteString("\n\n")
+	b.WriteString(renderFieldBlock(false, "Changed files", "Files that will be included by this fix.", m.renderChangedFilesList(), ""))
 
 	if len(m.wizard.Risk.SecretLikeChangedPaths) > 0 {
-		appendBlock(renderFieldBlock(
+		b.WriteString("\n\n")
+		b.WriteString(renderFieldBlock(
 			false,
 			"Secret-like changes detected",
 			"Review carefully before any push/commit operation.",
@@ -637,7 +657,8 @@ func (m *fixTUIModel) buildWizardContentLayout() wizardContentLayout {
 		} else {
 			detail += " This step will not generate .gitignore."
 		}
-		appendBlock(renderFieldBlock(
+		b.WriteString("\n\n")
+		b.WriteString(renderFieldBlock(
 			false,
 			"Missing root .gitignore",
 			detail,
@@ -645,56 +666,18 @@ func (m *fixTUIModel) buildWizardContentLayout() wizardContentLayout {
 			"",
 		))
 	}
-
-	if m.wizard.EnableCommitMessage {
-		rng := appendBlock(renderFieldBlock(
-			m.wizard.FocusArea == fixWizardFocusCommit,
-			"Commit message",
-			"Leave empty to auto-generate.",
-			renderInputContainer(m.wizard.CommitMessage.View(), m.wizard.FocusArea == fixWizardFocusCommit),
-			"",
-		))
-		focusRanges[fixWizardFocusCommit] = rng
-	}
-	if m.wizard.EnableProjectName {
-		rng := appendBlock(renderFieldBlock(
-			m.wizard.FocusArea == fixWizardFocusProjectName,
-			"Repository name on GitHub",
-			"Leave empty to use the current folder/repo name.",
-			renderInputContainer(m.wizard.ProjectName.View(), m.wizard.FocusArea == fixWizardFocusProjectName),
-			"",
-		))
-		focusRanges[fixWizardFocusProjectName] = rng
-	}
-	if m.wizard.ShowGitignoreToggle {
-		appendBlock(renderToggleField(
-			false,
-			"Generate .gitignore before commit",
-			"Only when root .gitignore is missing.",
-			m.wizard.GenerateGitignore,
-		))
-	}
-	if m.wizard.Action == FixActionCreateProject {
-		rng := appendBlock(renderFieldBlock(
-			m.wizard.FocusArea == fixWizardFocusVisibility,
-			"Project visibility",
-			"Left/right changes this field when focused.",
-			renderCreateVisibilityLine(m.wizard.Visibility, m.wizard.DefaultVis),
-			"",
-		))
-		focusRanges[fixWizardFocusVisibility] = rng
-	}
-
-	return wizardContentLayout{
-		Content:     b.String(),
-		FocusRanges: focusRanges,
-	}
+	return b.String()
 }
 
 func (m *fixTUIModel) syncWizardViewport() {
-	layout := m.buildWizardContentLayout()
-	content := layout.Content
-	staticLines := lipgloss.Height(renderWizardActionButtons(m.wizard.ActionFocus)) + lipgloss.Height(m.wizardFooterHint())
+	content := m.viewWizardContextContent()
+	controls := m.viewWizardStaticControls()
+	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus), m.wizardBodyLineWidth())
+	hint := m.wizardFooterHint()
+	staticLines := lipgloss.Height(actions) + lipgloss.Height(hint) + 3 // 2 blank lines before actions + newline before hint
+	if controls != "" {
+		staticLines += lipgloss.Height(controls) + 2 // blank lines between viewport and controls
+	}
 	width, height := m.wizardViewportSize(lipgloss.Height(content), longestANSIWidth(content), staticLines)
 	if width < 1 {
 		width = 1
@@ -710,25 +693,6 @@ func (m *fixTUIModel) syncWizardViewport() {
 	m.wizard.BodyViewport.Height = height
 	m.wizard.BodyViewport.SetContent(content)
 	m.wizard.BodyViewport.SetYOffset(offset)
-	m.ensureWizardFocusVisible(layout)
-}
-
-func (m *fixTUIModel) ensureWizardFocusVisible(layout wizardContentLayout) {
-	rng, ok := layout.FocusRanges[m.wizard.FocusArea]
-	if !ok || m.wizard.BodyViewport.Height < 1 {
-		return
-	}
-	top := m.wizard.BodyViewport.YOffset
-	bottom := top + m.wizard.BodyViewport.Height - 1
-	focusTop := rng.Start
-	focusBottom := max(rng.End-1, focusTop)
-	if focusTop < top {
-		m.wizard.BodyViewport.SetYOffset(focusTop)
-		return
-	}
-	if focusBottom > bottom {
-		m.wizard.BodyViewport.SetYOffset(focusBottom - m.wizard.BodyViewport.Height + 1)
-	}
 }
 
 func (m *fixTUIModel) wizardViewportSize(contentHeight int, contentWidth int, staticLines int) (int, int) {
