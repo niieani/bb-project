@@ -927,7 +927,28 @@ func (m *fixTUIModel) renderChangedFilesList() string {
 	if blockWidth <= 0 {
 		blockWidth = 88
 	}
-	pathBudget := blockWidth - 24
+	autoIgnoreBadgeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.AdaptiveColor{Light: "#663C00", Dark: "#161B22"}).
+		Background(lipgloss.AdaptiveColor{Light: "#F8D66D", Dark: "#D29922"}).
+		Bold(true).
+		Padding(0, 1)
+	autoIgnoreBadge := autoIgnoreBadgeStyle.Render("AUTO-IGNORE")
+	suggestedPatterns := map[string]struct{}{}
+	if m.wizard.ShowGitignoreToggle && m.wizard.GenerateGitignore {
+		for _, pattern := range m.wizard.Risk.SuggestedGitignorePatterns {
+			pattern = strings.TrimSpace(pattern)
+			if pattern == "" {
+				continue
+			}
+			suggestedPatterns[pattern] = struct{}{}
+		}
+	}
+	autoIgnoreSlotWidth := 0
+	if len(suggestedPatterns) > 0 {
+		autoIgnoreSlotWidth = ansi.StringWidth(" " + autoIgnoreBadge)
+	}
+
+	pathBudget := blockWidth - 24 - autoIgnoreSlotWidth
 	if pathBudget < 24 {
 		pathBudget = 24
 	}
@@ -949,11 +970,30 @@ func (m *fixTUIModel) renderChangedFilesList() string {
 		if pathPad < 0 {
 			pathPad = 0
 		}
-		row := bulletStyle.Render("•") + " " + path + strings.Repeat(" ", pathPad+2) + stats
+		autoIgnoreSlot := ""
+		if autoIgnoreSlotWidth > 0 {
+			autoIgnoreSlot = strings.Repeat(" ", autoIgnoreSlotWidth)
+			if shouldRenderAutoIgnoreBadge(file.Path, suggestedPatterns) {
+				autoIgnoreSlot = " " + autoIgnoreBadge
+			}
+		}
+		row := bulletStyle.Render("•") + " " + path + strings.Repeat(" ", pathPad) + autoIgnoreSlot + strings.Repeat(" ", 2) + stats
 		lines = append(lines, row)
 	}
 	if len(m.wizard.Risk.ChangedFiles) > maxRows {
 		lines = append(lines, hintStyle.Render(fmt.Sprintf("... showing first %d of %d changed files", maxRows, len(m.wizard.Risk.ChangedFiles))))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func shouldRenderAutoIgnoreBadge(path string, suggestedPatterns map[string]struct{}) bool {
+	if len(suggestedPatterns) == 0 {
+		return false
+	}
+	pattern := noisyPatternForPath(path)
+	if pattern == "" {
+		return false
+	}
+	_, ok := suggestedPatterns[pattern]
+	return ok
 }

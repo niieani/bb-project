@@ -1031,6 +1031,43 @@ func TestFixTUIWizardChangedFilesTrimIndicator(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardChangedFilesShowsAutoIgnoreBadgeForSuggestedPaths(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Risk: fixRiskSnapshot{
+				MissingRootGitignore:       true,
+				SuggestedGitignorePatterns: []string{"node_modules/"},
+				ChangedFiles: []fixChangedFile{
+					{Path: "node_modules/pkg/index.js", Added: 12, Deleted: 3},
+					{Path: "src/main.go", Added: 1, Deleted: 1},
+				},
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	view := ansi.Strip(m.viewWizardContent())
+	noisyLine := lineContaining(view, "node_modules/pkg/index.js")
+	if !strings.Contains(noisyLine, "AUTO-IGNORE") {
+		t.Fatalf("expected AUTO-IGNORE badge for suggested noisy file, got line %q", noisyLine)
+	}
+	normalLine := lineContaining(view, "src/main.go")
+	if strings.Contains(normalLine, "AUTO-IGNORE") {
+		t.Fatalf("did not expect AUTO-IGNORE badge for normal file, got line %q", normalLine)
+	}
+}
+
 func TestFixTUIWizardCreateProjectNameStartsEmptyWithPlaceholder(t *testing.T) {
 	t.Parallel()
 
@@ -1556,6 +1593,16 @@ func lineIndexContaining(view, needle string) int {
 		}
 	}
 	return -1
+}
+
+func lineContaining(view, needle string) string {
+	lines := strings.Split(view, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	return ""
 }
 
 func TestFixTUIResizeExpandsWideColumns(t *testing.T) {

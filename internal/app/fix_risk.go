@@ -36,7 +36,7 @@ func collectFixRiskSnapshot(repoPath string, git gitx.Runner) (fixRiskSnapshot, 
 		out.MissingRootGitignore = os.IsNotExist(err)
 	}
 
-	statusOut, err := git.RunGit(repoPath, "status", "--porcelain")
+	statusOut, err := git.RunGit(repoPath, "status", "--porcelain", "--branch")
 	if err != nil {
 		return out, err
 	}
@@ -96,7 +96,8 @@ type statusEntry struct {
 }
 
 func parseGitStatusPorcelain(raw string) []statusEntry {
-	lines := strings.Split(strings.TrimSpace(raw), "\n")
+	raw = strings.TrimRight(raw, "\n")
+	lines := strings.Split(raw, "\n")
 	out := make([]statusEntry, 0, len(lines))
 	for _, line := range lines {
 		line = strings.TrimRight(line, "\r")
@@ -105,6 +106,9 @@ func parseGitStatusPorcelain(raw string) []statusEntry {
 		}
 
 		code := line[:2]
+		if code == "##" {
+			continue
+		}
 		pathPart := strings.TrimSpace(line[3:])
 		if pathPart == "" {
 			continue

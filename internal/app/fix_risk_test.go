@@ -46,6 +46,67 @@ func TestCollectFixRiskSnapshotDetectsSecretAndNoisyChanges(t *testing.T) {
 	}
 }
 
+func TestParseGitStatusPorcelainPreservesLeadingSpaceOnFirstLine(t *testing.T) {
+	t.Parallel()
+
+	raw := " M README.md\n M package.json\n"
+	entries := parseGitStatusPorcelain(raw)
+	if len(entries) != 2 {
+		t.Fatalf("entries len = %d, want 2 (%v)", len(entries), entries)
+	}
+	if got := entries[0].Path; got != "README.md" {
+		t.Fatalf("first path = %q, want README.md", got)
+	}
+}
+
+func TestCollectFixRiskSnapshotKeepsFirstFilePathAndNumstat(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	runner := gitx.Runner{}
+	if _, err := runner.RunGit(repo, "init", "-b", "main"); err != nil {
+		t.Fatalf("git init failed: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("line1\nline2\n"), 0o644); err != nil {
+		t.Fatalf("seed README.md failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "package.json"), []byte("{\"name\":\"x\"}\n"), 0o644); err != nil {
+		t.Fatalf("seed package.json failed: %v", err)
+	}
+	if _, err := runner.RunGit(repo, "add", "."); err != nil {
+		t.Fatalf("git add failed: %v", err)
+	}
+	if _, err := runner.RunGit(
+		repo,
+		"-c", "user.name=bb",
+		"-c", "user.email=bb@example.invalid",
+		"commit", "-m", "init",
+	); err != nil {
+		t.Fatalf("git commit failed: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("line1\nline2 updated\nline3\n"), 0o644); err != nil {
+		t.Fatalf("update README.md failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "package.json"), []byte("{\"name\":\"x\",\"v\":1}\n"), 0o644); err != nil {
+		t.Fatalf("update package.json failed: %v", err)
+	}
+
+	risk, err := collectFixRiskSnapshot(repo, runner)
+	if err != nil {
+		t.Fatalf("collectFixRiskSnapshot failed: %v", err)
+	}
+
+	readme, ok := changedFileByPath(risk.ChangedFiles, "README.md")
+	if !ok {
+		t.Fatalf("README.md missing from changed files: %#v", risk.ChangedFiles)
+	}
+	if readme.Added == 0 && readme.Deleted == 0 {
+		t.Fatalf("README.md numstat should not be zero: %#v", readme)
+	}
+}
+
 func TestWriteGeneratedGitignoreCreatesMinimalSortedFile(t *testing.T) {
 	t.Parallel()
 
@@ -99,4 +160,13 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func changedFileByPath(files []fixChangedFile, path string) (fixChangedFile, bool) {
+	for _, file := range files {
+		if file.Path == path {
+			return file, true
+		}
+	}
+	return fixChangedFile{}, false
 }
