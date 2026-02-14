@@ -197,6 +197,38 @@ func TestFixTUIRepoNameUsesOSC8ForGitHub(t *testing.T) {
 	t.Fatal("expected at least one repo row")
 }
 
+func TestFixTUIRepoNameUsesOSC8ForAliasedGitHubHost(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "condu",
+				Path:      "/repos/condu",
+				Catalog:   "software",
+				OriginURL: "git@niieani.github.com:niieani/condu.git",
+				Upstream:  "niieani/main",
+				Ahead:     1,
+			},
+			IsDefaultCatalog: true,
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	items := m.repoList.Items()
+	for _, item := range items {
+		row, ok := item.(fixListItem)
+		if !ok || row.Kind != fixListItemRepo {
+			continue
+		}
+		if !strings.Contains(row.Name, "\x1b]8;;https://github.com/niieani/condu\x1b\\") {
+			t.Fatalf("repo name does not contain canonical github OSC8 link: %q", row.Name)
+		}
+		return
+	}
+	t.Fatal("expected at least one repo row")
+}
+
 func newFixTUIModelForTest(repos []fixRepoState) *fixTUIModel {
 	m := &fixTUIModel{
 		repos:          append([]fixRepoState(nil), repos...),

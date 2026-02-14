@@ -1343,7 +1343,10 @@ func githubRepoURLForRecord(rec domain.MachineRepoRecord) string {
 	if host == "" {
 		return ""
 	}
-	if host != "github.com" && !strings.HasPrefix(host, "github.") {
+	if strings.HasSuffix(host, ".github.com") {
+		host = "github.com"
+	}
+	if host != "github.com" {
 		return ""
 	}
 	return "https://" + host + "/" + path
