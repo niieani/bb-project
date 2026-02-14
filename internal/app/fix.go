@@ -610,6 +610,7 @@ func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, p
 	if projectName == "" {
 		projectName = filepath.Base(target.Record.Path)
 	}
+	projectName = sanitizeGitHubRepositoryNameInput(projectName)
 	if strings.TrimSpace(projectName) == "" {
 		return errors.New("project name is required for create-project")
 	}

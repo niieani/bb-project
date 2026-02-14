@@ -1368,7 +1368,7 @@ func TestFixTUIWizardCreateProjectNameValidationBlocksApply(t *testing.T) {
 	}
 	m := newFixTUIModelForTest(repos)
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/repo-from-folder", Action: FixActionCreateProject}})
-	m.wizard.ProjectName.SetValue("invalid repo name")
+	m.wizard.ProjectName.SetValue(".")
 	m.wizard.ActionFocus = fixWizardActionApply
 
 	m.applyWizardCurrent()
@@ -1384,6 +1384,38 @@ func TestFixTUIWizardCreateProjectNameValidationBlocksApply(t *testing.T) {
 	}
 	if len(m.summaryResults) != 0 {
 		t.Fatalf("summary results = %d, want 0 when apply is blocked by validation", len(m.summaryResults))
+	}
+}
+
+func TestFixTUIWizardCreateProjectNameSanitizesTypingAndPaste(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "repo-from-folder",
+				Path:      "/repos/repo-from-folder",
+				OriginURL: "",
+			},
+			Meta: nil,
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/repo-from-folder", Action: FixActionCreateProject}})
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("repo name")})
+	if got := m.wizard.ProjectName.Value(); got != "repo-name" {
+		t.Fatalf("project name after typing = %q, want %q", got, "repo-name")
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/with*chars")})
+	if got := m.wizard.ProjectName.Value(); got != "repo-name-with-chars" {
+		t.Fatalf("project name after paste-like input = %q, want %q", got, "repo-name-with-chars")
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("-._ABC")})
+	if got := m.wizard.ProjectName.Value(); got != "repo-name-with-chars-._abc" {
+		t.Fatalf("project name after allowed punctuation and uppercase = %q, want %q", got, "repo-name-with-chars-._abc")
 	}
 }
 

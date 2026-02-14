@@ -230,7 +230,7 @@ func (m *fixTUIModel) skipWizardCurrent() {
 func (m *fixTUIModel) applyWizardCurrent() {
 	opts := fixApplyOptions{Interactive: true}
 	if m.wizard.EnableProjectName {
-		opts.CreateProjectName = strings.TrimSpace(m.wizard.ProjectName.Value())
+		opts.CreateProjectName = sanitizeGitHubRepositoryNameInput(m.wizard.ProjectName.Value())
 	}
 	if m.wizard.EnableCommitMessage {
 		raw := strings.TrimSpace(m.wizard.CommitMessage.Value())
@@ -503,6 +503,7 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.wizard.ProjectName, cmd = m.wizard.ProjectName.Update(msg)
+		m.wizard.ProjectName.SetValue(sanitizeGitHubRepositoryNameInput(m.wizard.ProjectName.Value()))
 		m.errText = ""
 		return m, cmd
 	}
@@ -834,7 +835,7 @@ func (m *fixTUIModel) wizardActionPlanContext() fixActionPlanContext {
 		MissingRootGitignore:    m.wizard.Risk.MissingRootGitignore,
 	}
 	if m.wizard.EnableProjectName {
-		ctx.CreateProjectName = strings.TrimSpace(m.wizard.ProjectName.Value())
+		ctx.CreateProjectName = sanitizeGitHubRepositoryNameInput(m.wizard.ProjectName.Value())
 	}
 	if m.wizard.EnableCommitMessage {
 		raw := strings.TrimSpace(m.wizard.CommitMessage.Value())

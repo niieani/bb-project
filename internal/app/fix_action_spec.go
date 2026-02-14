@@ -300,10 +300,10 @@ func plannedBranch(branch string) string {
 }
 
 func plannedProjectName(name string, repoName string) string {
-	if trimmed := strings.TrimSpace(name); trimmed != "" {
-		return trimmed
+	if sanitized := sanitizeGitHubRepositoryNameInput(name); sanitized != "" {
+		return sanitized
 	}
-	if fallback := strings.TrimSpace(repoName); fallback != "" {
+	if fallback := sanitizeGitHubRepositoryNameInput(repoName); fallback != "" {
 		return fallback
 	}
 	return "<repository-name>"
