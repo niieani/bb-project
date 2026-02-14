@@ -31,8 +31,9 @@ type App struct {
 	IsInteractiveTerminal func() bool
 	RunConfigWizard       ConfigWizardRunner
 
-	repoMetadataMu  sync.Mutex
-	observeRepoHook func(cfg domain.ConfigFile, repo discoveredRepo, allowPush bool) (domain.MachineRepoRecord, error)
+	repoMetadataMu      sync.Mutex
+	observeRepoHook     func(cfg domain.ConfigFile, repo discoveredRepo, allowPush bool) (domain.MachineRepoRecord, error)
+	runFixInteractiveFn func(includeCatalogs []string, noRefresh bool) (int, error)
 }
 
 type InitOptions struct {

@@ -67,7 +67,7 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 		if a.IsInteractiveTerminal == nil || !a.IsInteractiveTerminal() {
 			return 2, errors.New("bb fix requires an interactive terminal")
 		}
-		return a.runFixInteractive(opts.IncludeCatalogs, opts.NoRefresh)
+		return a.runFixInteractiveWithMutedLogs(opts.IncludeCatalogs, opts.NoRefresh)
 	}
 
 	refreshMode := scanRefreshIfStale
@@ -132,6 +132,19 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 		return 0, nil
 	}
 	return 1, nil
+}
+
+func (a *App) runFixInteractiveWithMutedLogs(includeCatalogs []string, noRefresh bool) (int, error) {
+	runInteractive := a.runFixInteractive
+	if a.runFixInteractiveFn != nil {
+		runInteractive = a.runFixInteractiveFn
+	}
+
+	previousVerbose := a.Verbose
+	a.SetVerbose(false)
+	defer a.SetVerbose(previousVerbose)
+
+	return runInteractive(includeCatalogs, noRefresh)
 }
 
 func (a *App) renderFixStatus(rec domain.MachineRepoRecord, actions []string) {

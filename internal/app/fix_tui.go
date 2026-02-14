@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -342,15 +343,136 @@ var (
 const fixListColumnGap = "  "
 
 func (a *App) runFixInteractive(includeCatalogs []string, noRefresh bool) (int, error) {
-	model, err := newFixTUIModel(a, includeCatalogs, noRefresh)
+	model := newFixTUIBootModel(a, includeCatalogs, noRefresh)
+	program := tea.NewProgram(model, tea.WithAltScreen())
+	finalModel, err := program.Run()
 	if err != nil {
 		return 2, err
 	}
-	program := tea.NewProgram(model, tea.WithAltScreen())
-	if _, err := program.Run(); err != nil {
-		return 2, err
+	if boot, ok := finalModel.(*fixTUIBootModel); ok && boot.loadErr != nil {
+		return 2, boot.loadErr
 	}
 	return 0, nil
+}
+
+type fixTUIBootModel struct {
+	app             *App
+	includeCatalogs []string
+	noRefresh       bool
+
+	width  int
+	height int
+
+	spin    spinner.Model
+	loadFn  func() (*fixTUIModel, error)
+	loadErr error
+}
+
+type fixTUILoadedMsg struct {
+	model *fixTUIModel
+	err   error
+}
+
+func newFixTUIBootModel(app *App, includeCatalogs []string, noRefresh bool) *fixTUIBootModel {
+	spin := spinner.New(spinner.WithSpinner(spinner.Dot))
+	spin.Style = lipgloss.NewStyle().Foreground(accentColor)
+
+	return &fixTUIBootModel{
+		app:             app,
+		includeCatalogs: append([]string(nil), includeCatalogs...),
+		noRefresh:       noRefresh,
+		spin:            spin,
+	}
+}
+
+func (m *fixTUIBootModel) Init() tea.Cmd {
+	if m.loadFn == nil {
+		m.loadFn = func() (*fixTUIModel, error) {
+			return newFixTUIModel(m.app, m.includeCatalogs, m.noRefresh)
+		}
+	}
+	return tea.Batch(m.spin.Tick, m.loadReposCmd())
+}
+
+func (m *fixTUIBootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(msg)
+		return m, cmd
+	case fixTUILoadedMsg:
+		if msg.err != nil {
+			m.loadErr = msg.err
+			return m, tea.Quit
+		}
+		if msg.model == nil {
+			m.loadErr = errors.New("internal: fix tui model loader returned nil")
+			return m, tea.Quit
+		}
+		m.transferWindowSize(msg.model)
+		return msg.model, nil
+	case tea.KeyMsg:
+		if key.Matches(msg, defaultFixTUIKeyMap().Quit) {
+			return m, tea.Quit
+		}
+	}
+
+	return m, nil
+}
+
+func (m *fixTUIBootModel) View() string {
+	title := lipgloss.JoinHorizontal(lipgloss.Center,
+		titleBadgeStyle.Render("bb"),
+		" "+headerStyle.Render("fix"),
+	)
+	subtitle := hintStyle.Render("Interactive remediation for unsyncable repositories")
+
+	message := fmt.Sprintf("%s %s", m.spin.View(), "Loading repositories and risk checks for interactive fix...")
+	detail := hintStyle.Render("This runs scan refresh checks, loads repo state, and computes eligible fix actions.")
+
+	contentPanel := panelStyle
+	if w := m.viewContentWidth(); w > 0 {
+		contentPanel = contentPanel.Width(w)
+	}
+
+	var b strings.Builder
+	b.WriteString(labelStyle.Render("Preparing Interactive View"))
+	b.WriteString("\n")
+	b.WriteString(message)
+	b.WriteString("\n")
+	b.WriteString(detail)
+
+	body := title + "\n" + subtitle + "\n\n" + contentPanel.Render(b.String())
+	return fixPageStyle.Render(body)
+}
+
+func (m *fixTUIBootModel) loadReposCmd() tea.Cmd {
+	return func() tea.Msg {
+		model, err := m.loadFn()
+		return fixTUILoadedMsg{model: model, err: err}
+	}
+}
+
+func (m *fixTUIBootModel) transferWindowSize(target *fixTUIModel) {
+	target.width = m.width
+	target.height = m.height
+	target.help.Width = m.width
+	target.resizeRepoList()
+}
+
+func (m *fixTUIBootModel) viewContentWidth() int {
+	if m.width <= 0 {
+		return 0
+	}
+	contentWidth := m.width - 8
+	if contentWidth < 52 {
+		return 0
+	}
+	return contentWidth
 }
 
 func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUIModel, error) {

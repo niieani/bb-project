@@ -277,6 +277,66 @@ func TestFixTUIViewUsesCanonicalChromeWithoutInlineKeyLegend(t *testing.T) {
 	}
 }
 
+func TestFixTUIBootViewShowsLoadingStatus(t *testing.T) {
+	t.Parallel()
+
+	m := newFixTUIBootModel(nil, nil, false)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+
+	view := m.View()
+	if !strings.Contains(view, "Preparing Interactive View") {
+		t.Fatalf("expected boot heading in view, got %q", view)
+	}
+	if !strings.Contains(view, "Loading repositories and risk checks for interactive fix") {
+		t.Fatalf("expected loading explanation in view, got %q", view)
+	}
+}
+
+func TestFixTUIBootTransfersWindowSizeToLoadedModel(t *testing.T) {
+	t.Parallel()
+
+	boot := newFixTUIBootModel(nil, nil, false)
+	_, _ = boot.Update(tea.WindowSizeMsg{Width: 128, Height: 28})
+
+	loaded := newFixTUIModelForTest([]fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+		},
+	})
+
+	next, _ := boot.Update(fixTUILoadedMsg{model: loaded})
+	got, ok := next.(*fixTUIModel)
+	if !ok {
+		t.Fatalf("expected transition to fixTUIModel, got %T", next)
+	}
+	if got.width != 128 || got.height != 28 {
+		t.Fatalf("loaded model size = %dx%d, want 128x28", got.width, got.height)
+	}
+	if got.help.Width != 128 {
+		t.Fatalf("loaded model help width = %d, want 128", got.help.Width)
+	}
+}
+
+func TestFixTUIBootStoresLoadError(t *testing.T) {
+	t.Parallel()
+
+	boot := newFixTUIBootModel(nil, nil, false)
+	next, _ := boot.Update(fixTUILoadedMsg{err: fmt.Errorf("load failed")})
+	if next != boot {
+		t.Fatalf("expected boot model to remain active on load error, got %T", next)
+	}
+	if boot.loadErr == nil || !strings.Contains(boot.loadErr.Error(), "load failed") {
+		t.Fatalf("loadErr = %v, want load failure", boot.loadErr)
+	}
+}
+
 func TestFixTUIDefaultSelectionIsNoAction(t *testing.T) {
 	t.Parallel()
 
