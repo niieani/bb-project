@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -52,6 +53,8 @@ type fixWizardState struct {
 	DefaultVis  domain.Visibility
 	FocusArea   fixWizardFocusArea
 	ActionFocus int
+
+	BodyViewport viewport.Model
 }
 
 type fixSummaryResult struct {
@@ -166,6 +169,7 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	}
 	m.syncWizardFieldFocus()
 	m.wizard.ActionFocus = fixWizardActionApply
+	m.syncWizardViewport()
 }
 
 func (m *fixTUIModel) completeWizard() {
@@ -277,36 +281,48 @@ func (m *fixTUIModel) syncWizardFieldFocus() {
 	}
 }
 
-func (m *fixTUIModel) wizardFocusMoveNext() {
-	switch m.wizard.FocusArea {
-	case fixWizardFocusCommit, fixWizardFocusProjectName, fixWizardFocusVisibility:
-		m.wizard.FocusArea = fixWizardFocusActions
-	default:
-		if m.wizard.EnableProjectName {
-			m.wizard.FocusArea = fixWizardFocusProjectName
-		} else if m.wizard.EnableCommitMessage {
-			m.wizard.FocusArea = fixWizardFocusCommit
-		} else if m.wizard.Action == FixActionCreateProject {
-			m.wizard.FocusArea = fixWizardFocusVisibility
-		}
+func (m *fixTUIModel) wizardFocusOrder() []fixWizardFocusArea {
+	order := make([]fixWizardFocusArea, 0, 4)
+	if m.wizard.EnableCommitMessage {
+		order = append(order, fixWizardFocusCommit)
 	}
-	m.syncWizardFieldFocus()
+	if m.wizard.EnableProjectName {
+		order = append(order, fixWizardFocusProjectName)
+	}
+	if m.wizard.Action == FixActionCreateProject {
+		order = append(order, fixWizardFocusVisibility)
+	}
+	order = append(order, fixWizardFocusActions)
+	return order
 }
 
-func (m *fixTUIModel) wizardFocusMovePrev() {
-	switch m.wizard.FocusArea {
-	case fixWizardFocusActions:
-		if m.wizard.Action == FixActionCreateProject {
-			m.wizard.FocusArea = fixWizardFocusVisibility
-		} else if m.wizard.EnableCommitMessage {
-			m.wizard.FocusArea = fixWizardFocusCommit
-		}
-	case fixWizardFocusVisibility:
-		if m.wizard.EnableProjectName {
-			m.wizard.FocusArea = fixWizardFocusProjectName
+func (m *fixTUIModel) wizardMoveFocus(delta int, wrap bool) bool {
+	order := m.wizardFocusOrder()
+	if len(order) == 0 || delta == 0 {
+		return false
+	}
+	index := -1
+	for i, area := range order {
+		if area == m.wizard.FocusArea {
+			index = i
+			break
 		}
 	}
+	if index < 0 {
+		index = len(order) - 1
+	}
+	next := index + delta
+	if wrap {
+		next = (next%len(order) + len(order)) % len(order)
+	} else if next < 0 || next >= len(order) {
+		return false
+	}
+	if next == index {
+		return false
+	}
+	m.wizard.FocusArea = order[next]
 	m.syncWizardFieldFocus()
+	return true
 }
 
 func (m *fixTUIModel) shiftWizardVisibility(delta int) {
@@ -329,9 +345,29 @@ func (m *fixTUIModel) shiftWizardVisibility(delta int) {
 	}
 }
 
+func (m *fixTUIModel) scrollWizardDown(lines int) bool {
+	before := m.wizard.BodyViewport.YOffset
+	m.wizard.BodyViewport.ScrollDown(lines)
+	return m.wizard.BodyViewport.YOffset > before
+}
+
+func (m *fixTUIModel) scrollWizardUp(lines int) bool {
+	before := m.wizard.BodyViewport.YOffset
+	m.wizard.BodyViewport.ScrollUp(lines)
+	return m.wizard.BodyViewport.YOffset < before
+}
+
 func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
+	}
+	switch msg.String() {
+	case "tab":
+		m.wizardMoveFocus(1, true)
+		return m, nil
+	case "shift+tab":
+		m.wizardMoveFocus(-1, true)
+		return m, nil
 	}
 	if m.wizard.FocusArea == fixWizardFocusCommit {
 		if key.Matches(msg, m.keys.Cancel) {
@@ -340,9 +376,20 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
-		case "enter", "tab", "down":
-			m.wizard.FocusArea = fixWizardFocusActions
-			m.syncWizardFieldFocus()
+		case "enter":
+			m.wizardMoveFocus(1, false)
+			return m, nil
+		case "down":
+			if m.wizardMoveFocus(1, false) {
+				return m, nil
+			}
+			m.scrollWizardDown(1)
+			return m, nil
+		case "up":
+			if m.wizardMoveFocus(-1, false) {
+				return m, nil
+			}
+			m.scrollWizardUp(1)
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -356,9 +403,20 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
-		case "down", "tab", "enter":
-			m.wizard.FocusArea = fixWizardFocusVisibility
-			m.syncWizardFieldFocus()
+		case "enter":
+			m.wizardMoveFocus(1, false)
+			return m, nil
+		case "down":
+			if m.wizardMoveFocus(1, false) {
+				return m, nil
+			}
+			m.scrollWizardDown(1)
+			return m, nil
+		case "up":
+			if m.wizardMoveFocus(-1, false) {
+				return m, nil
+			}
+			m.scrollWizardUp(1)
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -389,10 +447,22 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "up":
-		m.wizardFocusMovePrev()
+		if m.scrollWizardUp(1) {
+			return m, nil
+		}
+		m.wizardMoveFocus(-1, false)
 		return m, nil
-	case "down", "tab":
-		m.wizardFocusMoveNext()
+	case "down":
+		if m.scrollWizardDown(1) {
+			return m, nil
+		}
+		m.wizardMoveFocus(1, false)
+		return m, nil
+	case "pgdown":
+		m.scrollWizardDown(max(1, m.wizard.BodyViewport.Height-1))
+		return m, nil
+	case "pgup":
+		m.scrollWizardUp(max(1, m.wizard.BodyViewport.Height-1))
 		return m, nil
 	}
 	if msg.String() == "left" {
@@ -436,22 +506,45 @@ func (m *fixTUIModel) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *fixTUIModel) viewWizardContent() string {
+	m.syncWizardViewport()
+
+	hint := m.wizardFooterHint()
+	actions := renderWizardActionButtons(m.wizard.ActionFocus)
+
 	var b strings.Builder
-	progress := renderStatusPill(fmt.Sprintf("%d/%d", m.wizard.Index+1, len(m.wizard.Queue)))
-	headerLeft := labelStyle.Render("Confirm Risky Fix")
-	headerRight := progress
-	header := headerLeft
-	if width := m.wizardInnerWidth(); width > 0 {
-		gap := width - lipgloss.Width(headerLeft) - lipgloss.Width(headerRight)
-		if gap < 2 {
-			gap = 2
-		}
-		header = lipgloss.JoinHorizontal(lipgloss.Top, headerLeft, strings.Repeat(" ", gap), headerRight)
-	}
-	b.WriteString(header)
+	b.WriteString(m.wizard.BodyViewport.View())
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Review context before applying this fix."))
-	b.WriteString("\n\n")
+	b.WriteString(actions)
+	b.WriteString("\n")
+	b.WriteString(hint)
+	return b.String()
+}
+
+func (m *fixTUIModel) viewWizardTopLine() string {
+	progress := renderStatusPill(fmt.Sprintf("%d/%d", m.wizard.Index+1, len(m.wizard.Queue)))
+	left := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		titleBadgeStyle.Render("bb"),
+		" "+headerStyle.Render("fix"),
+		"  ",
+		labelStyle.Render("Confirm Risky Fix"),
+	)
+	if m.wizard.RepoName == "" {
+		return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", progress)
+	}
+	context := hintStyle.Render(fmt.Sprintf("(%s · %s)", m.wizard.RepoName, fixActionLabel(m.wizard.Action)))
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", progress, " ", context)
+}
+
+func (m *fixTUIModel) wizardFooterHint() string {
+	if m.wizard.FocusArea == fixWizardFocusCommit || m.wizard.FocusArea == fixWizardFocusProjectName {
+		return hintStyle.Render("Typing mode: text input captures letters. Up/down moves focus or scrolls at edge. Tab/Shift+Tab cycles focus. Esc cancels remaining.")
+	}
+	return hintStyle.Render("Up/down: scroll (or move focus at edge)   tab/shift+tab: move focus   left/right: enum or buttons   enter: activate   esc: cancel remaining")
+}
+
+func (m *fixTUIModel) viewWizardScrollableContent() string {
+	var b strings.Builder
 
 	targetBranch := m.wizard.Branch
 	if targetBranch == "" {
@@ -461,15 +554,14 @@ func (m *fixTUIModel) viewWizardContent() string {
 	if m.wizard.Upstream != "" {
 		targetLabel += " -> " + m.wizard.Upstream
 	}
-	overview := strings.Join([]string{
+	context := strings.Join([]string{
 		fmt.Sprintf("Repository: %s", m.wizard.RepoName),
 		fmt.Sprintf("Path: %s", m.wizard.RepoPath),
 		fmt.Sprintf("Action: %s", fixActionLabel(m.wizard.Action)),
 		fmt.Sprintf("Target branch: %s", targetLabel),
 	}, "\n")
-	b.WriteString(renderFieldBlock(false, "Overview", "", overview, ""))
+	b.WriteString(fieldStyle.Render(context))
 	b.WriteString("\n\n")
-
 	b.WriteString(renderFieldBlock(false, "Changed files", "Files that will be included by this fix.", m.renderChangedFilesList(), ""))
 
 	if len(m.wizard.Risk.SecretLikeChangedPaths) > 0 {
@@ -506,7 +598,7 @@ func (m *fixTUIModel) viewWizardContent() string {
 		b.WriteString(renderFieldBlock(
 			m.wizard.FocusArea == fixWizardFocusCommit,
 			"Commit message",
-			"Leave empty to auto-generate. Enter/Tab moves to action buttons.",
+			"Leave empty to auto-generate.",
 			renderInputContainer(m.wizard.CommitMessage.View(), m.wizard.FocusArea == fixWizardFocusCommit),
 			"",
 		))
@@ -540,16 +632,90 @@ func (m *fixTUIModel) viewWizardContent() string {
 			"",
 		))
 	}
-
-	b.WriteString("\n\n")
-	b.WriteString(renderWizardActionButtons(m.wizard.ActionFocus))
-	b.WriteString("\n")
-	if m.wizard.FocusArea == fixWizardFocusCommit || m.wizard.FocusArea == fixWizardFocusProjectName {
-		b.WriteString(hintStyle.Render("Typing mode: text input captures all letters. Tab/down moves focus. Esc cancels remaining."))
-	} else {
-		b.WriteString(hintStyle.Render("Left/right: enum or buttons   up/down: move focus   enter: activate   esc: cancel remaining"))
-	}
 	return b.String()
+}
+
+func (m *fixTUIModel) syncWizardViewport() {
+	content := m.viewWizardScrollableContent()
+	staticLines := lipgloss.Height(renderWizardActionButtons(m.wizard.ActionFocus)) + lipgloss.Height(m.wizardFooterHint())
+	width, height := m.wizardViewportSize(lipgloss.Height(content), longestANSIWidth(content), staticLines)
+	if width < 1 {
+		width = 1
+	}
+	if height < 1 {
+		height = 1
+	}
+	if m.wizard.BodyViewport.Width <= 0 || m.wizard.BodyViewport.Height <= 0 {
+		m.wizard.BodyViewport = viewport.New(width, height)
+	}
+	offset := m.wizard.BodyViewport.YOffset
+	m.wizard.BodyViewport.Width = width
+	m.wizard.BodyViewport.Height = height
+	m.wizard.BodyViewport.SetContent(content)
+	m.wizard.BodyViewport.SetYOffset(offset)
+}
+
+func (m *fixTUIModel) wizardViewportSize(contentHeight int, contentWidth int, staticLines int) (int, int) {
+	width := m.wizardInnerWidth()
+	if width <= 0 {
+		if contentWidth < 88 {
+			contentWidth = 88
+		}
+		width = contentWidth
+	}
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	if m.height <= 0 {
+		return width, contentHeight
+	}
+
+	available := m.height - fixPageStyle.GetVerticalFrameSize()
+	available -= m.wizardHelpHeight()
+	available -= 1 // separator line between body and help
+
+	nonPanel := 2 // single top wizard header line + one spacer line
+	if m.status != "" {
+		nonPanel++
+	}
+	if m.errText != "" {
+		nonPanel++
+	}
+	available -= nonPanel
+	if available < panelStyle.GetVerticalFrameSize()+1 {
+		available = panelStyle.GetVerticalFrameSize() + 1
+	}
+
+	panelInner := available - panelStyle.GetVerticalFrameSize()
+	if staticLines < 1 {
+		staticLines = 1
+	}
+	height := panelInner - staticLines
+	if height < 1 {
+		height = 1
+	}
+	if height > contentHeight {
+		height = contentHeight
+	}
+	return width, height
+}
+
+func (m *fixTUIModel) wizardHelpHeight() int {
+	helpPanel := helpPanelStyle
+	if w := m.viewContentWidth(); w > 0 {
+		helpPanel = helpPanel.Width(w)
+	}
+	return lipgloss.Height(helpPanel.Render(m.help.View(m.keys)))
+}
+
+func longestANSIWidth(s string) int {
+	maxWidth := 0
+	for _, line := range strings.Split(s, "\n") {
+		if width := ansi.StringWidth(line); width > maxWidth {
+			maxWidth = width
+		}
+	}
+	return maxWidth
 }
 
 func (m *fixTUIModel) viewSummaryContent() string {

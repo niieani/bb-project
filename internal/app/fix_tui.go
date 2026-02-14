@@ -589,6 +589,9 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.help.Width = msg.Width
 		m.resizeRepoList()
+		if m.viewMode == fixViewWizard {
+			m.syncWizardViewport()
+		}
 		return m, nil
 	case tea.KeyMsg:
 		if m.viewMode == fixViewWizard {
@@ -642,6 +645,15 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.viewMode == fixViewWizard {
+		var cmd tea.Cmd
+		m.wizard.BodyViewport, cmd = m.wizard.BodyViewport.Update(msg)
+		return m, cmd
+	}
+	if m.viewMode == fixViewSummary {
+		return m, nil
+	}
+
 	var cmd tea.Cmd
 	m.repoList, cmd = m.repoList.Update(msg)
 	return m, cmd
@@ -651,15 +663,20 @@ func (m *fixTUIModel) View() string {
 	m.resizeRepoList()
 
 	var b strings.Builder
-	title := lipgloss.JoinHorizontal(lipgloss.Center,
-		titleBadgeStyle.Render("bb"),
-		" "+headerStyle.Render("fix"),
-	)
-	subtitle := hintStyle.Render("Interactive remediation for unsyncable repositories")
-	b.WriteString(title)
-	b.WriteString("\n")
-	b.WriteString(subtitle)
-	b.WriteString("\n\n")
+	if m.viewMode == fixViewWizard {
+		b.WriteString(m.viewWizardTopLine())
+		b.WriteString("\n\n")
+	} else {
+		title := lipgloss.JoinHorizontal(lipgloss.Center,
+			titleBadgeStyle.Render("bb"),
+			" "+headerStyle.Render("fix"),
+		)
+		subtitle := hintStyle.Render("Interactive remediation for unsyncable repositories")
+		b.WriteString(title)
+		b.WriteString("\n")
+		b.WriteString(subtitle)
+		b.WriteString("\n\n")
+	}
 
 	contentPanel := panelStyle
 	if w := m.viewContentWidth(); w > 0 {

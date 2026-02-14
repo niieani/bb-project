@@ -705,6 +705,37 @@ func TestFixTUIWizardViewShowsActionButtons(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardViewUsesSingleTopLineWithoutExtraWizardHeaders(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+
+	view := ansi.Strip(m.View())
+	if strings.Contains(view, "Interactive remediation for unsyncable repositories") {
+		t.Fatalf("wizard should use compact single top line, got %q", view)
+	}
+	if strings.Contains(view, "Review context before applying this fix.") {
+		t.Fatalf("wizard should not render extra review header line, got %q", view)
+	}
+	if strings.Count(view, "Confirm Risky Fix") != 1 {
+		t.Fatalf("expected exactly one wizard header label, got %q", view)
+	}
+}
+
 func TestFixTUIWizardInputAcceptsMappedLetters(t *testing.T) {
 	t.Parallel()
 
@@ -854,6 +885,126 @@ func TestFixTUIWizardCreateProjectVisibilityUsesLeftRightWhenFocused(t *testing.
 	}
 	if strings.Contains(view, "default") && !strings.Contains(view, "private (default)") {
 		t.Fatalf("expected no third default option, got %q", view)
+	}
+}
+
+func TestFixTUIWizardDownScrollsBeforeChangingNonInputFocus(t *testing.T) {
+	t.Parallel()
+
+	noisy := make([]string, 0, 40)
+	for i := 0; i < 40; i++ {
+		noisy = append(noisy, fmt.Sprintf("tmp/noisy-%02d.log", i))
+	}
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{
+				NoisyChangedPaths: noisy,
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
+
+	if m.wizard.FocusArea != fixWizardFocusProjectName {
+		t.Fatalf("initial focus area = %v, want project-name", m.wizard.FocusArea)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project name -> visibility
+	if m.wizard.FocusArea != fixWizardFocusVisibility {
+		t.Fatalf("focus area after first down = %v, want visibility", m.wizard.FocusArea)
+	}
+	startOffset := m.wizard.BodyViewport.YOffset
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // should scroll, not jump to actions
+
+	if m.wizard.FocusArea != fixWizardFocusVisibility {
+		t.Fatalf("focus area changed while viewport could scroll: got %v", m.wizard.FocusArea)
+	}
+	if m.wizard.BodyViewport.YOffset <= startOffset {
+		t.Fatalf("expected viewport to scroll down, yoffset %d -> %d", startOffset, m.wizard.BodyViewport.YOffset)
+	}
+}
+
+func TestFixTUIWizardDownMovesFocusAtViewportBottom(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{
+				ChangedFiles: []fixChangedFile{
+					{Path: "src/main.go", Added: 10, Deleted: 1},
+				},
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 20})
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project name -> visibility
+	if m.wizard.FocusArea != fixWizardFocusVisibility {
+		t.Fatalf("focus area = %v, want visibility before bottom-edge check", m.wizard.FocusArea)
+	}
+
+	m.wizard.BodyViewport.GotoBottom()
+	if !m.wizard.BodyViewport.AtBottom() {
+		t.Fatal("expected wizard viewport to be at bottom")
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // should move to actions at bottom edge
+	if m.wizard.FocusArea != fixWizardFocusActions {
+		t.Fatalf("focus area after down at bottom = %v, want actions", m.wizard.FocusArea)
+	}
+}
+
+func TestFixTUIWizardUpFromFirstInputScrollsWhenNoPreviousField(t *testing.T) {
+	t.Parallel()
+
+	noisy := make([]string, 0, 30)
+	for i := 0; i < 30; i++ {
+		noisy = append(noisy, fmt.Sprintf("tmp/noisy-%02d.log", i))
+	}
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{
+				NoisyChangedPaths: noisy,
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
+
+	m.wizard.BodyViewport.GotoBottom()
+	if m.wizard.BodyViewport.YOffset == 0 {
+		t.Fatal("expected wizard viewport to have scrollable overflow")
+	}
+	startOffset := m.wizard.BodyViewport.YOffset
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // no previous field from first input, should scroll
+	if m.wizard.FocusArea != fixWizardFocusProjectName {
+		t.Fatalf("focus area after up from first input = %v, want project-name", m.wizard.FocusArea)
+	}
+	if m.wizard.BodyViewport.YOffset >= startOffset {
+		t.Fatalf("expected viewport to scroll up, yoffset %d -> %d", startOffset, m.wizard.BodyViewport.YOffset)
 	}
 }
 
