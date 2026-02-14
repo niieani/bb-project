@@ -827,6 +827,18 @@ func TestFixTUIWizardButtonsRenderCancelFirst(t *testing.T) {
 	}
 }
 
+func TestRenderWizardActionButtonsUsesVisibleFocusMarker(t *testing.T) {
+	t.Parallel()
+
+	view := ansi.Strip(renderWizardActionButtons(fixWizardActionSkip))
+	if !strings.Contains(view, "[Skip]") {
+		t.Fatalf("expected focused marker on Skip, got %q", view)
+	}
+	if strings.Contains(view, "[Cancel]") || strings.Contains(view, "[Apply]") {
+		t.Fatalf("expected only Skip to be focused, got %q", view)
+	}
+}
+
 func TestFixTUIWizardEnterOnDefaultCancelReturnsToList(t *testing.T) {
 	t.Parallel()
 

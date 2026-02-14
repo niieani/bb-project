@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"bb-project/internal/domain"
 	"bb-project/internal/state"
@@ -533,6 +534,47 @@ func TestRenderEnumLineIsSingleLine(t *testing.T) {
 	line := renderEnumLine("private", []string{"private", "public"})
 	if strings.Contains(line, "\n") {
 		t.Fatalf("enum line should render in one line, got %q", line)
+	}
+}
+
+func TestButtonFocusStylesUseUnderlineAndNoFrameBorder(t *testing.T) {
+	t.Parallel()
+
+	if !buttonFocusStyle.GetUnderline() {
+		t.Fatal("secondary focused button should keep underline enabled")
+	}
+	if !buttonPrimaryFocusStyle.GetUnderline() {
+		t.Fatal("primary focused button should keep underline enabled")
+	}
+	if !buttonDangerFocusStyle.GetUnderline() {
+		t.Fatal("danger focused button should keep underline enabled")
+	}
+
+	focusedVariants := []string{
+		buttonFocusStyle.Render("[Skip]"),
+		buttonPrimaryFocusStyle.Render("[Apply]"),
+		buttonDangerFocusStyle.Render("[Cancel]"),
+	}
+	for _, rendered := range focusedVariants {
+		if strings.Contains(ansi.Strip(rendered), "│") {
+			t.Fatalf("focused button should not render a frame border glyph, got %q", ansi.Strip(rendered))
+		}
+	}
+}
+
+func TestRenderCatalogActionsFocusedButtonUsesVisibleMarker(t *testing.T) {
+	t.Parallel()
+
+	out := ansi.Strip(renderCatalogActions(
+		false, true, false, false, false, false, false,
+		true,
+		"policy",
+	))
+	if !strings.Contains(out, "[Add]") {
+		t.Fatalf("expected focused catalog action marker on Add, got %q", out)
+	}
+	if strings.Contains(out, "[Edit]") || strings.Contains(out, "[Continue]") {
+		t.Fatalf("expected exactly one focused marker in action row, got %q", out)
 	}
 }
 

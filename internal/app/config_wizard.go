@@ -314,7 +314,8 @@ var (
 				Underline(true)
 
 	buttonPrimaryFocusStyle = buttonPrimaryStyle.
-				Background(lipgloss.Color("25")).
+				Background(lipgloss.Color("33")).
+				Bold(true).
 				Underline(true)
 
 	buttonDangerStyle = buttonStyle.
@@ -323,7 +324,8 @@ var (
 				Bold(true)
 
 	buttonDangerFocusStyle = buttonDangerStyle.
-				Background(lipgloss.Color("124")).
+				Background(lipgloss.Color("196")).
+				Bold(true).
 				Underline(true)
 
 	buttonDisabledStyle = buttonStyle.
@@ -1752,61 +1754,76 @@ func renderToggleField(focused bool, title, description string, value bool) stri
 	return style.Render(b.String())
 }
 
+func renderButtonLabel(label string, focused bool) string {
+	if focused {
+		return "[" + label + "]"
+	}
+	return " " + label + " "
+}
+
 func renderCatalogActions(
 	editFocused, addFocused, setDefaultFocused, toggleLayoutFocused, togglePrivateFocused, togglePublicFocused, continueFocused bool,
 	hasCatalogs bool,
 	policySummary string,
 ) string {
+	editIsFocused := hasCatalogs && editFocused
+	addIsFocused := addFocused
+	setDefaultIsFocused := hasCatalogs && setDefaultFocused
+	toggleLayoutIsFocused := hasCatalogs && toggleLayoutFocused
+	togglePrivateIsFocused := hasCatalogs && togglePrivateFocused
+	togglePublicIsFocused := hasCatalogs && togglePublicFocused
+	continueIsFocused := hasCatalogs && continueFocused
+
 	editStyle := buttonStyle
 	if !hasCatalogs {
 		editStyle = buttonDisabledStyle
-	} else if editFocused {
+	} else if editIsFocused {
 		editStyle = buttonFocusStyle
 	}
 	addStyle := buttonStyle
-	if addFocused {
+	if addIsFocused {
 		addStyle = buttonFocusStyle
 	}
 	setDefaultStyle := buttonStyle
 	if !hasCatalogs {
 		setDefaultStyle = buttonDisabledStyle
-	} else if setDefaultFocused {
+	} else if setDefaultIsFocused {
 		setDefaultStyle = buttonFocusStyle
 	}
 	toggleLayoutStyle := buttonStyle
 	if !hasCatalogs {
 		toggleLayoutStyle = buttonDisabledStyle
-	} else if toggleLayoutFocused {
+	} else if toggleLayoutIsFocused {
 		toggleLayoutStyle = buttonFocusStyle
 	}
 	togglePrivateStyle := buttonStyle
 	if !hasCatalogs {
 		togglePrivateStyle = buttonDisabledStyle
-	} else if togglePrivateFocused {
+	} else if togglePrivateIsFocused {
 		togglePrivateStyle = buttonFocusStyle
 	}
 	togglePublicStyle := buttonStyle
 	if !hasCatalogs {
 		togglePublicStyle = buttonDisabledStyle
-	} else if togglePublicFocused {
+	} else if togglePublicIsFocused {
 		togglePublicStyle = buttonFocusStyle
 	}
 	continueStyle := buttonPrimaryStyle
 	if !hasCatalogs {
 		continueStyle = buttonDisabledStyle
 	}
-	if continueFocused && hasCatalogs {
+	if continueIsFocused {
 		continueStyle = buttonPrimaryFocusStyle
 	}
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		editStyle.Render("Edit"),
-		addStyle.Render("Add"),
-		setDefaultStyle.Render("Set Default"),
-		toggleLayoutStyle.Render("Toggle Layout"),
-		togglePrivateStyle.Render("Toggle Private"),
-		togglePublicStyle.Render("Toggle Public"),
-		continueStyle.Render("Continue"),
+		editStyle.Render(renderButtonLabel("Edit", editIsFocused)),
+		addStyle.Render(renderButtonLabel("Add", addIsFocused)),
+		setDefaultStyle.Render(renderButtonLabel("Set Default", setDefaultIsFocused)),
+		toggleLayoutStyle.Render(renderButtonLabel("Toggle Layout", toggleLayoutIsFocused)),
+		togglePrivateStyle.Render(renderButtonLabel("Toggle Private", togglePrivateIsFocused)),
+		togglePublicStyle.Render(renderButtonLabel("Toggle Public", togglePublicIsFocused)),
+		continueStyle.Render(renderButtonLabel("Continue", continueIsFocused)),
 	) + "\n" + hintStyle.Render(policySummary)
 }
 
@@ -1819,15 +1836,15 @@ func renderEditorActions(includeDelete, saveFocused, deleteFocused, cancelFocuse
 	if cancelFocused {
 		cancelStyle = buttonFocusStyle
 	}
-	parts := []string{saveStyle.Render("Save")}
+	parts := []string{saveStyle.Render(renderButtonLabel("Save", saveFocused))}
 	if includeDelete {
 		deleteStyle := buttonDangerStyle
 		if deleteFocused {
 			deleteStyle = buttonDangerFocusStyle
 		}
-		parts = append(parts, deleteStyle.Render("Delete"))
+		parts = append(parts, deleteStyle.Render(renderButtonLabel("Delete", deleteFocused)))
 	}
-	parts = append(parts, cancelStyle.Render("Cancel"))
+	parts = append(parts, cancelStyle.Render(renderButtonLabel("Cancel", cancelFocused)))
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 

@@ -91,6 +91,12 @@ Use a reusable field block for all form rows:
 - When items exist, include `Edit` as the first action and focus it by default.
 - Destructive action uses danger style and requires explicit confirmation before applying.
 - Buttons must be keyboard-focusable and show focus state clearly.
+- Use one shared focus treatment for all button variants (secondary, primary, danger):
+  - Focused button uses a more vivid fill than its non-focused variant.
+  - Focused button keeps underline enabled as an additional cue.
+  - Focused button uses symmetric label markers (`[Label]`) to avoid one-sided visual imbalance.
+- Do not use asymmetric one-sided focus markers for button labels.
+- Keep focused and non-focused labels width-stable by reserving two wrapping characters for both states (`[Label]` when focused, ` Label ` when not).
 
 ### Input
 
@@ -114,6 +120,23 @@ Use a reusable field block for all form rows:
 - `ON` uses success foreground with subtle success background.
 - `OFF` uses muted foreground with neutral background.
 - Row label and description always adjacent to token.
+
+### Badges / Chips
+
+- Use badges for short, non-interactive metadata tags (for example `AUTO-IGNORE`, risk flags, or compact status labels).
+- Badge shape:
+  - Single-line only.
+  - Bold text.
+  - Horizontal padding of one space on each side.
+- Keep badge labels short and scannable (prefer uppercase tokens, usually <= 14 chars).
+- Use semantic badge tones consistently:
+  - Neutral: informational metadata with no positive/negative implication.
+  - Info: contextual hints.
+  - Success: completed/safe/healthy state.
+  - Warning: cautionary state (for example noisy files to be ignored).
+  - Danger: blocking/error-critical state.
+- When rendering badges inline in aligned lists/tables, reserve a fixed-width badge slot so rows remain column-aligned when a badge is absent.
+- Badges are not focus targets; interactive controls should use the button/toggle focus patterns instead.
 
 ## Catalog UX Standards
 

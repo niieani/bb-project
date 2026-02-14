@@ -891,22 +891,25 @@ func renderWizardActionButtons(focus int) string {
 	cancelStyle := buttonDangerStyle
 	skipStyle := buttonStyle
 	applyStyle := buttonPrimaryStyle
+	cancelFocused := focus == fixWizardActionCancel
+	skipFocused := focus == fixWizardActionSkip
+	applyFocused := focus == fixWizardActionApply
 
-	if focus == fixWizardActionCancel {
+	if cancelFocused {
 		cancelStyle = buttonDangerFocusStyle
 	}
-	if focus == fixWizardActionSkip {
+	if skipFocused {
 		skipStyle = buttonFocusStyle
 	}
-	if focus == fixWizardActionApply {
+	if applyFocused {
 		applyStyle = buttonPrimaryFocusStyle
 	}
 
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		cancelStyle.Render("Cancel"),
-		skipStyle.Render("Skip"),
-		applyStyle.Render("Apply"),
+		cancelStyle.Render(renderButtonLabel("Cancel", cancelFocused)),
+		skipStyle.Render(renderButtonLabel("Skip", skipFocused)),
+		applyStyle.Render(renderButtonLabel("Apply", applyFocused)),
 	)
 }
 
@@ -967,12 +970,7 @@ func (m *fixTUIModel) renderChangedFilesList() string {
 	if blockWidth <= 0 {
 		blockWidth = 88
 	}
-	autoIgnoreBadgeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Light: "#663C00", Dark: "#161B22"}).
-		Background(lipgloss.AdaptiveColor{Light: "#F8D66D", Dark: "#D29922"}).
-		Bold(true).
-		Padding(0, 1)
-	autoIgnoreBadge := autoIgnoreBadgeStyle.Render("AUTO-IGNORE")
+	autoIgnoreBadge := renderBadge("AUTO-IGNORE", badgeToneWarning)
 	suggestedPatterns := map[string]struct{}{}
 	if m.wizard.ShowGitignoreToggle && m.wizard.GenerateGitignore {
 		for _, pattern := range m.wizardGitignoreTogglePatterns() {
