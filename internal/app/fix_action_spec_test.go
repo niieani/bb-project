@@ -106,6 +106,9 @@ func TestFixActionPlanCreateProjectIncludesGhAndMetadataWrite(t *testing.T) {
 		Branch:                  "main",
 		Upstream:                "",
 		OriginURL:               "",
+		GitHubOwner:             "acme",
+		RemoteProtocol:          "https",
+		RepoName:                "api",
 		PreferredRemote:         "origin",
 		CreateProjectName:       "api",
 		CreateProjectVisibility: domain.VisibilityPublic,
@@ -116,6 +119,12 @@ func TestFixActionPlanCreateProjectIncludesGhAndMetadataWrite(t *testing.T) {
 	}
 	if !planContains(plan, true, "git remote add origin") {
 		t.Fatalf("expected origin add command in plan, got %#v", plan)
+	}
+	if !planContains(plan, true, "gh repo create acme/api --public") {
+		t.Fatalf("expected concrete owner/repo in gh create command, got %#v", plan)
+	}
+	if !planContains(plan, true, "git remote add origin https://github.com/acme/api.git") {
+		t.Fatalf("expected concrete origin url in remote add command, got %#v", plan)
 	}
 	if !planContains(plan, false, "Write/update repo metadata") {
 		t.Fatalf("expected metadata write effect in plan, got %#v", plan)

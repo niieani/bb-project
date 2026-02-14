@@ -20,6 +20,9 @@ type fixActionPlanContext struct {
 	Upstream                string
 	OriginURL               string
 	PreferredRemote         string
+	GitHubOwner             string
+	RemoteProtocol          string
+	RepoName                string
 	CommitMessage           string
 	CreateProjectName       string
 	CreateProjectVisibility domain.Visibility
@@ -209,15 +212,17 @@ func planFixActionCreateProject(ctx fixActionPlanContext) []fixActionPlanEntry {
 			})
 		}
 	}
-	projectName := plannedProjectName(ctx.CreateProjectName)
+	projectName := plannedProjectName(ctx.CreateProjectName, ctx.RepoName)
+	owner := plannedGitHubOwner(ctx.GitHubOwner)
 	entries = append(entries, fixActionPlanEntry{
 		Command: true,
-		Summary: fmt.Sprintf("gh repo create <github.owner>/%s %s", projectName, plannedVisibilityFlag(ctx.CreateProjectVisibility)),
+		Summary: fmt.Sprintf("gh repo create %s/%s %s", owner, projectName, plannedVisibilityFlag(ctx.CreateProjectVisibility)),
 	})
 	if strings.TrimSpace(ctx.OriginURL) == "" {
+		originURL := plannedOriginURL(ctx.GitHubOwner, projectName, ctx.RemoteProtocol)
 		entries = append(entries, fixActionPlanEntry{
 			Command: true,
-			Summary: "git remote add origin <new-origin-url>",
+			Summary: fmt.Sprintf("git remote add origin %s", originURL),
 		})
 	} else {
 		entries = append(entries, fixActionPlanEntry{
@@ -239,6 +244,7 @@ func planFixActionCreateProject(ctx fixActionPlanContext) []fixActionPlanEntry {
 }
 
 func planFixActionForkAndRetarget(ctx fixActionPlanContext) []fixActionPlanEntry {
+	owner := plannedGitHubOwner(ctx.GitHubOwner)
 	return []fixActionPlanEntry{
 		{
 			Command: true,
@@ -246,11 +252,11 @@ func planFixActionForkAndRetarget(ctx fixActionPlanContext) []fixActionPlanEntry
 		},
 		{
 			Command: true,
-			Summary: "git remote add <github.owner> <fork-url> (or git remote set-url when that remote already exists)",
+			Summary: fmt.Sprintf("git remote add %s <fork-url> (or git remote set-url when that remote already exists)", owner),
 		},
 		{
 			Command: true,
-			Summary: fmt.Sprintf("git push -u <github.owner> %s", plannedBranch(ctx.Branch)),
+			Summary: fmt.Sprintf("git push -u %s %s", owner, plannedBranch(ctx.Branch)),
 		},
 		{
 			Command: false,
@@ -293,11 +299,33 @@ func plannedBranch(branch string) string {
 	return "<current-branch>"
 }
 
-func plannedProjectName(name string) string {
+func plannedProjectName(name string, repoName string) string {
 	if trimmed := strings.TrimSpace(name); trimmed != "" {
 		return trimmed
 	}
+	if fallback := strings.TrimSpace(repoName); fallback != "" {
+		return fallback
+	}
 	return "<repository-name>"
+}
+
+func plannedGitHubOwner(owner string) string {
+	if trimmed := strings.TrimSpace(owner); trimmed != "" {
+		return trimmed
+	}
+	return "<github.owner>"
+}
+
+func plannedOriginURL(owner string, projectName string, protocol string) string {
+	owner = strings.TrimSpace(owner)
+	projectName = strings.TrimSpace(projectName)
+	if owner == "" || projectName == "" || strings.HasPrefix(owner, "<") || strings.HasPrefix(projectName, "<") {
+		return "<new-origin-url>"
+	}
+	if strings.EqualFold(strings.TrimSpace(protocol), "https") {
+		return fmt.Sprintf("https://github.com/%s/%s.git", owner, projectName)
+	}
+	return fmt.Sprintf("git@github.com:%s/%s.git", owner, projectName)
 }
 
 func plannedVisibilityFlag(visibility domain.Visibility) string {

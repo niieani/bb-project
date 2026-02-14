@@ -20,7 +20,7 @@ Applies to:
 Interactive screens share the same skeleton:
 
 - Outer padding: `1` row, `2` columns.
-- Header: product badge + title + dynamic subtitle on a single line, separated by a short delimiter (for example `|`).
+- Header: product badge + title + dynamic subtitle on a single line, separated by ` · ` (middle dot).
 - Main: exactly one primary panel per screen/step.
 - Footer: sticky help panel at the bottom. No other key legends.
 - Callouts: warnings/errors render above the help panel (so keys stay visible).
@@ -35,7 +35,7 @@ Chrome spacing rules:
 Example shape (schematic):
 
 ```text
-bb  <title>  |  <dynamic subtitle>
+bb  <title>  ·  <dynamic subtitle>
 [Step] [Step] [Step]    (optional)
 ------------------------------
 | Main panel content          |
@@ -47,6 +47,7 @@ bb  <title>  |  <dynamic subtitle>
 
 Avoid unconditional trailing newlines in `View()` output when they cause top borders to scroll off-screen in shorter terminals.
 Avoid trailing spaces on any rendered line (especially the last line) because they can cause awkward wraps in narrow terminals.
+Prefer expressive terminal glyphs (box-drawing borders, bullets, dots, radio/toggle symbols) when they improve scanability and alignment.
 
 ## Visual System
 
@@ -203,11 +204,11 @@ When a content region is scrollable (for example a viewport in a wizard/details 
 Examples:
 
 ```text
-↓ More context below (scroll down)
+↓ More below
 ```
 
 ```text
-↑ More context above (scroll up)
+↑ More above
 ```
 
 ### Badges / Chips (Non-interactive)

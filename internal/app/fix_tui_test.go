@@ -778,10 +778,10 @@ func TestFixTUIWizardViewIncludesApplyingPlanBlock(t *testing.T) {
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
 
 	view := ansi.Strip(m.viewWizardContent())
-	if !strings.Contains(view, "Applying this fix will:") {
+	if !strings.Contains(view, "Review before applying") {
 		t.Fatalf("expected applying-plan block heading, got %q", view)
 	}
-	if !strings.Contains(view, "Commands:") || !strings.Contains(view, "Other actions:") {
+	if !strings.Contains(view, "Applying this fix will run these commands:") || !strings.Contains(view, "It will also perform these side effects:") {
 		t.Fatalf("expected command/action sections in applying-plan block, got %q", view)
 	}
 	if !strings.Contains(view, "git push") {
@@ -818,14 +818,87 @@ func TestFixTUIWizardApplyingPlanShowsCommandsAndNonCommandActions(t *testing.T)
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
 
 	view := ansi.Strip(m.viewWizardContent())
-	if !strings.Contains(view, "[command] git add -A") {
+	if !strings.Contains(view, "git add -A") {
 		t.Fatalf("expected git add command in applying-plan block, got %q", view)
 	}
-	if !strings.Contains(view, "[command] git commit -m") {
+	if !strings.Contains(view, "git commit -m") {
 		t.Fatalf("expected git commit command in applying-plan block, got %q", view)
 	}
-	if !strings.Contains(view, "[action] Generate root .gitignore") {
+	if !strings.Contains(view, "Generate root .gitignore") {
 		t.Fatalf("expected non-command gitignore action in applying-plan block, got %q", view)
+	}
+}
+
+func TestFixTUIWizardApplyPlanBlockRendersAfterRiskContext(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "",
+			},
+			Meta: &domain.RepoMetadataFile{
+				OriginURL: "https://github.com/you/api.git",
+				AutoPush:  true,
+			},
+			Risk: fixRiskSnapshot{
+				MissingRootGitignore:       true,
+				NoisyChangedPaths:          []string{"node_modules/pkg/index.js"},
+				SuggestedGitignorePatterns: []string{"node_modules/"},
+				ChangedFiles: []fixChangedFile{
+					{Path: "node_modules/pkg/index.js", Added: 1, Deleted: 0},
+				},
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	view := ansi.Strip(m.viewWizardContent())
+	changedIdx := strings.Index(view, "Uncommitted changed files")
+	noisyIdx := strings.Index(view, "Missing root .gitignore")
+	planIdx := strings.Index(view, "Review before applying")
+	if changedIdx < 0 || noisyIdx < 0 || planIdx < 0 {
+		t.Fatalf("expected changed/noisy/plan sections, got %q", view)
+	}
+	if !(changedIdx < noisyIdx && noisyIdx < planIdx) {
+		t.Fatalf("expected apply-plan block after risk context, got %q", view)
+	}
+}
+
+func TestFixTUIWizardChangedFilesDescriptionDependsOnAction(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{
+				ChangedFiles: []fixChangedFile{
+					{Path: "src/main.go", Added: 1, Deleted: 1},
+				},
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	createProjectView := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(createProjectView, "Shown for review only. This fix does not stage or commit uncommitted files.") {
+		t.Fatalf("expected review-only changed-files description for create-project, got %q", createProjectView)
+	}
+
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+	stageCommitView := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(stageCommitView, "These uncommitted files will be staged and committed by this fix.") {
+		t.Fatalf("expected stage/commit changed-files description for stage-commit-push, got %q", stageCommitView)
 	}
 }
 

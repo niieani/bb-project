@@ -39,6 +39,8 @@ type fixWizardState struct {
 	OriginURL       string
 	PreferredRemote string
 	Operation       domain.Operation
+	GitHubOwner     string
+	RemoteProtocol  string
 	Action          string
 	Risk            fixRiskSnapshot
 
@@ -167,7 +169,10 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	m.wizard.ProjectName = projectNameInput
 	m.wizard.ShowGitignoreToggle = showGitignoreToggle
 	m.wizard.GenerateGitignore = showGitignoreToggle
-	m.wizard.DefaultVis = m.detectDefaultVisibility()
+	githubOwner, defaultVis, remoteProtocol := m.detectWizardDefaults()
+	m.wizard.GitHubOwner = githubOwner
+	m.wizard.RemoteProtocol = remoteProtocol
+	m.wizard.DefaultVis = defaultVis
 	m.wizard.Visibility = m.wizard.DefaultVis
 	m.wizard.FocusArea = fixWizardFocusActions
 	if m.wizard.EnableCommitMessage {
@@ -270,18 +275,24 @@ func (m *fixTUIModel) applyWizardCurrent() {
 	m.advanceWizard()
 }
 
-func (m *fixTUIModel) detectDefaultVisibility() domain.Visibility {
+func (m *fixTUIModel) detectWizardDefaults() (owner string, visibility domain.Visibility, remoteProtocol string) {
+	visibility = domain.VisibilityPrivate
+	remoteProtocol = "ssh"
 	if m.app == nil {
-		return domain.VisibilityPrivate
+		return "", visibility, remoteProtocol
 	}
 	cfg, _, err := m.app.loadContext()
 	if err != nil {
-		return domain.VisibilityPrivate
+		return "", visibility, remoteProtocol
+	}
+	owner = strings.TrimSpace(cfg.GitHub.Owner)
+	if strings.EqualFold(strings.TrimSpace(cfg.GitHub.RemoteProtocol), "https") {
+		remoteProtocol = "https"
 	}
 	if strings.EqualFold(strings.TrimSpace(cfg.GitHub.DefaultVisibility), string(domain.VisibilityPublic)) {
-		return domain.VisibilityPublic
+		visibility = domain.VisibilityPublic
 	}
-	return domain.VisibilityPrivate
+	return owner, visibility, remoteProtocol
 }
 
 func (m *fixTUIModel) syncWizardFieldFocus() {
@@ -738,9 +749,8 @@ func (m *fixTUIModel) viewWizardContextContent() string {
 	}, "\n")
 	b.WriteString(fieldStyle.Render(context))
 	b.WriteString("\n\n")
-	b.WriteString(m.renderWizardApplyPlan())
-	b.WriteString("\n\n")
-	b.WriteString(renderFieldBlock(false, "Changed files", "Files that will be included by this fix.", m.renderChangedFilesList(), ""))
+	title, description := m.wizardChangedFilesFieldMeta()
+	b.WriteString(renderFieldBlock(false, title, description, m.renderChangedFilesList(), ""))
 
 	if len(m.wizard.Risk.SecretLikeChangedPaths) > 0 {
 		b.WriteString("\n\n")
@@ -776,6 +786,8 @@ func (m *fixTUIModel) viewWizardContextContent() string {
 			"",
 		))
 	}
+	b.WriteString("\n\n")
+	b.WriteString(m.renderWizardApplyPlan())
 	return b.String()
 }
 
@@ -786,6 +798,9 @@ func (m *fixTUIModel) wizardActionPlanContext() fixActionPlanContext {
 		Upstream:                strings.TrimSpace(m.wizard.Upstream),
 		OriginURL:               strings.TrimSpace(m.wizard.OriginURL),
 		PreferredRemote:         strings.TrimSpace(m.wizard.PreferredRemote),
+		GitHubOwner:             strings.TrimSpace(m.wizard.GitHubOwner),
+		RemoteProtocol:          strings.TrimSpace(m.wizard.RemoteProtocol),
+		RepoName:                strings.TrimSpace(m.wizard.RepoName),
 		CreateProjectVisibility: m.wizard.Visibility,
 		MissingRootGitignore:    m.wizard.Risk.MissingRootGitignore,
 	}
@@ -809,41 +824,57 @@ func (m *fixTUIModel) wizardActionPlanContext() fixActionPlanContext {
 func (m *fixTUIModel) renderWizardApplyPlan() string {
 	entries := fixActionPlanFor(m.wizard.Action, m.wizardActionPlanContext())
 
-	commands := make([]string, 0, len(entries))
-	actions := make([]string, 0, len(entries))
+	commandRows := make([]string, 0, len(entries))
+	actionRows := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if strings.TrimSpace(entry.Summary) == "" {
+		summary := strings.TrimSpace(entry.Summary)
+		if summary == "" {
 			continue
 		}
 		if entry.Command {
-			commands = append(commands, "• [command] "+entry.Summary)
+			commandRows = append(commandRows, "• "+renderWizardCommandLine(summary))
 			continue
 		}
-		actions = append(actions, "• [action] "+entry.Summary)
+		actionRows = append(actionRows, "• "+summary)
 	}
 
-	lines := []string{
-		"Commands:",
-	}
-	if len(commands) == 0 {
-		lines = append(lines, "• [command] none")
+	lines := []string{"Applying this fix will run these commands:"}
+	if len(commandRows) == 0 {
+		lines = append(lines, "• none")
 	} else {
-		lines = append(lines, commands...)
+		lines = append(lines, commandRows...)
 	}
-	lines = append(lines, "", "Other actions:")
-	if len(actions) == 0 {
-		lines = append(lines, "• [action] none")
+	lines = append(lines, "", "It will also perform these side effects:")
+	if len(actionRows) == 0 {
+		lines = append(lines, "• none")
 	} else {
-		lines = append(lines, actions...)
+		lines = append(lines, actionRows...)
 	}
 
 	return renderFieldBlock(
 		false,
-		"Applying this fix will:",
-		"Review commands and side effects that run when you choose Apply.",
+		"Review before applying",
+		"These commands and side effects run when you choose Apply.",
 		strings.Join(lines, "\n"),
 		"",
 	)
+}
+
+func (m *fixTUIModel) wizardChangedFilesFieldMeta() (string, string) {
+	switch m.wizard.Action {
+	case FixActionStageCommitPush:
+		return "Uncommitted changed files", "These uncommitted files will be staged and committed by this fix."
+	default:
+		return "Uncommitted changed files", "Shown for review only. This fix does not stage or commit uncommitted files."
+	}
+}
+
+func renderWizardCommandLine(command string) string {
+	return lipgloss.NewStyle().
+		Foreground(textColor).
+		Background(lipgloss.AdaptiveColor{Light: "#ECF3FF", Dark: "#1C2738"}).
+		Padding(0, 1).
+		Render(command)
 }
 
 func (m *fixTUIModel) syncWizardViewport() {
