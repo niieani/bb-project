@@ -67,6 +67,9 @@ func isGitHubRepositoryNameRune(r rune) bool {
 }
 
 func validateFixApplyOptions(action string, opts fixApplyOptions) error {
+	if opts.GenerateGitignore && action != FixActionStageCommitPush {
+		return fmt.Errorf("invalid gitignore generation: action %q does not create a commit", action)
+	}
 	if action == FixActionCreateProject && strings.TrimSpace(opts.CreateProjectName) != "" {
 		sanitized := sanitizeGitHubRepositoryNameInput(opts.CreateProjectName)
 		if err := validateGitHubRepositoryName(sanitized); err != nil {

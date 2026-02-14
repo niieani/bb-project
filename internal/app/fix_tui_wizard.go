@@ -351,7 +351,7 @@ func (m *fixTUIModel) wizardFocusOrder() []fixWizardFocusArea {
 }
 
 func (m *fixTUIModel) shouldShowGitignoreToggle(action string, risk fixRiskSnapshot) bool {
-	if action != FixActionStageCommitPush && action != FixActionCreateProject {
+	if action != FixActionStageCommitPush {
 		return false
 	}
 	if len(risk.NoisyChangedPaths) == 0 {

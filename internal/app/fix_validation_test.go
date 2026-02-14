@@ -79,4 +79,20 @@ func TestValidateFixApplyOptionsCreateProject(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation error for unsanitizable create-project repository name")
 	}
+
+	err = validateFixApplyOptions(FixActionCreateProject, fixApplyOptions{
+		GenerateGitignore: true,
+		GitignorePatterns: []string{"node_modules/"},
+	})
+	if err == nil {
+		t.Fatal("expected validation error when gitignore generation is requested for non-commit action")
+	}
+
+	err = validateFixApplyOptions(FixActionStageCommitPush, fixApplyOptions{
+		GenerateGitignore: true,
+		GitignorePatterns: []string{"node_modules/"},
+	})
+	if err != nil {
+		t.Fatalf("expected gitignore generation to be allowed for stage-commit-push, got %v", err)
+	}
 }

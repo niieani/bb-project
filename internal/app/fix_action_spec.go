@@ -197,21 +197,7 @@ func planFixActionSetUpstreamPush(ctx fixActionPlanContext) []fixActionPlanEntry
 }
 
 func planFixActionCreateProject(ctx fixActionPlanContext) []fixActionPlanEntry {
-	entries := make([]fixActionPlanEntry, 0, 6)
-	if ctx.GenerateGitignore && len(ctx.GitignorePatterns) > 0 {
-		n := len(ctx.GitignorePatterns)
-		if ctx.MissingRootGitignore {
-			entries = append(entries, fixActionPlanEntry{
-				Command: false,
-				Summary: fmt.Sprintf("Generate root .gitignore with %d selected pattern(s).", n),
-			})
-		} else {
-			entries = append(entries, fixActionPlanEntry{
-				Command: false,
-				Summary: fmt.Sprintf("Append %d selected pattern(s) to root .gitignore.", n),
-			})
-		}
-	}
+	entries := make([]fixActionPlanEntry, 0, 5)
 	projectName := plannedProjectName(ctx.CreateProjectName, ctx.RepoName)
 	owner := plannedGitHubOwner(ctx.GitHubOwner)
 	entries = append(entries, fixActionPlanEntry{

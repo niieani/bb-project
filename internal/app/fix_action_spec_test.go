@@ -112,6 +112,9 @@ func TestFixActionPlanCreateProjectIncludesGhAndMetadataWrite(t *testing.T) {
 		PreferredRemote:         "origin",
 		CreateProjectName:       "api",
 		CreateProjectVisibility: domain.VisibilityPublic,
+		GenerateGitignore:       true,
+		GitignorePatterns:       []string{"node_modules/"},
+		MissingRootGitignore:    true,
 	})
 
 	if !planContains(plan, true, "gh repo create") {
@@ -128,6 +131,9 @@ func TestFixActionPlanCreateProjectIncludesGhAndMetadataWrite(t *testing.T) {
 	}
 	if !planContains(plan, false, "Write/update repo metadata") {
 		t.Fatalf("expected metadata write effect in plan, got %#v", plan)
+	}
+	if planContains(plan, false, ".gitignore") {
+		t.Fatalf("did not expect gitignore side effects in create-project plan, got %#v", plan)
 	}
 }
 

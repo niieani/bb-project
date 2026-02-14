@@ -1784,7 +1784,7 @@ func TestFixTUIWizardMissingGitignoreExplainsGenerationForStageCommit(t *testing
 	}
 }
 
-func TestFixTUIWizardCreateProjectMissingGitignoreOffersGenerationToggle(t *testing.T) {
+func TestFixTUIWizardCreateProjectMissingGitignoreDoesNotOfferGenerationToggle(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
@@ -1810,11 +1810,11 @@ func TestFixTUIWizardCreateProjectMissingGitignoreOffersGenerationToggle(t *test
 	})
 
 	view := m.viewWizardContent()
-	if !strings.Contains(view, "bb can generate a root .gitignore before commit") {
-		t.Fatalf("expected explicit .gitignore generation note for create-project, got %q", view)
+	if strings.Contains(view, "Generate .gitignore before commit") || strings.Contains(view, "Append to .gitignore before commit") {
+		t.Fatalf("did not expect gitignore generation toggle in create-project wizard, got %q", view)
 	}
-	if !strings.Contains(view, "Generate .gitignore before commit") {
-		t.Fatalf("expected .gitignore toggle in create-project wizard, got %q", view)
+	if !strings.Contains(view, "This step will not generate .gitignore.") {
+		t.Fatalf("expected explicit no-generation note for create-project, got %q", view)
 	}
 }
 
