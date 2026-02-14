@@ -1320,6 +1320,40 @@ func TestFixTUIWizardCreateProjectNameStartsEmptyWithPlaceholder(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardCreateProjectNameValidationBlocksApply(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "repo-from-folder",
+				Path:      "/repos/repo-from-folder",
+				OriginURL: "",
+			},
+			Meta: nil,
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/repo-from-folder", Action: FixActionCreateProject}})
+	m.wizard.ProjectName.SetValue("invalid repo name")
+	m.wizard.ActionFocus = fixWizardActionApply
+
+	m.applyWizardCurrent()
+
+	if m.viewMode != fixViewWizard {
+		t.Fatalf("view mode = %v, want wizard after validation error", m.viewMode)
+	}
+	if m.errText == "" {
+		t.Fatal("expected validation error text for invalid repository name")
+	}
+	if !strings.Contains(m.errText, "invalid repository name") {
+		t.Fatalf("unexpected error text: %q", m.errText)
+	}
+	if len(m.summaryResults) != 0 {
+		t.Fatalf("summary results = %d, want 0 when apply is blocked by validation", len(m.summaryResults))
+	}
+}
+
 func TestFixTUIWizardCreateProjectVisibilityUsesLeftRightWhenFocused(t *testing.T) {
 	t.Parallel()
 

@@ -228,11 +228,6 @@ func (m *fixTUIModel) skipWizardCurrent() {
 }
 
 func (m *fixTUIModel) applyWizardCurrent() {
-	if m.app == nil {
-		m.appendSummaryResult(m.wizard.Action, "failed", "internal: app is not configured")
-		m.advanceWizard()
-		return
-	}
 	opts := fixApplyOptions{Interactive: true}
 	if m.wizard.EnableProjectName {
 		opts.CreateProjectName = strings.TrimSpace(m.wizard.ProjectName.Value())
@@ -254,6 +249,18 @@ func (m *fixTUIModel) applyWizardCurrent() {
 	if m.wizard.Action == FixActionCreateProject &&
 		(m.wizard.Visibility == domain.VisibilityPrivate || m.wizard.Visibility == domain.VisibilityPublic) {
 		opts.CreateProjectVisibility = m.wizard.Visibility
+	}
+
+	if err := m.validateWizardInputs(opts); err != nil {
+		m.errText = err.Error()
+		return
+	}
+	m.errText = ""
+
+	if m.app == nil {
+		m.appendSummaryResult(m.wizard.Action, "failed", "internal: app is not configured")
+		m.advanceWizard()
+		return
 	}
 
 	if _, err := m.app.applyFixAction(m.includeCatalogs, m.wizard.RepoPath, m.wizard.Action, opts); err != nil {
@@ -293,6 +300,23 @@ func (m *fixTUIModel) detectWizardDefaults() (owner string, visibility domain.Vi
 		visibility = domain.VisibilityPublic
 	}
 	return owner, visibility, remoteProtocol
+}
+
+func (m *fixTUIModel) validateWizardInputs(opts fixApplyOptions) error {
+	if err := validateFixApplyOptions(m.wizard.Action, opts); err != nil {
+		return err
+	}
+
+	if m.wizard.EnableProjectName {
+		name := strings.TrimSpace(opts.CreateProjectName)
+		if name == "" {
+			name = strings.TrimSpace(m.wizard.RepoName)
+		}
+		if err := validateGitHubRepositoryName(name); err != nil {
+			return fmt.Errorf("invalid repository name on GitHub: %w", err)
+		}
+	}
+	return nil
 }
 
 func (m *fixTUIModel) syncWizardFieldFocus() {
@@ -451,6 +475,7 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.wizard.CommitMessage, cmd = m.wizard.CommitMessage.Update(msg)
+		m.errText = ""
 		return m, cmd
 	}
 	if m.wizard.FocusArea == fixWizardFocusProjectName {
@@ -478,6 +503,7 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.wizard.ProjectName, cmd = m.wizard.ProjectName.Update(msg)
+		m.errText = ""
 		return m, cmd
 	}
 	if m.wizard.FocusArea == fixWizardFocusGitignore {

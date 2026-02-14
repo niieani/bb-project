@@ -426,6 +426,10 @@ func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, 
 }
 
 func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, action string, opts fixApplyOptions) error {
+	if err := validateFixApplyOptions(action, opts); err != nil {
+		return err
+	}
+
 	path := target.Record.Path
 	preferredRemote := ""
 	if target.Meta != nil {
@@ -608,6 +612,9 @@ func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, p
 	}
 	if strings.TrimSpace(projectName) == "" {
 		return errors.New("project name is required for create-project")
+	}
+	if err := validateGitHubRepositoryName(projectName); err != nil {
+		return fmt.Errorf("invalid repository name: %w", err)
 	}
 
 	visibility := resolveCreateProjectVisibility(cfg, visibilityOverride)
