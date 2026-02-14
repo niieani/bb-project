@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -54,11 +55,64 @@ func (r Runner) IsGitRepo(path string) bool {
 }
 
 func (r Runner) RepoOrigin(path string) (string, error) {
-	out, err := r.RunGit(path, "remote", "get-url", "origin")
+	remote, err := r.PreferredRemote(path)
+	if err != nil {
+		return "", err
+	}
+	if remote == "" {
+		return "", nil
+	}
+	out, err := r.RunGit(path, "remote", "get-url", remote)
 	if err != nil {
 		return "", nil
 	}
 	return strings.TrimSpace(out), nil
+}
+
+func (r Runner) RemoteNames(path string) ([]string, error) {
+	out, err := r.RunGit(path, "remote")
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(out, "\n")
+	names := make([]string, 0, len(lines))
+	for _, line := range lines {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func (r Runner) PreferredRemote(path string) (string, error) {
+	upstream, _ := r.Upstream(path)
+	if remote := remoteFromUpstream(upstream); remote != "" {
+		return remote, nil
+	}
+	names, err := r.RemoteNames(path)
+	if err != nil {
+		return "", err
+	}
+	if len(names) == 0 {
+		return "", nil
+	}
+	for _, name := range names {
+		if name == "origin" {
+			return name, nil
+		}
+	}
+	return names[0], nil
+}
+
+func remoteFromUpstream(upstream string) string {
+	remote, _, ok := strings.Cut(strings.TrimSpace(upstream), "/")
+	if !ok {
+		return ""
+	}
+	return remote
 }
 
 func (r Runner) InitRepo(path string) error {
@@ -187,7 +241,14 @@ func (r Runner) Push(path string) error {
 }
 
 func (r Runner) PushUpstream(path, branch string) error {
-	_, err := r.RunGit(path, "push", "-u", "origin", branch)
+	remote, err := r.PreferredRemote(path)
+	if err != nil {
+		return err
+	}
+	if remote == "" {
+		remote = "origin"
+	}
+	_, err = r.RunGit(path, "push", "-u", remote, branch)
 	return err
 }
 
@@ -202,12 +263,20 @@ func (r Runner) Commit(path, message string) error {
 }
 
 func (r Runner) Checkout(path, branch string) error {
-	_, err := r.RunGit(path, "checkout", branch)
+	remote, err := r.PreferredRemote(path)
+	if err != nil {
+		return err
+	}
+	if remote == "" {
+		remote = "origin"
+	}
+
+	_, err = r.RunGit(path, "checkout", branch)
 	if err == nil {
-		_, _ = r.RunGit(path, "branch", "--set-upstream-to", "origin/"+branch, branch)
+		_, _ = r.RunGit(path, "branch", "--set-upstream-to", remote+"/"+branch, branch)
 		return nil
 	}
-	_, err2 := r.RunGit(path, "checkout", "-B", branch, "--track", "origin/"+branch)
+	_, err2 := r.RunGit(path, "checkout", "-B", branch, "--track", remote+"/"+branch)
 	return err2
 }
 

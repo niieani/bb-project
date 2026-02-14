@@ -88,6 +88,23 @@ func TestFixCases(t *testing.T) {
 		}
 	})
 
+	t.Run("set upstream push works with non-origin remote", func(t *testing.T) {
+		_, m, catalogRoot := setupSingleMachine(t)
+		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+		m.MustRunGit(now, repoPath, "remote", "rename", "origin", "upstream")
+
+		m.MustRunGit(now, repoPath, "checkout", "-b", "feature/upstream-only")
+		out, err := m.RunBB(now.Add(1*time.Minute), "fix", "demo", "set-upstream-push")
+		if err != nil {
+			t.Fatalf("set-upstream-push failed: %v\n%s", err, out)
+		}
+
+		upstream := strings.TrimSpace(m.MustRunGit(now, repoPath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"))
+		if upstream != "upstream/feature/upstream-only" {
+			t.Fatalf("upstream = %q, want upstream/feature/upstream-only", upstream)
+		}
+	})
+
 	t.Run("enable auto push action", func(t *testing.T) {
 		_, m, catalogRoot := setupSingleMachine(t)
 		_, _ = createRepoWithOrigin(t, m, catalogRoot, "demo", now)

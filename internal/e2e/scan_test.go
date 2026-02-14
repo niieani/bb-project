@@ -86,6 +86,25 @@ func TestScanCases(t *testing.T) {
 			t.Fatalf("expected worktree repo at %q to be discovered, got repos=%+v", worktreePath, mf.Repos)
 		}
 	})
+
+	t.Run("TC-SCAN-005", func(t *testing.T) {
+		_, m, catalogRoot := setupSingleMachine(t)
+		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+		m.MustRunGit(now, repoPath, "remote", "rename", "origin", "upstream")
+
+		if out, err := m.RunBB(now.Add(1*time.Minute), "scan"); err != nil {
+			t.Fatalf("scan failed: %v\n%s", err, out)
+		}
+
+		mf := loadMachineFile(t, m)
+		rec := findRepoRecordByName(t, mf, "demo")
+		if rec.OriginURL == "" {
+			t.Fatal("expected non-origin remote to be treated as repository origin")
+		}
+		if !rec.Syncable {
+			t.Fatalf("expected repo with upstream remote name to remain syncable, reasons=%v", rec.UnsyncableReasons)
+		}
+	})
 }
 
 type twoCatalogHarness struct {
