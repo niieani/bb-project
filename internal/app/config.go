@@ -215,6 +215,9 @@ func validateMachineForSave(machine domain.MachineFile) error {
 		if !filepath.IsAbs(root) {
 			return fmt.Errorf("catalog %q root must be an absolute path", name)
 		}
+		if err := domain.ValidateRepoPathDepth(c.RepoPathDepth); err != nil {
+			return fmt.Errorf("catalog %q %w", name, err)
+		}
 	}
 	if strings.TrimSpace(machine.DefaultCatalog) == "" {
 		return errors.New("default catalog is required")

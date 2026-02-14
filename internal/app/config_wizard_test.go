@@ -314,7 +314,7 @@ func TestWizardCatalogButtonsCanOpenAddEditorAndContinue(t *testing.T) {
 
 	m.catalogEdit = nil
 	m.catalogFocus = catalogFocusButtons
-	m.catalogBtn = 5 // continue
+	m.catalogBtn = 6 // continue
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.step != stepReview {
 		t.Fatalf("step = %v, want %v", m.step, stepReview)
@@ -345,7 +345,7 @@ func TestWizardCatalogButtonsToggleDefaultBranchAutoPushPolicies(t *testing.T) {
 	m.step = stepCatalogs
 	m.focusTabs = false
 	m.catalogFocus = catalogFocusButtons
-	m.catalogBtn = 3 // toggle private
+	m.catalogBtn = 4 // toggle private
 	m.onStepChanged()
 	m.catalogTable.SetCursor(0)
 
@@ -357,13 +357,35 @@ func TestWizardCatalogButtonsToggleDefaultBranchAutoPushPolicies(t *testing.T) {
 		t.Fatal("expected private default policy to toggle off")
 	}
 
-	m.catalogBtn = 4 // toggle public
+	m.catalogBtn = 5 // toggle public
 	if m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPublic) {
 		t.Fatal("expected public default policy to start as off")
 	}
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPublic) {
 		t.Fatal("expected public default policy to toggle on")
+	}
+}
+
+func TestWizardCatalogButtonsToggleLayoutDepth(t *testing.T) {
+	m := testConfigWizardModel(t)
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.catalogFocus = catalogFocusButtons
+	m.catalogBtn = 3 // toggle layout
+	m.onStepChanged()
+	m.catalogTable.SetCursor(0)
+
+	if got := domain.EffectiveRepoPathDepth(m.machine.Catalogs[0]); got != 1 {
+		t.Fatalf("initial depth = %d, want 1", got)
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := domain.EffectiveRepoPathDepth(m.machine.Catalogs[0]); got != 2 {
+		t.Fatalf("depth after toggle = %d, want 2", got)
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := domain.EffectiveRepoPathDepth(m.machine.Catalogs[0]); got != 1 {
+		t.Fatalf("depth after second toggle = %d, want 1", got)
 	}
 }
 
@@ -542,5 +564,8 @@ func TestWizardCatalogListShowsAddedCatalogValues(t *testing.T) {
 	}
 	if !strings.Contains(view, "/tmp/software") {
 		t.Fatalf("expected catalog root in view, got %q", view)
+	}
+	if !strings.Contains(view, "1-level") {
+		t.Fatalf("expected catalog layout depth in view, got %q", view)
 	}
 }

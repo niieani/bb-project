@@ -65,6 +65,29 @@ func setCatalogDefaultBranchAutoPushPolicy(t *testing.T, m *testharness.Machine,
 	}
 }
 
+func setCatalogRepoPathDepth(t *testing.T, m *testharness.Machine, catalogName string, depth int) {
+	t.Helper()
+	paths := state.NewPaths(m.Home)
+	mf, err := state.LoadMachine(paths, m.ID)
+	if err != nil {
+		t.Fatalf("load machine %s: %v", m.ID, err)
+	}
+	found := false
+	for i := range mf.Catalogs {
+		if mf.Catalogs[i].Name != catalogName {
+			continue
+		}
+		mf.Catalogs[i].RepoPathDepth = depth
+		found = true
+	}
+	if !found {
+		t.Fatalf("catalog %q not found on machine %s", catalogName, m.ID)
+	}
+	if err := state.SaveMachine(paths, mf); err != nil {
+		t.Fatalf("save machine %s: %v", m.ID, err)
+	}
+}
+
 func createRepoWithOrigin(t *testing.T, m *testharness.Machine, catalogRoot, name string, now time.Time) (path string, remotePath string) {
 	t.Helper()
 	path = filepath.Join(catalogRoot, name)

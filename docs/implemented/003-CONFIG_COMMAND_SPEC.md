@@ -89,7 +89,7 @@ These concrete patterns should be followed:
   - `github.owner` validator: trimmed, non-empty.
   - `notify.throttle_minutes` validator: integer and `>= 0`.
 - `bubbles/table`:
-  - Catalog listing with columns `Name`, `Root`, `Default`.
+  - Catalog listing with columns `Name`, `Root`, `Layout`, `Default`.
   - Uses focus/blur when entering/exiting catalog edit mode.
   - Dynamically resized via `SetWidth`/`SetHeight` on `tea.WindowSizeMsg`.
 - `bubbles/key` + `bubbles/help`:
@@ -143,6 +143,7 @@ These concrete patterns should be followed:
   - Edit existing catalog root.
   - Remove catalog (confirm).
   - Set default catalog.
+  - Toggle repository path layout depth (`1` or `2` levels under catalog root).
 - Catalog name immutable after creation.
 - Missing root directories can be created during apply flow.
 
@@ -158,6 +159,7 @@ These concrete patterns should be followed:
 - `n`/`p`: next/previous step (blocked when step invalid).
 - `Enter`/`Space`: activate/select.
 - `a` `e` `d` `s`: add/edit/delete/set-default in catalog step.
+- Catalog action row includes a dedicated `Toggle Layout` action.
 - `Ctrl+S`: apply from review step.
 - `Esc`: back/cancel current modal.
 - `Ctrl+C`: quit (blocked by unsaved-change filter unless discard confirmed).
@@ -170,6 +172,7 @@ These concrete patterns should be followed:
 - `default_catalog` must reference an existing catalog.
 - Catalog names unique and non-empty.
 - Catalog roots absolute and non-empty.
+- Catalog `repo_path_depth` must be `1` or `2` (or omitted/`0`, which defaults to `1`).
 - Missing catalog roots:
   - Prompt to create during apply.
   - If user declines and root is still missing, block save.

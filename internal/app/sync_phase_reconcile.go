@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"bb-project/internal/domain"
 	"bb-project/internal/gitx"
@@ -19,7 +20,11 @@ func (a *App) ensureFromWinners(
 ) error {
 	a.logf("sync: reconciling %d repo metadata entries", len(repoMetas))
 	for _, meta := range repoMetas {
-		if meta.RepoID == "" || meta.Name == "" {
+		if strings.TrimSpace(meta.RepoKey) == "" || strings.TrimSpace(meta.RepoID) == "" {
+			continue
+		}
+		keyCatalog, keyRelativePath, keyRepoName, err := domain.ParseRepoKey(meta.RepoKey)
+		if err != nil {
 			continue
 		}
 		if meta.PreferredCatalog != "" {
@@ -30,37 +35,28 @@ func (a *App) ensureFromWinners(
 			}
 		}
 
-		matches := findLocalMatches(machine.Repos, meta.RepoID, selectedCatalogMap)
-		if len(matches) > 1 {
-			a.logf("sync: duplicate local repo_id detected for %s", meta.RepoID)
-			for _, idx := range matches {
-				machine.Repos[idx].Syncable = false
-				machine.Repos[idx].UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonDuplicateLocalRepoID}
-				machine.Repos[idx].StateHash = domain.ComputeStateHash(machine.Repos[idx])
-			}
-			continue
-		}
+		matches := findLocalMatches(machine.Repos, meta.RepoKey, selectedCatalogMap)
 
-		winner, ok := selectWinnerForRepo(allMachines, meta.RepoID)
+		winner, ok := selectWinnerForRepo(allMachines, meta.RepoKey)
 		if !ok {
-			a.logf("sync: no syncable winner for %s", meta.RepoID)
+			a.logf("sync: no syncable winner for %s", meta.RepoKey)
 			continue
 		}
 		if winner.MachineID == machine.MachineID && len(matches) == 1 {
-			if remoteWinner, ok := selectWinnerForRepoExcluding(allMachines, meta.RepoID, machine.MachineID); ok {
-				key := machine.Repos[matches[0]].RepoID + "|" + machine.Repos[matches[0]].Path
+			if remoteWinner, ok := selectWinnerForRepoExcluding(allMachines, meta.RepoKey, machine.MachineID); ok {
+				key := repoRecordIdentityKey(machine.Repos[matches[0]])
 				if transitionedToSyncable[key] && machine.Repos[matches[0]].Branch != remoteWinner.Record.Branch {
 					winner = remoteWinner
 				}
 			}
 		}
 
-		targetCatalog, ok := chooseTargetCatalog(*machine, meta, selectedCatalogMap)
+		targetCatalog, ok := chooseTargetCatalog(*machine, keyCatalog, meta, selectedCatalogMap)
 		if !ok {
 			continue
 		}
-		targetPath := filepath.Join(targetCatalog.Root, meta.Name)
-		a.logf("sync: repo %s winner=%s branch=%s target=%s", meta.RepoID, winner.MachineID, winner.Record.Branch, targetPath)
+		targetPath := filepath.Join(targetCatalog.Root, filepath.FromSlash(keyRelativePath))
+		a.logf("sync: repo %s winner=%s branch=%s target=%s", meta.RepoKey, winner.MachineID, winner.Record.Branch, targetPath)
 
 		pathConflictReason, err := validateTargetPath(a.Git, targetPath, meta.RepoID, meta.PreferredRemote)
 		if err != nil {
@@ -68,7 +64,7 @@ func (a *App) ensureFromWinners(
 		}
 		if pathConflictReason != "" {
 			a.logf("sync: path conflict at %s: %s", targetPath, pathConflictReason)
-			a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, pathConflictReason)
+			a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, keyRepoName, pathConflictReason)
 			continue
 		}
 
@@ -108,7 +104,12 @@ func (a *App) ensureFromWinners(
 			if selected, ok := selectedCatalogMap[local.Catalog]; ok {
 				catalog = selected
 			}
-			updated, err := a.observeRepo(cfg, discoveredRepo{Catalog: catalog, Path: local.Path, Name: local.Name}, opts.Push)
+			updated, err := a.observeRepo(cfg, discoveredRepo{
+				Catalog: catalog,
+				Path:    local.Path,
+				Name:    local.Name,
+				RepoKey: meta.RepoKey,
+			}, opts.Push)
 			if err != nil {
 				return err
 			}
@@ -120,7 +121,7 @@ func (a *App) ensureFromWinners(
 			continue
 		}
 		a.logf("sync: ensuring local copy at %s", targetPath)
-		if err := a.ensureLocalCopy(cfg, machine, meta, winner, targetCatalog, targetPath, opts); err != nil {
+		if err := a.ensureLocalCopy(cfg, machine, meta, winner, targetCatalog, targetPath, keyRepoName, opts); err != nil {
 			return err
 		}
 	}
@@ -128,11 +129,11 @@ func (a *App) ensureFromWinners(
 	return nil
 }
 
-func selectWinnerForRepo(all []domain.MachineFile, repoID string) (domain.MachineRepoRecordWithMachine, bool) {
+func selectWinnerForRepo(all []domain.MachineFile, repoKey string) (domain.MachineRepoRecordWithMachine, bool) {
 	records := make([]domain.MachineRepoRecordWithMachine, 0)
 	for _, m := range all {
 		for _, rec := range m.Repos {
-			if rec.RepoID == repoID {
+			if rec.RepoKey == repoKey {
 				records = append(records, domain.MachineRepoRecordWithMachine{MachineID: m.MachineID, Record: rec})
 			}
 		}
@@ -140,14 +141,14 @@ func selectWinnerForRepo(all []domain.MachineFile, repoID string) (domain.Machin
 	return domain.SelectWinner(records)
 }
 
-func selectWinnerForRepoExcluding(all []domain.MachineFile, repoID string, excludedMachineID string) (domain.MachineRepoRecordWithMachine, bool) {
+func selectWinnerForRepoExcluding(all []domain.MachineFile, repoKey string, excludedMachineID string) (domain.MachineRepoRecordWithMachine, bool) {
 	records := make([]domain.MachineRepoRecordWithMachine, 0)
 	for _, m := range all {
 		if m.MachineID == excludedMachineID {
 			continue
 		}
 		for _, rec := range m.Repos {
-			if rec.RepoID == repoID {
+			if rec.RepoKey == repoKey {
 				records = append(records, domain.MachineRepoRecordWithMachine{MachineID: m.MachineID, Record: rec})
 			}
 		}
@@ -155,10 +156,10 @@ func selectWinnerForRepoExcluding(all []domain.MachineFile, repoID string, exclu
 	return domain.SelectWinner(records)
 }
 
-func findLocalMatches(records []domain.MachineRepoRecord, repoID string, selected map[string]domain.Catalog) []int {
+func findLocalMatches(records []domain.MachineRepoRecord, repoKey string, selected map[string]domain.Catalog) []int {
 	idx := []int{}
 	for i, rec := range records {
-		if rec.RepoID != repoID {
+		if rec.RepoKey != repoKey {
 			continue
 		}
 		if _, ok := selected[rec.Catalog]; !ok {
@@ -169,7 +170,15 @@ func findLocalMatches(records []domain.MachineRepoRecord, repoID string, selecte
 	return idx
 }
 
-func chooseTargetCatalog(machine domain.MachineFile, meta domain.RepoMetadataFile, selected map[string]domain.Catalog) (domain.Catalog, bool) {
+func chooseTargetCatalog(machine domain.MachineFile, keyCatalog string, meta domain.RepoMetadataFile, selected map[string]domain.Catalog) (domain.Catalog, bool) {
+	if keyCatalog != "" {
+		if _, existsOnMachine := domain.FindCatalog(machine, keyCatalog); existsOnMachine {
+			if c, ok := selected[keyCatalog]; ok {
+				return c, true
+			}
+			return domain.Catalog{}, false
+		}
+	}
 	if meta.PreferredCatalog != "" {
 		if c, ok := selected[meta.PreferredCatalog]; ok {
 			return c, true
@@ -229,16 +238,17 @@ func (a *App) ensureLocalCopy(
 	winner domain.MachineRepoRecordWithMachine,
 	targetCatalog domain.Catalog,
 	targetPath string,
+	repoName string,
 	opts SyncOptions,
 ) error {
 	if info, err := os.Stat(targetPath); os.IsNotExist(err) {
 		a.logf("sync: cloning %s into %s", winner.Record.OriginURL, targetPath)
 		if err := a.Git.Clone(winner.Record.OriginURL, targetPath); err != nil {
-			a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonCheckoutFailed)
+			a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCheckoutFailed)
 			return nil
 		}
 		if err := a.Git.EnsureBranchWithPreferredRemote(targetPath, winner.Record.Branch, meta.PreferredRemote); err != nil {
-			a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonCheckoutFailed)
+			a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCheckoutFailed)
 			return nil
 		}
 	} else if err != nil {
@@ -251,29 +261,29 @@ func (a *App) ensureLocalCopy(
 		if len(entries) == 0 {
 			a.logf("sync: cloning into empty directory %s", targetPath)
 			if err := a.Git.Clone(winner.Record.OriginURL, targetPath); err != nil {
-				a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonCheckoutFailed)
+				a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCheckoutFailed)
 				return nil
 			}
 			if err := a.Git.EnsureBranchWithPreferredRemote(targetPath, winner.Record.Branch, meta.PreferredRemote); err != nil {
-				a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonCheckoutFailed)
+				a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCheckoutFailed)
 				return nil
 			}
 		}
 	}
 
 	if !a.Git.IsGitRepo(targetPath) {
-		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonTargetPathNonRepo)
+		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonTargetPathNonRepo)
 		return nil
 	}
 	origin, _ := a.Git.RepoOriginWithPreferredRemote(targetPath, meta.PreferredRemote)
 	originID, _ := domain.NormalizeOriginToRepoID(origin)
 	if originID != meta.RepoID {
-		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonTargetPathRepoMismatch)
+		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonTargetPathRepoMismatch)
 		return nil
 	}
 
 	if err := a.Git.EnsureBranchWithPreferredRemote(targetPath, winner.Record.Branch, meta.PreferredRemote); err != nil {
-		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonCheckoutFailed)
+		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCheckoutFailed)
 		return nil
 	}
 	if cfg.Sync.FetchPrune {
@@ -282,11 +292,16 @@ func (a *App) ensureLocalCopy(
 	}
 	a.logf("sync: pull --ff-only %s", targetPath)
 	if err := a.Git.PullFFOnly(targetPath); err != nil {
-		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonPullFailed)
+		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonPullFailed)
 		return nil
 	}
 
-	rec, err := a.observeRepo(cfg, discoveredRepo{Catalog: targetCatalog, Path: targetPath, Name: meta.Name}, opts.Push)
+	rec, err := a.observeRepo(cfg, discoveredRepo{
+		Catalog: targetCatalog,
+		Path:    targetPath,
+		Name:    repoName,
+		RepoKey: meta.RepoKey,
+	}, opts.Push)
 	if err != nil {
 		return err
 	}
@@ -294,18 +309,23 @@ func (a *App) ensureLocalCopy(
 	return nil
 }
 
-func (a *App) addOrUpdateSyntheticUnsyncable(machine *domain.MachineFile, meta domain.RepoMetadataFile, catalog, targetPath string, reason domain.UnsyncableReason) {
+func (a *App) addOrUpdateSyntheticUnsyncable(machine *domain.MachineFile, meta domain.RepoMetadataFile, catalog, targetPath string, repoName string, reason domain.UnsyncableReason) {
 	for i := range machine.Repos {
-		if machine.Repos[i].RepoID == meta.RepoID && machine.Repos[i].Path == targetPath {
+		if machine.Repos[i].RepoKey == meta.RepoKey && machine.Repos[i].Path == targetPath {
 			machine.Repos[i].Syncable = false
 			machine.Repos[i].UnsyncableReasons = []domain.UnsyncableReason{reason}
 			machine.Repos[i].StateHash = domain.ComputeStateHash(machine.Repos[i])
 			return
 		}
 	}
+	name := strings.TrimSpace(repoName)
+	if name == "" {
+		name = strings.TrimSpace(meta.Name)
+	}
 	rec := domain.MachineRepoRecord{
+		RepoKey:           meta.RepoKey,
 		RepoID:            meta.RepoID,
-		Name:              meta.Name,
+		Name:              name,
 		Catalog:           catalog,
 		Path:              targetPath,
 		OriginURL:         meta.OriginURL,

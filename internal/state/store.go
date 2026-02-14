@@ -160,22 +160,25 @@ func BootstrapMachine(machineID, hostname string, now time.Time) domain.MachineF
 	}
 }
 
-func RepoMetaFileName(repoID string) string {
+func RepoMetaFileName(repoKey string) string {
 	replacer := strings.NewReplacer("/", "__", ":", "_", "\\", "_", "?", "_", "*", "_")
-	return replacer.Replace(repoID) + ".yaml"
+	return replacer.Replace(repoKey) + ".yaml"
 }
 
-func RepoMetaPath(paths Paths, repoID string) string {
-	return filepath.Join(paths.RepoDir(), RepoMetaFileName(repoID))
+func RepoMetaPath(paths Paths, repoKey string) string {
+	return filepath.Join(paths.RepoDir(), RepoMetaFileName(repoKey))
 }
 
 func SaveRepoMetadata(paths Paths, repo domain.RepoMetadataFile) error {
 	repo.Version = 1
-	return SaveYAML(RepoMetaPath(paths, repo.RepoID), repo)
+	if strings.TrimSpace(repo.RepoKey) == "" {
+		return fmt.Errorf("repo_key is required")
+	}
+	return SaveYAML(RepoMetaPath(paths, repo.RepoKey), repo)
 }
 
-func LoadRepoMetadata(paths Paths, repoID string) (domain.RepoMetadataFile, error) {
-	path := RepoMetaPath(paths, repoID)
+func LoadRepoMetadata(paths Paths, repoKey string) (domain.RepoMetadataFile, error) {
+	path := RepoMetaPath(paths, repoKey)
 	if _, err := os.Stat(path); err != nil {
 		return domain.RepoMetadataFile{}, err
 	}
@@ -204,12 +207,12 @@ func LoadAllRepoMetadata(paths Paths) ([]domain.RepoMetadataFile, error) {
 		if err := LoadYAML(filepath.Join(dir, e.Name()), &repo); err != nil {
 			return nil, fmt.Errorf("parse repo metadata %s: %w", e.Name(), err)
 		}
-		if repo.RepoID == "" {
+		if strings.TrimSpace(repo.RepoKey) == "" {
 			continue
 		}
 		out = append(out, repo)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].RepoID < out[j].RepoID })
+	sort.Slice(out, func(i, j int) bool { return out[i].RepoKey < out[j].RepoKey })
 	return out, nil
 }
 

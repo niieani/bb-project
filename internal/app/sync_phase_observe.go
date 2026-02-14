@@ -1,6 +1,8 @@
 package app
 
 import (
+	"strings"
+
 	"bb-project/internal/domain"
 	"bb-project/internal/state"
 )
@@ -24,7 +26,7 @@ func (a *App) observePhase(
 		if err != nil {
 			return nil, nil, err
 		}
-		key := rec.RepoID + "|" + rec.Path
+		key := repoRecordIdentityKey(rec)
 		if old, ok := previous[key]; ok && !old.Syncable && rec.Syncable {
 			transitionedToSyncable[key] = true
 		}
@@ -71,8 +73,10 @@ func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRep
 
 	if rec.Ahead > 0 {
 		autoPush := false
-		if meta, err := state.LoadRepoMetadata(a.Paths, rec.RepoID); err == nil {
-			autoPush = meta.AutoPush
+		if strings.TrimSpace(rec.RepoKey) != "" {
+			if meta, err := state.LoadRepoMetadata(a.Paths, rec.RepoKey); err == nil {
+				autoPush = meta.AutoPush
+			}
 		}
 		if autoPush || opts.Push {
 			a.logf("sync: pushing ahead commits for %s", repo.Path)

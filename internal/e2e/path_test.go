@@ -109,20 +109,28 @@ func TestPathCases(t *testing.T) {
 		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
-		repo1, remote := createRepoWithOrigin(t, m, catalogRoot, "one", now)
+		_, remote := createRepoWithOrigin(t, m, catalogRoot, "one", now)
 		repo2 := filepath.Join(catalogRoot, "two")
 		m.MustRunGit(now, catalogRoot, "clone", remote, repo2)
+		m.MustRunGit(now, repo2, "checkout", "-B", "main", "--track", "origin/main")
 
-		if _, err := m.RunBB(now.Add(1*time.Minute), "sync"); err == nil {
-			t.Fatal("expected duplicate repo_id unsyncable")
+		if out, err := m.RunBB(now.Add(1*time.Minute), "sync"); err != nil {
+			t.Fatalf("expected sync to succeed for duplicate origin with different repo paths: %v\n%s", err, out)
 		}
 		mf := loadMachineFile(t, m)
-		reasons := map[string][]domain.UnsyncableReason{}
+		repoByPath := map[string]domain.MachineRepoRecord{}
 		for _, rec := range mf.Repos {
-			reasons[rec.Path] = rec.UnsyncableReasons
+			repoByPath[rec.Path] = rec
 		}
-		if !containsReason(reasons[repo1], domain.ReasonDuplicateLocalRepoID) || !containsReason(reasons[repo2], domain.ReasonDuplicateLocalRepoID) {
-			t.Fatalf("expected duplicate_local_repo_id for both repos, got %+v", reasons)
+		onePath := filepath.Join(catalogRoot, "one")
+		if _, ok := repoByPath[onePath]; !ok {
+			t.Fatalf("missing repo record for %s", onePath)
+		}
+		if _, ok := repoByPath[repo2]; !ok {
+			t.Fatalf("missing repo record for %s", repo2)
+		}
+		if !repoByPath[onePath].Syncable || !repoByPath[repo2].Syncable {
+			t.Fatalf("expected both repos to remain syncable, got one=%t two=%t", repoByPath[onePath].Syncable, repoByPath[repo2].Syncable)
 		}
 	})
 

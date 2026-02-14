@@ -37,12 +37,12 @@ const (
 	ReasonCheckoutFailed         UnsyncableReason = "checkout_failed"
 	ReasonTargetPathNonRepo      UnsyncableReason = "target_path_nonempty_not_repo"
 	ReasonTargetPathRepoMismatch UnsyncableReason = "target_path_repo_mismatch"
-	ReasonDuplicateLocalRepoID   UnsyncableReason = "duplicate_local_repo_id"
 )
 
 type Catalog struct {
 	Name                              string `yaml:"name"`
 	Root                              string `yaml:"root"`
+	RepoPathDepth                     int    `yaml:"repo_path_depth,omitempty"`
 	AllowAutoPushDefaultBranchPrivate *bool  `yaml:"allow_auto_push_default_branch_private,omitempty"`
 	AllowAutoPushDefaultBranchPublic  *bool  `yaml:"allow_auto_push_default_branch_public,omitempty"`
 }
@@ -82,6 +82,7 @@ type NotifyConfig struct {
 
 type RepoMetadataFile struct {
 	Version             int        `yaml:"version"`
+	RepoKey             string     `yaml:"repo_key"`
 	RepoID              string     `yaml:"repo_id"`
 	Name                string     `yaml:"name"`
 	OriginURL           string     `yaml:"origin_url"`
@@ -103,6 +104,7 @@ type MachineFile struct {
 }
 
 type MachineRepoRecord struct {
+	RepoKey             string             `yaml:"repo_key"`
 	RepoID              string             `yaml:"repo_id"`
 	Name                string             `yaml:"name"`
 	Catalog             string             `yaml:"catalog"`

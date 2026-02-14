@@ -86,7 +86,7 @@ func selectSyncCatalogs(machine domain.MachineFile, include []string) ([]domain.
 func previousRepoRecords(repos []domain.MachineRepoRecord) map[string]domain.MachineRepoRecord {
 	previous := map[string]domain.MachineRepoRecord{}
 	for _, rec := range repos {
-		previous[rec.RepoID+"|"+rec.Path] = rec
+		previous[repoRecordIdentityKey(rec)] = rec
 	}
 	return previous
 }

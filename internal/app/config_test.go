@@ -196,6 +196,8 @@ func TestRunConfigDetectsExternalConfigChange(t *testing.T) {
 }
 
 func TestRunConfigNonInteractiveFails(t *testing.T) {
+	t.Parallel()
+
 	home := t.TempDir()
 	paths := state.NewPaths(home)
 	a := New(paths, &bytes.Buffer{}, &bytes.Buffer{})
@@ -206,6 +208,24 @@ func TestRunConfigNonInteractiveFails(t *testing.T) {
 		t.Fatal("expected non-interactive error")
 	}
 	if !strings.Contains(err.Error(), "requires an interactive terminal") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateMachineForSaveRejectsInvalidRepoPathDepth(t *testing.T) {
+	t.Parallel()
+
+	machine := domain.MachineFile{
+		DefaultCatalog: "software",
+		Catalogs: []domain.Catalog{
+			{Name: "software", Root: "/tmp/software", RepoPathDepth: 3},
+		},
+	}
+	err := validateMachineForSave(machine)
+	if err == nil {
+		t.Fatal("expected validation error for invalid repo_path_depth")
+	}
+	if !strings.Contains(err.Error(), "repo_path_depth") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

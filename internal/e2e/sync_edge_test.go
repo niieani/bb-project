@@ -163,8 +163,8 @@ func TestSyncEdgeCases(t *testing.T) {
 				t.Fatal("expected sync failure")
 			}
 			rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-			if !containsReason(rec.UnsyncableReasons, domain.ReasonPullFailed) {
-				t.Fatalf("expected pull_failed, got %v", rec.UnsyncableReasons)
+			if !containsReason(rec.UnsyncableReasons, domain.ReasonTargetPathRepoMismatch) {
+				t.Fatalf("expected target_path_repo_mismatch, got %v", rec.UnsyncableReasons)
 			}
 		})
 

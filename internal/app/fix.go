@@ -222,10 +222,40 @@ func resolveFixTarget(selector string, repos []fixRepoState) (fixRepoState, erro
 		}
 	}
 
+	repoKeyMatches := make([]fixRepoState, 0, 2)
+	for _, repo := range repos {
+		if strings.EqualFold(strings.TrimSpace(repo.Record.RepoKey), selector) {
+			repoKeyMatches = append(repoKeyMatches, repo)
+		}
+	}
+	if len(repoKeyMatches) == 1 {
+		return repoKeyMatches[0], nil
+	}
+	if len(repoKeyMatches) > 1 {
+		paths := make([]string, 0, len(repoKeyMatches))
+		for _, match := range repoKeyMatches {
+			paths = append(paths, match.Record.Path)
+		}
+		sort.Strings(paths)
+		return fixRepoState{}, fmt.Errorf("project selector %q is ambiguous; matches: %s", selector, strings.Join(paths, ", "))
+	}
+
+	repoIDMatches := make([]fixRepoState, 0, 2)
 	for _, repo := range repos {
 		if strings.EqualFold(strings.TrimSpace(repo.Record.RepoID), selector) {
-			return repo, nil
+			repoIDMatches = append(repoIDMatches, repo)
 		}
+	}
+	if len(repoIDMatches) == 1 {
+		return repoIDMatches[0], nil
+	}
+	if len(repoIDMatches) > 1 {
+		paths := make([]string, 0, len(repoIDMatches))
+		for _, match := range repoIDMatches {
+			paths = append(paths, match.Record.Path)
+		}
+		sort.Strings(paths)
+		return fixRepoState{}, fmt.Errorf("project selector %q is ambiguous; matches: %s", selector, strings.Join(paths, ", "))
 	}
 
 	matches := make([]fixRepoState, 0, 2)
@@ -276,10 +306,10 @@ func (a *App) loadFixRepos(includeCatalogs []string, refresh bool) ([]fixRepoSta
 	if err != nil {
 		return nil, err
 	}
-	metaByRepoID := make(map[string]*domain.RepoMetadataFile, len(metas))
+	metaByRepoKey := make(map[string]*domain.RepoMetadataFile, len(metas))
 	for i := range metas {
 		meta := metas[i]
-		metaByRepoID[meta.RepoID] = &meta
+		metaByRepoKey[meta.RepoKey] = &meta
 	}
 
 	out := make([]fixRepoState, 0, len(machine.Repos))
@@ -290,7 +320,7 @@ func (a *App) loadFixRepos(includeCatalogs []string, refresh bool) ([]fixRepoSta
 		}
 		out = append(out, fixRepoState{
 			Record:           rec,
-			Meta:             metaByRepoID[rec.RepoID],
+			Meta:             metaByRepoKey[rec.RepoKey],
 			Risk:             risk,
 			IsDefaultCatalog: rec.Catalog == machine.DefaultCatalog,
 		})
@@ -365,10 +395,10 @@ func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, 
 	if err != nil {
 		return nil, err
 	}
-	metaByRepoID := make(map[string]*domain.RepoMetadataFile, len(metas))
+	metaByRepoKey := make(map[string]*domain.RepoMetadataFile, len(metas))
 	for i := range metas {
 		meta := metas[i]
-		metaByRepoID[meta.RepoID] = &meta
+		metaByRepoKey[meta.RepoKey] = &meta
 	}
 
 	out := make([]fixRepoState, 0, len(machine.Repos))
@@ -379,7 +409,7 @@ func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, 
 		}
 		out = append(out, fixRepoState{
 			Record:           rec,
-			Meta:             metaByRepoID[rec.RepoID],
+			Meta:             metaByRepoKey[rec.RepoKey],
 			Risk:             risk,
 			IsDefaultCatalog: rec.Catalog == machine.DefaultCatalog,
 		})
@@ -455,10 +485,10 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 		}
 		return a.Git.PushUpstreamWithPreferredRemote(path, branch, preferredRemote)
 	case FixActionEnableAutoPush:
-		if strings.TrimSpace(target.Record.RepoID) == "" {
-			return errors.New("repo_id is required for enable-auto-push")
+		if strings.TrimSpace(target.Record.RepoKey) == "" {
+			return errors.New("repo_key is required for enable-auto-push")
 		}
-		meta, err := state.LoadRepoMetadata(a.Paths, target.Record.RepoID)
+		meta, err := state.LoadRepoMetadata(a.Paths, target.Record.RepoKey)
 		if err != nil {
 			return err
 		}
@@ -522,7 +552,10 @@ func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, p
 	if err != nil {
 		return fmt.Errorf("normalize origin: %w", err)
 	}
-	meta, _, err := a.ensureRepoMetadata(cfg, repoID, projectName, origin, visibility, target.Record.Catalog)
+	if strings.TrimSpace(target.Record.RepoKey) == "" {
+		return errors.New("repo_key is required for create-project")
+	}
+	meta, _, err := a.ensureRepoMetadata(cfg, target.Record.RepoKey, repoID, projectName, origin, visibility, target.Record.Catalog)
 	if err != nil {
 		return err
 	}

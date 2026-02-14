@@ -97,6 +97,7 @@ Implementation constraints:
 
 ## Terminology
 
+- `repo_key`: catalog/path identity (`<catalog>/<relative-path>`) used for shared metadata and winner selection.
 - `repo_id`: canonical repository identifier derived from normalized `origin` URL.
 - `catalog`: named root directory containing projects.
 - `default_catalog`: catalog used when command does not specify one.
@@ -128,7 +129,7 @@ Implementation constraints:
 ### Shared state directory (externally synchronized)
 
 - `/Users/<user>/.config/bb-project/config.yaml`
-- `/Users/<user>/.config/bb-project/repos/<repo-id>.yaml`
+- `/Users/<user>/.config/bb-project/repos/<repo-key>.yaml` (with `/` encoded as `__`)
 - `/Users/<user>/.config/bb-project/machines/<machine-id>.yaml`
 
 Write ownership:
@@ -169,10 +170,11 @@ notify:
   throttle_minutes: 60
 ```
 
-### 2) `repos/<repo-id>.yaml` (shared repo metadata + policy)
+### 2) `repos/<repo-key>.yaml` (shared repo metadata + policy)
 
 ```yaml
 version: 1
+repo_key: software/bb-project
 repo_id: github.com/you/bb-project
 name: bb-project
 origin_url: git@github.com:you/bb-project.git
@@ -192,11 +194,14 @@ default_catalog: software
 catalogs:
   - name: software
     root: /Volumes/Projects/Software
+    repo_path_depth: 1 # 1 | 2, defaults to 1 when omitted
   - name: references
     root: /Volumes/Projects/SoftwareReferences
+    repo_path_depth: 2
 updated_at: "2026-02-13T20:31:00Z"
 repos:
-  - repo_id: github.com/you/bb-project
+  - repo_key: software/bb-project
+    repo_id: github.com/you/bb-project
     name: bb-project
     catalog: software
     path: /Volumes/Projects/Software/bb-project
@@ -267,7 +272,6 @@ Unsyncable reasons include:
 - `checkout_failed`
 - `target_path_nonempty_not_repo`
 - `target_path_repo_mismatch`
-- `duplicate_local_repo_id`
 
 ## Definition: Newest Syncable Observed State
 
@@ -290,7 +294,7 @@ Therefore, "newest" means newest meaningful state change, not newest scan tick.
 
 ## Deterministic Winner Selection
 
-For each `repo_id`:
+For each `repo_key`:
 
 1. Gather records from all machine files.
 2. Filter `syncable == true`.
@@ -324,9 +328,10 @@ selected_catalogs =
   else all catalogs from this machine file
 
 auto_discover_repos_under(selected_catalog_roots)
-for each local repo in selected catalogs:
+for each local repo in selected catalogs that matches catalog.repo_path_depth:
+  derive repo_key = <catalog>/<relative path>
   resolve repo_id from normalized origin URL
-  ensure repos/<repo-id>.yaml exists
+  ensure repos/<repo-key>.yaml exists
   if repo metadata created now:
     set preferred_catalog from discovered catalog
     set auto_push default from visibility
@@ -352,7 +357,7 @@ for each local repo in selected catalogs:
 write this machine file
 read all machines/*.yaml
 
-for each repo_id with shared metadata:
+for each repo_key with shared metadata:
   if repo preferred_catalog not in selected_catalogs:
     continue
   winner = newest syncable observed state
@@ -362,19 +367,16 @@ for each repo_id with shared metadata:
   target_catalog =
     repo preferred_catalog if present on this machine
     else default_catalog
-  target_path = <target_catalog root>/<repo name>
+  target_path = <target_catalog root>/<repo_key relative path>
   if target_path exists and is not empty:
     if target_path is not git repository:
       mark repo unsyncable target_path_nonempty_not_repo
       continue
-    if target_path git origin does not match repo_id:
+    if target_path git origin does not match metadata repo_id:
       mark repo unsyncable target_path_repo_mismatch
       continue
 
-  local_matches = local repos with same repo_id in selected catalogs
-  if count(local_matches) > 1:
-    mark repo unsyncable duplicate_local_repo_id
-    continue
+  local_matches = local repos with same repo_key in selected catalogs
 
   if count(local_matches) == 1:
     local_path = local_matches[0]
@@ -419,7 +421,7 @@ release lock
 6. Visibility behavior:
    - default: create private repo
    - `--public`: create public repo
-7. Create/update `repos/<repo-id>.yaml` with policy defaults from visibility:
+7. Create/update `repos/<repo-key>.yaml` with policy defaults from visibility:
    - private -> `auto_push: true`
    - public -> `auto_push: false`
 8. If current branch has commits and no upstream:
@@ -514,7 +516,6 @@ Suggested scenario matrix:
 3. Path conflict safety:
    - target exists non-empty non-repo -> `target_path_nonempty_not_repo`.
    - target repo origin mismatch -> `target_path_repo_mismatch`.
-   - duplicate same `repo_id` on one machine -> `duplicate_local_repo_id`.
 
 4. Push policy:
    - private repo auto-push succeeds by default.
@@ -527,8 +528,8 @@ Suggested scenario matrix:
    - sync with repeated `--include-catalog` scopes correctly.
 
 6. First-run adoption:
-   - same repo already cloned on multiple machines, no unnecessary clone.
-   - different local paths/catalogs still converge by `repo_id`.
+   - same `repo_key` already cloned on multiple machines, no unnecessary clone.
+   - different local paths/catalogs are independent repos (different `repo_key` values).
 
 7. Observed state monotonicity:
    - repeated no-op sync does not bump `observed_at`.
@@ -586,7 +587,7 @@ Test IDs are normative for coverage tracking.
 34. `TC-PATH-002`: target path exists non-empty and not git repo -> `target_path_nonempty_not_repo`.
 35. `TC-PATH-003`: target path is git repo with mismatched origin -> `target_path_repo_mismatch`.
 36. `TC-PATH-004`: target path is git repo with matching origin -> adopt existing repo, no reclone.
-37. `TC-PATH-005`: same `repo_id` found at multiple local paths on one machine -> `duplicate_local_repo_id`.
+37. `TC-PATH-005`: same `repo_id` at multiple local paths with different `repo_key` values remains valid (no duplicate unsyncable state).
 38. `TC-PATH-006`: when path conflict reason is active, sync makes no project changes for that repo.
 
 39. `TC-CATALOG-001`: `bb init` without `--catalog` uses `default_catalog`.
@@ -596,8 +597,8 @@ Test IDs are normative for coverage tracking.
 43. `TC-CATALOG-005`: repo with `preferred_catalog` absent on machine falls back to `default_catalog`.
 44. `TC-CATALOG-006`: invalid catalog name in include/init returns clear validation error.
 
-45. `TC-ADOPT-001`: first-run on two machines with same existing repo adopts both copies and converges by `repo_id`.
-46. `TC-ADOPT-002`: first-run with different local paths for same repo still converges branch state correctly.
+45. `TC-ADOPT-001`: first-run on two machines with same existing repo adopts both copies and converges by `repo_key`.
+46. `TC-ADOPT-002`: first-run with different local paths for same remote keeps repos independent (distinct `repo_key` values).
 47. `TC-ADOPT-003`: first-run with pre-existing non-empty conflicting target path marks unsyncable and skips.
 
 48. `TC-NOTIFY-001`: notification emitted when repo first becomes unsyncable.
@@ -617,12 +618,12 @@ Test IDs are normative for coverage tracking.
 This section defines behavior when `bb` is first enabled on machines that already contain repositories.
 
 1. First sync on each machine performs discovery first, then publishes observed state.
-2. If the same repo already exists on multiple machines, no clone is attempted; each machine adopts its local copy via `repo_id` matching.
+2. If the same repo already exists on multiple machines at the same catalog-relative path, no clone is attempted; each machine adopts its local copy via `repo_key` matching.
 3. If a machine has the repo at a different local path/catalog than other machines, that is allowed unless target path conflict rules apply.
 4. If clone/ensure target path exists and is empty, clone is allowed.
 5. If target path exists and has files but is not a git repo, mark `target_path_nonempty_not_repo` and skip all sync changes for that repo on that machine.
 6. If target path is a git repo but not the expected `repo_id`, mark `target_path_repo_mismatch` and skip all sync changes for that repo on that machine.
-7. If more than one local path on the same machine maps to the same `repo_id`, mark `duplicate_local_repo_id` and skip changes for that repo until user resolves duplicates.
+7. Multiple local paths with the same `repo_id` are allowed when `repo_key` differs; each path is managed independently.
 
 ## Failure Handling
 

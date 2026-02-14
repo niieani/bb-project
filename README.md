@@ -19,14 +19,15 @@ Known hardening work planned for v1.1 is documented in `docs/PLAN-V1.1.md`.
 
 ## Core Model
 
-- `repo_id`: canonical repository ID normalized from `origin` URL
+- `repo_key`: catalog/path identity (`<catalog>/<relative-path>`) used for repo metadata and convergence
+- `repo_id`: canonical repository ID normalized from `origin` URL (derived from `origin`)
 - `catalog`: named local root where repos live
 - `machine file`: one YAML per machine (catalogs + observed repo states)
 - `repo metadata`: shared per-repo YAML (name, visibility, policy)
 - `syncable`: safe for automation
 - `unsyncable`: requires manual intervention first
 
-For each `repo_id`, `bb` picks the newest syncable observation as winner and tries to converge local copies when safe.
+For each `repo_key`, `bb` picks the newest syncable observation as winner and tries to converge local copies when safe.
 
 ## Requirements
 
@@ -62,7 +63,7 @@ This wizard configures:
 - `github.owner` (required)
 - default visibility and remote protocol
 - sync/notify options
-- catalogs and default catalog
+- catalogs, per-catalog repository layout depth (`1` or `2`), and default catalog
 
 Manual catalog commands remain available.
 
@@ -100,6 +101,9 @@ Flags:
 Behavior:
 
 - If `project` omitted, infers project root from current directory inside a catalog subtree.
+- `project` must match the selected catalog layout depth:
+  - depth `1`: `repo`
+  - depth `2`: `owner/repo`
 - Initializes git repo if missing.
 - Creates GitHub repo via `gh repo create` (unless running in test backend mode).
 - Sets/verifies `origin`.
@@ -167,6 +171,7 @@ Interactive apply behavior:
 Selector resolution for `<project>`:
 
 - exact local path
+- exact `repo_key`
 - exact `repo_id`
 - unique repo name
 
@@ -197,6 +202,7 @@ Updates `auto_push` policy in repo metadata.
 
 `<repo>` selector can be either:
 
+- exact `repo_key`
 - exact `repo_id`
 - repo `name` (must not be ambiguous)
 
@@ -216,7 +222,7 @@ Sets the repo-level preferred remote used when `bb` needs to choose a remote for
 Launches an interactive Bubble Tea wizard for onboarding and reconfiguration.
 
 - edits all `config.yaml` keys
-- edits this machine's catalogs and default catalog
+- edits this machine's catalogs (including layout depth) and default catalog
 - can be rerun to change existing values
 - requires an interactive terminal
 
@@ -278,6 +284,13 @@ Shared (externally synced):
 - `~/.config/bb-project/repos/*.yaml`
 - `~/.config/bb-project/machines/*.yaml`
 
+Repo metadata file naming:
+
+- `repos/<repo_key>.yaml` with `/` replaced by `__`
+- examples:
+  - `software/api` -> `software__api.yaml`
+  - `software/openai/codex` -> `software__openai__codex.yaml`
+
 Local runtime state (not required to sync):
 
 - `~/.local/state/bb-project/machine-id`
@@ -318,7 +331,6 @@ Unsyncable reasons include:
 - `checkout_failed`
 - `target_path_nonempty_not_repo`
 - `target_path_repo_mismatch`
-- `duplicate_local_repo_id`
 
 ## Notification Behavior
 

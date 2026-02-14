@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"bb-project/internal/domain"
@@ -159,5 +160,22 @@ func TestResolveFixTarget(t *testing.T) {
 	}
 	if got.Record.Path != "/repos/api" {
 		t.Fatalf("resolved path = %q, want /repos/api", got.Record.Path)
+	}
+}
+
+func TestResolveFixTargetRepoIDAmbiguous(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{Record: domain.MachineRepoRecord{Name: "api-a", Path: "/repos/api-a", RepoKey: "software/api-a", RepoID: "github.com/you/api"}},
+		{Record: domain.MachineRepoRecord{Name: "api-b", Path: "/repos/api-b", RepoKey: "software/api-b", RepoID: "github.com/you/api"}},
+	}
+
+	_, err := resolveFixTarget("github.com/you/api", repos)
+	if err == nil {
+		t.Fatal("expected ambiguous selector error")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"bb-project/internal/domain"
 )
 
 func TestAcquireLock(t *testing.T) {
@@ -99,6 +101,8 @@ func TestAcquireLock(t *testing.T) {
 }
 
 func TestLockFilePayload(t *testing.T) {
+	t.Parallel()
+
 	paths := NewPaths(t.TempDir())
 	lock, err := AcquireLock(paths)
 	if err != nil {
@@ -119,5 +123,59 @@ func TestLockFilePayload(t *testing.T) {
 	}
 	if !strings.Contains(text, "created_at=") {
 		t.Fatalf("expected created_at in lock file, got: %q", text)
+	}
+}
+
+func TestRepoMetaFileNameUsesRepoKey(t *testing.T) {
+	t.Parallel()
+
+	got := RepoMetaFileName("software/openai/codex")
+	if got != "software__openai__codex.yaml" {
+		t.Fatalf("RepoMetaFileName() = %q, want %q", got, "software__openai__codex.yaml")
+	}
+}
+
+func TestLoadAllRepoMetadataSkipsMissingRepoKeyAndSortsByRepoKey(t *testing.T) {
+	t.Parallel()
+
+	paths := NewPaths(t.TempDir())
+	if err := EnsureDir(paths.RepoDir()); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+
+	if err := SaveRepoMetadata(paths, domain.RepoMetadataFile{
+		RepoKey: "software/zeta",
+		RepoID:  "github.com/you/zeta",
+		Name:    "zeta",
+	}); err != nil {
+		t.Fatalf("save repo zeta: %v", err)
+	}
+	if err := SaveRepoMetadata(paths, domain.RepoMetadataFile{
+		RepoKey: "software/alpha",
+		RepoID:  "github.com/you/alpha",
+		Name:    "alpha",
+	}); err != nil {
+		t.Fatalf("save repo alpha: %v", err)
+	}
+
+	legacyPath := filepath.Join(paths.RepoDir(), "legacy.yaml")
+	legacyYAML := strings.TrimSpace(`
+version: 1
+repo_id: github.com/you/legacy
+name: legacy
+`) + "\n"
+	if err := os.WriteFile(legacyPath, []byte(legacyYAML), 0o644); err != nil {
+		t.Fatalf("write legacy metadata: %v", err)
+	}
+
+	repos, err := LoadAllRepoMetadata(paths)
+	if err != nil {
+		t.Fatalf("LoadAllRepoMetadata: %v", err)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("repo count = %d, want 2", len(repos))
+	}
+	if repos[0].RepoKey != "software/alpha" || repos[1].RepoKey != "software/zeta" {
+		t.Fatalf("unexpected repo key order: %q, %q", repos[0].RepoKey, repos[1].RepoKey)
 	}
 }

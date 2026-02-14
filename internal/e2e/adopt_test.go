@@ -79,11 +79,15 @@ func TestAdoptCases(t *testing.T) {
 			t.Fatalf("sync on B failed: %v\n%s", err, out)
 		}
 
-		if got := gitCurrentBranch(t, mB, repoB, now); got != "feature/adopt-2" {
-			t.Fatalf("expected custom path repo to converge, got %q", got)
+		if got := gitCurrentBranch(t, mB, repoB, now); got != "main" {
+			t.Fatalf("expected custom path repo to remain independent, got %q", got)
 		}
-		if _, err := os.Stat(filepath.Join(rootB, "api")); !os.IsNotExist(err) {
-			t.Fatalf("expected no additional clone at default path, stat err=%v", err)
+		defaultPath := filepath.Join(rootB, "api")
+		if _, err := os.Stat(filepath.Join(defaultPath, ".git")); err != nil {
+			t.Fatalf("expected additional clone at default path, stat err=%v", err)
+		}
+		if got := gitCurrentBranch(t, mB, defaultPath, now); got != "feature/adopt-2" {
+			t.Fatalf("expected default path clone to converge, got %q", got)
 		}
 	})
 

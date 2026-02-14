@@ -863,7 +863,18 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.recomputeDirty()
 					return m, nil
-				case 3: // toggle private default-branch auto-push
+				case 3: // toggle repo path layout depth
+					if len(m.machine.Catalogs) == 0 {
+						m.errorText = "select a catalog to toggle layout"
+						return m, nil
+					}
+					if err := m.toggleRepoPathDepthFromSelection(); err != nil {
+						m.errorText = err.Error()
+						return m, nil
+					}
+					m.recomputeDirty()
+					return m, nil
+				case 4: // toggle private default-branch auto-push
 					if len(m.machine.Catalogs) == 0 {
 						m.errorText = "select a catalog to toggle private auto-push"
 						return m, nil
@@ -874,7 +885,7 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.recomputeDirty()
 					return m, nil
-				case 4: // toggle public default-branch auto-push
+				case 5: // toggle public default-branch auto-push
 					if len(m.machine.Catalogs) == 0 {
 						m.errorText = "select a catalog to toggle public auto-push"
 						return m, nil
@@ -885,7 +896,7 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.recomputeDirty()
 					return m, nil
-				case 5: // continue
+				case 6: // continue
 					if len(m.machine.Catalogs) == 0 {
 						m.errorText = "at least one catalog is required"
 						return m, nil
@@ -1096,7 +1107,8 @@ func (m *configWizardModel) initNotifyInput() {
 func (m *configWizardModel) initCatalogTable() {
 	cols := []table.Column{
 		{Title: "Name", Width: 16},
-		{Title: "Root", Width: 42},
+		{Title: "Root", Width: 36},
+		{Title: "Layout", Width: 10},
 		{Title: "Default", Width: 8},
 		{Title: "Private Push", Width: 12},
 		{Title: "Public Push", Width: 11},
@@ -1294,7 +1306,7 @@ func (m *configWizardModel) catalogButtonMax() int {
 	if len(m.machine.Catalogs) == 0 {
 		return 1 // Add
 	}
-	return 5 // Edit, Add, Set Default, Toggle Private, Toggle Public, Continue
+	return 6 // Edit, Add, Set Default, Toggle Layout, Toggle Private, Toggle Public, Continue
 }
 
 func (m *configWizardModel) validateCurrentStep() error {
@@ -1506,7 +1518,7 @@ func (m *configWizardModel) viewCatalogs() string {
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Catalogs define root folders where bb discovers repositories."))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Select a row and use action buttons to set default and toggle default-branch auto-push for private/public repos."))
+	b.WriteString(hintStyle.Render("Select a row and use action buttons to set default, toggle folder layout depth, and change default-branch auto-push policy."))
 	b.WriteString("\n\n")
 	if m.catalogEdit != nil {
 		b.WriteString(panelStyle.Render(m.viewCatalogEditor()))
@@ -1535,6 +1547,7 @@ func (m *configWizardModel) viewCatalogs() string {
 		!m.focusTabs && m.catalogFocus == catalogFocusButtons && m.catalogBtn == 3,
 		!m.focusTabs && m.catalogFocus == catalogFocusButtons && m.catalogBtn == 4,
 		!m.focusTabs && m.catalogFocus == catalogFocusButtons && m.catalogBtn == 5,
+		!m.focusTabs && m.catalogFocus == catalogFocusButtons && m.catalogBtn == 6,
 		len(m.machine.Catalogs) > 0,
 		m.selectedCatalogPolicySummary(),
 	))
@@ -1740,7 +1753,7 @@ func renderToggleField(focused bool, title, description string, value bool) stri
 }
 
 func renderCatalogActions(
-	editFocused, addFocused, setDefaultFocused, togglePrivateFocused, togglePublicFocused, continueFocused bool,
+	editFocused, addFocused, setDefaultFocused, toggleLayoutFocused, togglePrivateFocused, togglePublicFocused, continueFocused bool,
 	hasCatalogs bool,
 	policySummary string,
 ) string {
@@ -1759,6 +1772,12 @@ func renderCatalogActions(
 		setDefaultStyle = buttonDisabledStyle
 	} else if setDefaultFocused {
 		setDefaultStyle = buttonFocusStyle
+	}
+	toggleLayoutStyle := buttonStyle
+	if !hasCatalogs {
+		toggleLayoutStyle = buttonDisabledStyle
+	} else if toggleLayoutFocused {
+		toggleLayoutStyle = buttonFocusStyle
 	}
 	togglePrivateStyle := buttonStyle
 	if !hasCatalogs {
@@ -1784,6 +1803,7 @@ func renderCatalogActions(
 		editStyle.Render("Edit"),
 		addStyle.Render("Add"),
 		setDefaultStyle.Render("Set Default"),
+		toggleLayoutStyle.Render("Toggle Layout"),
 		togglePrivateStyle.Render("Toggle Private"),
 		togglePublicStyle.Render("Toggle Public"),
 		continueStyle.Render("Continue"),
@@ -1851,6 +1871,7 @@ func (m *configWizardModel) rebuildCatalogRows() {
 		rows = append(rows, table.Row{
 			c.Name,
 			c.Root,
+			repoPathDepthLabel(c),
 			def,
 			onOffLabel(c.AllowsDefaultBranchAutoPush(domain.VisibilityPrivate)),
 			onOffLabel(c.AllowsDefaultBranchAutoPush(domain.VisibilityPublic)),
@@ -1865,6 +1886,13 @@ func onOffLabel(v bool) string {
 		return "on"
 	}
 	return "off"
+}
+
+func repoPathDepthLabel(c domain.Catalog) string {
+	if domain.EffectiveRepoPathDepth(c) == 2 {
+		return "2-level"
+	}
+	return "1-level"
 }
 
 func (m *configWizardModel) startCatalogAddEditor() {
@@ -1928,7 +1956,11 @@ func (m *configWizardModel) commitCatalogEditor() error {
 		if !filepath.IsAbs(root) {
 			return fmt.Errorf("catalog root must be absolute")
 		}
-		m.machine.Catalogs = append(m.machine.Catalogs, domain.Catalog{Name: name, Root: root})
+		m.machine.Catalogs = append(m.machine.Catalogs, domain.Catalog{
+			Name:          name,
+			Root:          root,
+			RepoPathDepth: domain.DefaultRepoPathDepth,
+		})
 		if strings.TrimSpace(m.machine.DefaultCatalog) == "" {
 			m.machine.DefaultCatalog = name
 		}
@@ -1999,6 +2031,22 @@ func (m *configWizardModel) setDefaultFromSelection() error {
 	return nil
 }
 
+func (m *configWizardModel) toggleRepoPathDepthFromSelection() error {
+	idx := m.catalogTable.Cursor()
+	if idx < 0 || idx >= len(m.machine.Catalogs) {
+		return fmt.Errorf("select a catalog first")
+	}
+	current := domain.EffectiveRepoPathDepth(m.machine.Catalogs[idx])
+	if current == 2 {
+		m.machine.Catalogs[idx].RepoPathDepth = 1
+	} else {
+		m.machine.Catalogs[idx].RepoPathDepth = 2
+	}
+	m.rebuildCatalogRows()
+	m.catalogTable.SetCursor(idx)
+	return nil
+}
+
 func (m *configWizardModel) toggleDefaultBranchAutoPushFromSelection(visibility domain.Visibility) error {
 	idx := m.catalogTable.Cursor()
 	if idx < 0 || idx >= len(m.machine.Catalogs) {
@@ -2027,8 +2075,9 @@ func (m *configWizardModel) selectedCatalogPolicySummary() string {
 	}
 	c := m.machine.Catalogs[idx]
 	return fmt.Sprintf(
-		"Selected %q: private=%s, public=%s",
+		"Selected %q: layout=%s, private=%s, public=%s",
 		c.Name,
+		repoPathDepthLabel(c),
 		onOffLabel(c.AllowsDefaultBranchAutoPush(domain.VisibilityPrivate)),
 		onOffLabel(c.AllowsDefaultBranchAutoPush(domain.VisibilityPublic)),
 	)

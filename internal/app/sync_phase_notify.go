@@ -47,6 +47,9 @@ func (a *App) notifyUnsyncable(cfg domain.ConfigFile, repos []domain.MachineRepo
 }
 
 func notifyCacheKey(rec domain.MachineRepoRecord) string {
+	if strings.TrimSpace(rec.RepoKey) != "" {
+		return "repo_key:" + rec.RepoKey
+	}
 	if strings.TrimSpace(rec.RepoID) != "" {
 		return rec.RepoID
 	}

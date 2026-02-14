@@ -163,7 +163,7 @@ func (a *App) RunInit(opts InitOptions) error {
 		return err
 	}
 	a.logf("init: selected catalog %q (%s)", targetCatalog.Name, targetCatalog.Root)
-	targetPath, projectName, err := a.resolveInitTarget(machine, targetCatalog, opts.Project)
+	targetPath, projectName, repoKey, err := a.resolveInitTarget(machine, targetCatalog, opts.Project)
 	if err != nil {
 		return err
 	}
@@ -231,7 +231,7 @@ func (a *App) RunInit(opts InitOptions) error {
 		return fmt.Errorf("normalize origin: %w", err)
 	}
 
-	repoMeta, created, err := a.ensureRepoMetadata(cfg, repoID, projectName, origin, visibility, targetCatalog.Name)
+	repoMeta, created, err := a.ensureRepoMetadata(cfg, repoKey, repoID, projectName, origin, visibility, targetCatalog.Name)
 	if err != nil {
 		return err
 	}
@@ -288,15 +288,22 @@ func resolveInitCatalog(machine domain.MachineFile, explicit string) (domain.Cat
 	return domain.Catalog{}, fmt.Errorf("default catalog %q is not configured", machine.DefaultCatalog)
 }
 
-func (a *App) resolveInitTarget(machine domain.MachineFile, targetCatalog domain.Catalog, project string) (path string, name string, err error) {
+func (a *App) resolveInitTarget(machine domain.MachineFile, targetCatalog domain.Catalog, project string) (path string, name string, repoKey string, err error) {
 	if project != "" {
 		project = strings.TrimSpace(project)
-		return filepath.Join(targetCatalog.Root, project), filepath.Base(project), nil
+		if filepath.IsAbs(project) {
+			return "", "", "", errors.New("project must be relative to the catalog root")
+		}
+		repoKey, normalizedRelativePath, repoName, ok := domain.DeriveRepoKeyFromRelative(targetCatalog, project)
+		if !ok {
+			return "", "", "", fmt.Errorf("project path must match catalog layout depth %d", domain.EffectiveRepoPathDepth(targetCatalog))
+		}
+		return filepath.Join(targetCatalog.Root, filepath.FromSlash(normalizedRelativePath)), repoName, repoKey, nil
 	}
 
 	cwd, err := a.Getwd()
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	for _, c := range machine.Catalogs {
@@ -308,13 +315,18 @@ func (a *App) resolveInitTarget(machine domain.MachineFile, targetCatalog domain
 			continue
 		}
 		parts := splitPath(rel)
-		if len(parts) == 0 {
-			break
+		depth := domain.EffectiveRepoPathDepth(c)
+		if len(parts) < depth {
+			continue
 		}
-		name = parts[0]
-		return filepath.Join(c.Root, name), name, nil
+		relativePath := filepath.Join(parts[:depth]...)
+		repoKey, normalizedRelativePath, repoName, ok := domain.DeriveRepoKeyFromRelative(c, relativePath)
+		if !ok {
+			continue
+		}
+		return filepath.Join(c.Root, filepath.FromSlash(normalizedRelativePath)), repoName, repoKey, nil
 	}
-	return "", "", errors.New("current directory is outside configured catalogs")
+	return "", "", "", errors.New("current directory is outside configured catalogs")
 }
 
 func pathUnderRoot(path, root string) (string, bool) {
@@ -403,8 +415,8 @@ func (a *App) createRemoteRepo(owner, repo string, visibility domain.Visibility,
 	return fmt.Sprintf("git@github.com:%s/%s.git", owner, repo), nil
 }
 
-func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoID, name, origin string, visibility domain.Visibility, preferredCatalog string) (domain.RepoMetadataFile, bool, error) {
-	meta, err := state.LoadRepoMetadata(a.Paths, repoID)
+func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, repoID, name, origin string, visibility domain.Visibility, preferredCatalog string) (domain.RepoMetadataFile, bool, error) {
+	meta, err := state.LoadRepoMetadata(a.Paths, repoKey)
 	created := false
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -412,6 +424,7 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoID, name, origin str
 		}
 		meta = domain.RepoMetadataFile{
 			Version:             1,
+			RepoKey:             repoKey,
 			RepoID:              repoID,
 			Name:                name,
 			OriginURL:           origin,
@@ -429,6 +442,12 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoID, name, origin str
 		}
 		created = true
 	} else {
+		if meta.RepoKey == "" {
+			meta.RepoKey = repoKey
+		}
+		if meta.RepoID == "" {
+			meta.RepoID = repoID
+		}
 		if meta.Name == "" {
 			meta.Name = name
 		}
@@ -448,7 +467,7 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoID, name, origin str
 	if err := state.SaveRepoMetadata(a.Paths, meta); err != nil {
 		return domain.RepoMetadataFile{}, false, err
 	}
-	a.logf("state: wrote repo metadata %s", state.RepoMetaPath(a.Paths, repoID))
+	a.logf("state: wrote repo metadata %s", state.RepoMetaPath(a.Paths, repoKey))
 	return meta, created, nil
 }
 
@@ -456,6 +475,7 @@ type discoveredRepo struct {
 	Catalog domain.Catalog
 	Path    string
 	Name    string
+	RepoKey string
 }
 
 func (a *App) scanAndPublish(cfg domain.ConfigFile, machine *domain.MachineFile, opts ScanOptions) (bool, error) {
@@ -473,7 +493,7 @@ func (a *App) scanAndPublish(cfg domain.ConfigFile, machine *domain.MachineFile,
 
 	prev := map[string]domain.MachineRepoRecord{}
 	for _, rec := range machine.Repos {
-		prev[rec.RepoID+"|"+rec.Path] = rec
+		prev[repoRecordIdentityKey(rec)] = rec
 	}
 
 	records := make([]domain.MachineRepoRecord, 0, len(discovered))
@@ -484,7 +504,7 @@ func (a *App) scanAndPublish(cfg domain.ConfigFile, machine *domain.MachineFile,
 		if err != nil {
 			return false, err
 		}
-		old := prev[rec.RepoID+"|"+rec.Path]
+		old := prev[repoRecordIdentityKey(rec)]
 		rec = domain.UpdateObservedAt(old, rec, a.Now())
 		if !rec.Syncable {
 			unsyncable = true
@@ -493,10 +513,10 @@ func (a *App) scanAndPublish(cfg domain.ConfigFile, machine *domain.MachineFile,
 	}
 
 	sort.Slice(records, func(i, j int) bool {
-		if records[i].RepoID == records[j].RepoID {
+		if repoRecordSortKey(records[i]) == repoRecordSortKey(records[j]) {
 			return records[i].Path < records[j].Path
 		}
-		return records[i].RepoID < records[j].RepoID
+		return repoRecordSortKey(records[i]) < repoRecordSortKey(records[j])
 	})
 	machine.Repos = records
 	machine.UpdatedAt = a.Now()
@@ -528,12 +548,15 @@ func discoverRepos(catalogs []domain.Catalog) ([]discoveredRepo, error) {
 				return filepath.SkipDir
 			}
 			if isGitDir(path) {
-				rel, _ := filepath.Rel(c.Root, path)
-				name := filepath.Base(path)
-				if rel == "." {
-					name = filepath.Base(c.Root)
+				repoKey, _, name, ok := domain.DeriveRepoKey(c, path)
+				if ok {
+					out = append(out, discoveredRepo{
+						Catalog: c,
+						Path:    path,
+						Name:    name,
+						RepoKey: repoKey,
+					})
 				}
-				out = append(out, discoveredRepo{Catalog: c, Path: path, Name: name})
 				return filepath.SkipDir
 			}
 			return nil
@@ -559,8 +582,8 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	if origin != "" {
 		repoID, _ = domain.NormalizeOriginToRepoID(origin)
 	}
-	if repoID != "" {
-		_, _, err := a.ensureRepoMetadata(cfg, repoID, repo.Name, origin, domain.VisibilityUnknown, repo.Catalog.Name)
+	if repoID != "" && strings.TrimSpace(repo.RepoKey) != "" {
+		_, _, err := a.ensureRepoMetadata(cfg, repo.RepoKey, repoID, repo.Name, origin, domain.VisibilityUnknown, repo.Catalog.Name)
 		if err != nil {
 			return domain.MachineRepoRecord{}, err
 		}
@@ -577,8 +600,8 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	autoPush := false
 	visibility := domain.VisibilityUnknown
 	preferredRemote := ""
-	if repoID != "" {
-		if meta, err := state.LoadRepoMetadata(a.Paths, repoID); err == nil {
+	if strings.TrimSpace(repo.RepoKey) != "" {
+		if meta, err := state.LoadRepoMetadata(a.Paths, repo.RepoKey); err == nil {
 			autoPush = meta.AutoPush
 			visibility = meta.Visibility
 			preferredRemote = meta.PreferredRemote
@@ -603,6 +626,7 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	}, autoPush, allowPush)
 
 	rec := domain.MachineRepoRecord{
+		RepoKey:             repo.RepoKey,
 		RepoID:              repoID,
 		Name:                repo.Name,
 		Catalog:             repo.Catalog.Name,
@@ -781,7 +805,7 @@ func (a *App) RunCatalogAdd(name, root string) (int, error) {
 			return 2, fmt.Errorf("catalog %q already exists", name)
 		}
 	}
-	machine.Catalogs = append(machine.Catalogs, domain.Catalog{Name: name, Root: root})
+	machine.Catalogs = append(machine.Catalogs, domain.Catalog{Name: name, Root: root, RepoPathDepth: domain.DefaultRepoPathDepth})
 	if machine.DefaultCatalog == "" {
 		machine.DefaultCatalog = name
 	}
@@ -896,16 +920,11 @@ func (a *App) RunRepoPolicy(repoSelector string, autoPush bool) (int, error) {
 	if err != nil {
 		return 2, err
 	}
-	idx := -1
-	for i, r := range repos {
-		if r.RepoID == repoSelector || r.Name == repoSelector {
-			if idx >= 0 {
-				return 2, fmt.Errorf("repo selector %q is ambiguous", repoSelector)
-			}
-			idx = i
-		}
+	idx, err := selectRepoMetadataIndex(repos, repoSelector)
+	if err != nil {
+		return 2, err
 	}
-	if idx < 0 {
+	if idx == -1 {
 		return 2, fmt.Errorf("repo %q not found", repoSelector)
 	}
 	repos[idx].AutoPush = autoPush
@@ -931,16 +950,11 @@ func (a *App) RunRepoPreferredRemote(repoSelector string, preferredRemote string
 	if err != nil {
 		return 2, err
 	}
-	idx := -1
-	for i, r := range repos {
-		if r.RepoID == repoSelector || r.Name == repoSelector {
-			if idx >= 0 {
-				return 2, fmt.Errorf("repo selector %q is ambiguous", repoSelector)
-			}
-			idx = i
-		}
+	idx, err := selectRepoMetadataIndex(repos, repoSelector)
+	if err != nil {
+		return 2, err
 	}
-	if idx < 0 {
+	if idx == -1 {
 		return 2, fmt.Errorf("repo %q not found", repoSelector)
 	}
 	preferredRemote = strings.TrimSpace(preferredRemote)
@@ -953,6 +967,48 @@ func (a *App) RunRepoPreferredRemote(repoSelector string, preferredRemote string
 	}
 	a.logf("repo remote: set preferred_remote=%q for %s", preferredRemote, repos[idx].RepoID)
 	return 0, nil
+}
+
+func selectRepoMetadataIndex(repos []domain.RepoMetadataFile, selector string) (int, error) {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return -1, nil
+	}
+	matches := make([]int, 0, 2)
+	for i, r := range repos {
+		if selector == strings.TrimSpace(r.RepoKey) || selector == strings.TrimSpace(r.RepoID) || selector == strings.TrimSpace(r.Name) {
+			matches = append(matches, i)
+		}
+	}
+	if len(matches) == 0 {
+		return -1, nil
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	keys := make([]string, 0, len(matches))
+	for _, idx := range matches {
+		keys = append(keys, repos[idx].RepoKey)
+	}
+	sort.Strings(keys)
+	return -1, fmt.Errorf("repo selector %q is ambiguous; matches: %s", selector, strings.Join(keys, ", "))
+}
+
+func repoRecordIdentityKey(rec domain.MachineRepoRecord) string {
+	if strings.TrimSpace(rec.RepoKey) != "" {
+		return rec.RepoKey + "|" + rec.Path
+	}
+	if strings.TrimSpace(rec.RepoID) != "" {
+		return rec.RepoID + "|" + rec.Path
+	}
+	return rec.Path
+}
+
+func repoRecordSortKey(rec domain.MachineRepoRecord) string {
+	if strings.TrimSpace(rec.RepoKey) != "" {
+		return rec.RepoKey
+	}
+	return rec.RepoID
 }
 
 func (a *App) RunEnsure(include []string) (int, error) {
