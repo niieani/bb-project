@@ -88,6 +88,7 @@ func DefaultConfig() domain.ConfigFile {
 			DefaultAutoPushPublic:   false,
 			FetchPrune:              true,
 			PullFFOnly:              true,
+			ScanFreshnessSeconds:    60,
 		},
 		Notify: domain.NotifyConfig{Enabled: true, Dedupe: true, ThrottleMinutes: 60},
 	}
@@ -118,6 +119,9 @@ func LoadConfig(paths Paths) (domain.ConfigFile, error) {
 	}
 	if cfg.GitHub.RemoteProtocol == "" {
 		cfg.GitHub.RemoteProtocol = "ssh"
+	}
+	if cfg.Sync.ScanFreshnessSeconds < 0 {
+		cfg.Sync.ScanFreshnessSeconds = 0
 	}
 	return cfg, nil
 }

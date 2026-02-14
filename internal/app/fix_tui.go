@@ -366,7 +366,11 @@ func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUI
 		repoList:        repoList,
 	}
 	m.help.ShowAll = false
-	if err := m.refreshRepos(!noRefresh); err != nil {
+	initialRefreshMode := scanRefreshIfStale
+	if noRefresh {
+		initialRefreshMode = scanRefreshNever
+	}
+	if err := m.refreshRepos(initialRefreshMode); err != nil {
 		return nil, err
 	}
 	return m, nil
@@ -445,7 +449,7 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyAllSelections()
 			return m, nil
 		case key.Matches(msg, m.keys.Refresh):
-			if err := m.refreshRepos(true); err != nil {
+			if err := m.refreshRepos(scanRefreshAlways); err != nil {
 				m.errText = err.Error()
 			}
 			return m, nil
@@ -728,13 +732,13 @@ func (m *fixTUIModel) resizeRepoList() {
 	m.repoList.SetSize(listWidth, height)
 }
 
-func (m *fixTUIModel) refreshRepos(refresh bool) error {
+func (m *fixTUIModel) refreshRepos(refreshMode scanRefreshMode) error {
 	selectedPath := ""
 	if current, ok := m.currentRepo(); ok {
 		selectedPath = current.Record.Path
 	}
 
-	repos, err := m.app.loadFixRepos(m.includeCatalogs, refresh)
+	repos, err := m.app.loadFixRepos(m.includeCatalogs, refreshMode)
 	if err != nil {
 		return err
 	}
@@ -1029,7 +1033,7 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		return
 	}
 	if m.app != nil && applied > 0 {
-		if err := m.refreshRepos(true); err != nil {
+		if err := m.refreshRepos(scanRefreshAlways); err != nil {
 			m.errText = err.Error()
 			return
 		}
@@ -1104,7 +1108,7 @@ func (m *fixTUIModel) applyAllSelections() {
 	}
 
 	if m.app != nil {
-		if err := m.refreshRepos(true); err != nil {
+		if err := m.refreshRepos(scanRefreshAlways); err != nil {
 			m.errText = err.Error()
 			return
 		}

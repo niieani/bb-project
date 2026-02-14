@@ -111,6 +111,39 @@ func TestScanCases(t *testing.T) {
 			t.Fatalf("expected repo with upstream remote name to remain syncable, reasons=%v", rec.UnsyncableReasons)
 		}
 	})
+
+	t.Run("TC-SCAN-006", func(t *testing.T) {
+		t.Parallel()
+		_, m, catalogRoot := setupSingleMachine(t)
+		createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+
+		cfg := m.MustReadFile(m.ConfigPath())
+		cfg = strings.Replace(cfg, "pull_ff_only: true", "pull_ff_only: true\n  scan_freshness_seconds: 5", 1)
+		m.MustWriteFile(m.ConfigPath(), cfg)
+
+		if out, err := m.RunBB(now, "scan"); err != nil {
+			t.Fatalf("scan failed: %v\n%s", err, out)
+		}
+
+		out, err := m.RunBB(now.Add(3*time.Second), "doctor")
+		if err != nil {
+			t.Fatalf("doctor failed: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "snapshot is fresh") {
+			t.Fatalf("expected freshness-skip log in doctor output, got: %s", out)
+		}
+		if strings.Contains(out, "scan: discovered") {
+			t.Fatalf("did not expect doctor refresh scan within configured freshness window, got: %s", out)
+		}
+
+		out, err = m.RunBB(now.Add(10*time.Second), "doctor")
+		if err != nil {
+			t.Fatalf("doctor failed after freshness window: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "scan: discovered") {
+			t.Fatalf("expected doctor refresh scan after configured freshness window, got: %s", out)
+		}
+	})
 }
 
 type twoCatalogHarness struct {

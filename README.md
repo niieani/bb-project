@@ -146,6 +146,8 @@ Shows last recorded machine repo state.
 
 Prints unsyncable repos and reasons from machine file.
 
+- refreshes local observations only when the last scan snapshot is stale (default threshold: 60 seconds; configurable via `sync.scan_freshness_seconds`)
+
 Returns `1` if any unsyncable repo is present in selected catalogs.
 
 ### `bb ensure [--include-catalog <name> ...]`
@@ -262,6 +264,7 @@ sync:
   default_auto_push_public: false
   fetch_prune: true
   pull_ff_only: true
+  scan_freshness_seconds: 60
 notify:
   enabled: true
   dedupe: true

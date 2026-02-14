@@ -7,8 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"bb-project/internal/domain"
@@ -28,6 +30,9 @@ type App struct {
 
 	IsInteractiveTerminal func() bool
 	RunConfigWizard       ConfigWizardRunner
+
+	repoMetadataMu  sync.Mutex
+	observeRepoHook func(cfg domain.ConfigFile, repo discoveredRepo, allowPush bool) (domain.MachineRepoRecord, error)
 }
 
 type InitOptions struct {
@@ -57,6 +62,14 @@ type FixOptions struct {
 	CommitMessage   string
 	NoRefresh       bool
 }
+
+type scanRefreshMode int
+
+const (
+	scanRefreshNever scanRefreshMode = iota
+	scanRefreshIfStale
+	scanRefreshAlways
+)
 
 func New(paths state.Paths, stdout io.Writer, stderr io.Writer) *App {
 	nowFn := func() time.Time {
@@ -503,6 +516,7 @@ func (a *App) scanAndPublish(cfg domain.ConfigFile, machine *domain.MachineFile,
 	if err != nil {
 		return false, err
 	}
+	discovered = dedupeDiscoveredReposByPath(discovered)
 	a.logf("scan: discovered %d git repo(s)", len(discovered))
 
 	prev := map[string]domain.MachineRepoRecord{}
@@ -510,20 +524,63 @@ func (a *App) scanAndPublish(cfg domain.ConfigFile, machine *domain.MachineFile,
 		prev[repoRecordIdentityKey(rec)] = rec
 	}
 
-	records := make([]domain.MachineRepoRecord, 0, len(discovered))
+	type observedResult struct {
+		Index  int
+		Record domain.MachineRepoRecord
+		Err    error
+	}
+
+	records := make([]domain.MachineRepoRecord, len(discovered))
 	unsyncable := false
-	for _, repo := range discovered {
-		a.logf("scan: observing repo at %s", repo.Path)
-		rec, err := a.observeRepo(cfg, repo, opts.AllowPush)
-		if err != nil {
-			return false, err
+	workerCount := scanWorkerCount(len(discovered))
+	jobs := make(chan int)
+	results := make(chan observedResult, len(discovered))
+	for worker := 0; worker < workerCount; worker++ {
+		go func() {
+			for idx := range jobs {
+				repo := discovered[idx]
+				a.logf("scan: observing repo at %s", repo.Path)
+				rec, observeErr := a.observeRepoForScan(cfg, repo, opts.AllowPush)
+				if observeErr != nil {
+					results <- observedResult{
+						Index: idx,
+						Err:   fmt.Errorf("observe repo at %s: %w", repo.Path, observeErr),
+					}
+					continue
+				}
+				results <- observedResult{
+					Index:  idx,
+					Record: rec,
+				}
+			}
+		}()
+	}
+	go func() {
+		for idx := range discovered {
+			jobs <- idx
 		}
-		old := prev[repoRecordIdentityKey(rec)]
-		rec = domain.UpdateObservedAt(old, rec, a.Now())
-		if !rec.Syncable {
+		close(jobs)
+	}()
+
+	observationTime := a.Now()
+	var firstErr error
+	for i := 0; i < len(discovered); i++ {
+		result := <-results
+		if result.Err != nil {
+			if firstErr == nil {
+				firstErr = result.Err
+			}
+			continue
+		}
+		old := prev[repoRecordIdentityKey(result.Record)]
+		result.Record = domain.UpdateObservedAt(old, result.Record, observationTime)
+		if !result.Record.Syncable {
 			unsyncable = true
 		}
-		records = append(records, rec)
+		records[result.Index] = result.Record
+	}
+	if firstErr != nil {
+		return false, firstErr
 	}
 
 	sort.Slice(records, func(i, j int) bool {
@@ -533,13 +590,70 @@ func (a *App) scanAndPublish(cfg domain.ConfigFile, machine *domain.MachineFile,
 		return repoRecordSortKey(records[i]) < repoRecordSortKey(records[j])
 	})
 	machine.Repos = records
-	machine.UpdatedAt = a.Now()
+	scanAt := a.Now()
+	machine.LastScanAt = scanAt
+	machine.LastScanCatalogs = catalogNames(selected)
+	machine.UpdatedAt = scanAt
 
 	if err := state.SaveMachine(a.Paths, *machine); err != nil {
 		return false, err
 	}
 	a.logf("state: wrote machine file %s with %d repo record(s)", a.Paths.MachinePath(machine.MachineID), len(machine.Repos))
 	return unsyncable, nil
+}
+
+func (a *App) observeRepoForScan(cfg domain.ConfigFile, repo discoveredRepo, allowPush bool) (domain.MachineRepoRecord, error) {
+	if a.observeRepoHook != nil {
+		return a.observeRepoHook(cfg, repo, allowPush)
+	}
+	return a.observeRepo(cfg, repo, allowPush)
+}
+
+func dedupeDiscoveredReposByPath(in []discoveredRepo) []discoveredRepo {
+	if len(in) <= 1 {
+		return in
+	}
+	out := make([]discoveredRepo, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, repo := range in {
+		key := filepath.Clean(repo.Path)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, repo)
+	}
+	return out
+}
+
+func scanWorkerCount(repoCount int) int {
+	if repoCount <= 0 {
+		return 0
+	}
+	workers := runtime.GOMAXPROCS(0)
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > repoCount {
+		workers = repoCount
+	}
+	return workers
+}
+
+func catalogNames(catalogs []domain.Catalog) []string {
+	if len(catalogs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(catalogs))
+	for _, catalog := range catalogs {
+		name := strings.TrimSpace(catalog.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func discoverRepos(catalogs []domain.Catalog) ([]discoveredRepo, error) {
@@ -593,7 +707,9 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 		return domain.MachineRepoRecord{}, err
 	}
 	if origin != "" && strings.TrimSpace(repo.RepoKey) != "" {
+		a.repoMetadataMu.Lock()
 		_, _, err := a.ensureRepoMetadata(cfg, repo.RepoKey, repo.Name, origin, domain.VisibilityUnknown, repo.Catalog.Name)
+		a.repoMetadataMu.Unlock()
 		if err != nil {
 			return domain.MachineRepoRecord{}, err
 		}
@@ -687,6 +803,76 @@ func isDefaultBranch(branch string, defaultBranch string) bool {
 	return branch == "main" || branch == "master"
 }
 
+func scanFreshnessWindow(cfg domain.ConfigFile) time.Duration {
+	if cfg.Sync.ScanFreshnessSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(cfg.Sync.ScanFreshnessSeconds) * time.Second
+}
+
+func shouldRefreshScanSnapshot(machine domain.MachineFile, selected []domain.Catalog, now time.Time, window time.Duration) bool {
+	if window <= 0 {
+		return true
+	}
+	if machine.LastScanAt.IsZero() {
+		return true
+	}
+	if !lastScanIncludesCatalogs(machine.LastScanCatalogs, selected) {
+		return true
+	}
+	age := now.Sub(machine.LastScanAt)
+	if age < 0 {
+		age = 0
+	}
+	return age > window
+}
+
+func lastScanIncludesCatalogs(lastScanCatalogs []string, selected []domain.Catalog) bool {
+	if len(selected) == 0 {
+		return true
+	}
+	if len(lastScanCatalogs) == 0 {
+		return false
+	}
+	covered := make(map[string]struct{}, len(lastScanCatalogs))
+	for _, name := range lastScanCatalogs {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		covered[name] = struct{}{}
+	}
+	for _, catalog := range selected {
+		if _, ok := covered[strings.TrimSpace(catalog.Name)]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *App) refreshMachineSnapshotLocked(cfg domain.ConfigFile, machine *domain.MachineFile, includeCatalogs []string, mode scanRefreshMode) error {
+	if mode == scanRefreshNever {
+		return nil
+	}
+	if mode == scanRefreshAlways {
+		_, err := a.scanAndPublish(cfg, machine, ScanOptions{IncludeCatalogs: includeCatalogs, AllowPush: false})
+		return err
+	}
+
+	selected, err := domain.SelectCatalogs(*machine, includeCatalogs)
+	if err != nil {
+		return err
+	}
+	window := scanFreshnessWindow(cfg)
+	if !shouldRefreshScanSnapshot(*machine, selected, a.Now(), window) {
+		a.logf("scan: snapshot is fresh (<= %s), skipping refresh", window)
+		return nil
+	}
+	a.logf("scan: snapshot is stale, refreshing")
+	_, err = a.scanAndPublish(cfg, machine, ScanOptions{IncludeCatalogs: includeCatalogs, AllowPush: false})
+	return err
+}
+
 func (a *App) RunScan(opts ScanOptions) (int, error) {
 	a.logf("scan: acquiring global lock")
 	lock, err := state.AcquireLock(a.Paths)
@@ -763,9 +949,22 @@ func (a *App) RunStatus(jsonOut bool, include []string) (int, error) {
 }
 
 func (a *App) RunDoctor(include []string) (int, error) {
-	a.logf("doctor: loading state")
-	_, machine, err := a.loadContext()
+	a.logf("doctor: acquiring global lock")
+	lock, err := state.AcquireLock(a.Paths)
 	if err != nil {
+		return 2, err
+	}
+	defer func() {
+		_ = lock.Release()
+		a.logf("doctor: released global lock")
+	}()
+
+	a.logf("doctor: loading state")
+	cfg, machine, err := a.loadContext()
+	if err != nil {
+		return 2, err
+	}
+	if err := a.refreshMachineSnapshotLocked(cfg, &machine, include, scanRefreshIfStale); err != nil {
 		return 2, err
 	}
 	selected, err := domain.SelectCatalogs(machine, include)

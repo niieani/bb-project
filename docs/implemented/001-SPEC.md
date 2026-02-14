@@ -164,6 +164,7 @@ sync:
   default_auto_push_public: false
   fetch_prune: true
   pull_ff_only: true
+  scan_freshness_seconds: 60
 notify:
   enabled: true
   dedupe: true

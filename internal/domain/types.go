@@ -72,6 +72,7 @@ type SyncConfig struct {
 	DefaultAutoPushPublic   bool `yaml:"default_auto_push_public"`
 	FetchPrune              bool `yaml:"fetch_prune"`
 	PullFFOnly              bool `yaml:"pull_ff_only"`
+	ScanFreshnessSeconds    int  `yaml:"scan_freshness_seconds"`
 }
 
 type NotifyConfig struct {
@@ -93,13 +94,15 @@ type RepoMetadataFile struct {
 }
 
 type MachineFile struct {
-	Version        int                 `yaml:"version"`
-	MachineID      string              `yaml:"machine_id"`
-	Hostname       string              `yaml:"hostname"`
-	DefaultCatalog string              `yaml:"default_catalog"`
-	Catalogs       []Catalog           `yaml:"catalogs"`
-	UpdatedAt      time.Time           `yaml:"updated_at"`
-	Repos          []MachineRepoRecord `yaml:"repos"`
+	Version          int                 `yaml:"version"`
+	MachineID        string              `yaml:"machine_id"`
+	Hostname         string              `yaml:"hostname"`
+	DefaultCatalog   string              `yaml:"default_catalog"`
+	Catalogs         []Catalog           `yaml:"catalogs"`
+	LastScanAt       time.Time           `yaml:"last_scan_at"`
+	LastScanCatalogs []string            `yaml:"last_scan_catalogs,omitempty"`
+	UpdatedAt        time.Time           `yaml:"updated_at"`
+	Repos            []MachineRepoRecord `yaml:"repos"`
 }
 
 type MachineRepoRecord struct {

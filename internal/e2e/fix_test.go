@@ -23,6 +23,35 @@ func TestFixCases(t *testing.T) {
 		}
 	})
 
+	t.Run("reuses fresh scan snapshot before list mode", func(t *testing.T) {
+		t.Parallel()
+		_, m, catalogRoot := setupSingleMachine(t)
+		_, _ = createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+
+		if out, err := m.RunBB(now, "scan"); err != nil {
+			t.Fatalf("scan failed: %v\n%s", err, out)
+		}
+
+		out, err := m.RunBB(now.Add(30*time.Second), "fix", "demo")
+		if err != nil {
+			t.Fatalf("fix list mode failed: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "snapshot is fresh") {
+			t.Fatalf("expected freshness-skip log in output, got: %s", out)
+		}
+		if strings.Contains(out, "scan: discovered") {
+			t.Fatalf("did not expect a rescan within freshness window, got: %s", out)
+		}
+
+		out, err = m.RunBB(now.Add(2*time.Minute), "fix", "demo")
+		if err != nil {
+			t.Fatalf("fix list mode after freshness window failed: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "scan: discovered") {
+			t.Fatalf("expected refresh scan after freshness window, got: %s", out)
+		}
+	})
+
 	t.Run("lists and applies push", func(t *testing.T) {
 		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)

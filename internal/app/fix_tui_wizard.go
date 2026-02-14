@@ -244,7 +244,7 @@ func (m *fixTUIModel) applyWizardCurrent() {
 		}
 		m.appendSummaryResult(m.wizard.Action, "applied", detail)
 	}
-	if err := m.refreshRepos(true); err != nil {
+	if err := m.refreshRepos(scanRefreshAlways); err != nil {
 		m.errText = err.Error()
 	}
 	m.advanceWizard()

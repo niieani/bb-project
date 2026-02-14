@@ -70,7 +70,11 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 		return a.runFixInteractive(opts.IncludeCatalogs, opts.NoRefresh)
 	}
 
-	repos, err := a.loadFixRepos(opts.IncludeCatalogs, !opts.NoRefresh)
+	refreshMode := scanRefreshIfStale
+	if opts.NoRefresh {
+		refreshMode = scanRefreshNever
+	}
+	repos, err := a.loadFixRepos(opts.IncludeCatalogs, refreshMode)
 	if err != nil {
 		return 2, err
 	}
@@ -261,7 +265,7 @@ func resolveFixTarget(selector string, repos []fixRepoState) (fixRepoState, erro
 	return fixRepoState{}, fmt.Errorf("project %q not found", selector)
 }
 
-func (a *App) loadFixRepos(includeCatalogs []string, refresh bool) ([]fixRepoState, error) {
+func (a *App) loadFixRepos(includeCatalogs []string, refreshMode scanRefreshMode) ([]fixRepoState, error) {
 	a.logf("fix: acquiring global lock")
 	lock, err := state.AcquireLock(a.Paths)
 	if err != nil {
@@ -276,11 +280,10 @@ func (a *App) loadFixRepos(includeCatalogs []string, refresh bool) ([]fixRepoSta
 	if err != nil {
 		return nil, err
 	}
-	if refresh {
-		if _, err := a.scanAndPublish(cfg, &machine, ScanOptions{IncludeCatalogs: includeCatalogs, AllowPush: false}); err != nil {
-			return nil, err
-		}
-	} else {
+	if err := a.refreshMachineSnapshotLocked(cfg, &machine, includeCatalogs, refreshMode); err != nil {
+		return nil, err
+	}
+	if refreshMode == scanRefreshNever {
 		a.logf("fix: using existing machine snapshot without refresh")
 	}
 
@@ -335,7 +338,7 @@ func (a *App) applyFixAction(includeCatalogs []string, repoPath string, action s
 	if err != nil {
 		return fixRepoState{}, err
 	}
-	if _, err := a.scanAndPublish(cfg, &machine, ScanOptions{IncludeCatalogs: includeCatalogs, AllowPush: false}); err != nil {
+	if err := a.refreshMachineSnapshotLocked(cfg, &machine, includeCatalogs, scanRefreshIfStale); err != nil {
 		return fixRepoState{}, err
 	}
 
@@ -362,7 +365,7 @@ func (a *App) applyFixAction(includeCatalogs []string, repoPath string, action s
 	if err := a.executeFixAction(cfg, target, action, opts); err != nil {
 		return fixRepoState{}, err
 	}
-	if _, err := a.scanAndPublish(cfg, &machine, ScanOptions{IncludeCatalogs: includeCatalogs, AllowPush: false}); err != nil {
+	if err := a.refreshMachineSnapshotLocked(cfg, &machine, includeCatalogs, scanRefreshAlways); err != nil {
 		return fixRepoState{}, err
 	}
 	refreshedRepos, err := a.loadFixReposUnlocked(machine)
