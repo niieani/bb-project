@@ -62,7 +62,7 @@ func (a *App) ensureFromWinners(
 		targetPath := filepath.Join(targetCatalog.Root, meta.Name)
 		a.logf("sync: repo %s winner=%s branch=%s target=%s", meta.RepoID, winner.MachineID, winner.Record.Branch, targetPath)
 
-		pathConflictReason, err := validateTargetPath(a.Git, targetPath, meta.RepoID)
+		pathConflictReason, err := validateTargetPath(a.Git, targetPath, meta.RepoID, meta.PreferredRemote)
 		if err != nil {
 			return err
 		}
@@ -84,7 +84,7 @@ func (a *App) ensureFromWinners(
 
 			if local.Branch != winner.Record.Branch {
 				a.logf("sync: checking out branch %s in %s", winner.Record.Branch, local.Path)
-				if err := a.Git.Checkout(local.Path, winner.Record.Branch); err != nil {
+				if err := a.Git.CheckoutWithPreferredRemote(local.Path, winner.Record.Branch, meta.PreferredRemote); err != nil {
 					machine.Repos[idx].Syncable = false
 					machine.Repos[idx].UnsyncableReasons = appendUniqueReasons(machine.Repos[idx].UnsyncableReasons, domain.ReasonCheckoutFailed)
 					machine.Repos[idx].StateHash = domain.ComputeStateHash(machine.Repos[idx])
@@ -182,7 +182,7 @@ func chooseTargetCatalog(machine domain.MachineFile, meta domain.RepoMetadataFil
 	return domain.Catalog{}, false
 }
 
-func validateTargetPath(g gitx.Runner, targetPath string, expectedRepoID string) (domain.UnsyncableReason, error) {
+func validateTargetPath(g gitx.Runner, targetPath string, expectedRepoID string, preferredRemote string) (domain.UnsyncableReason, error) {
 	info, err := os.Stat(targetPath)
 	if os.IsNotExist(err) {
 		return "", nil
@@ -204,7 +204,7 @@ func validateTargetPath(g gitx.Runner, targetPath string, expectedRepoID string)
 	if !g.IsGitRepo(targetPath) {
 		return domain.ReasonTargetPathNonRepo, nil
 	}
-	origin, err := g.RepoOrigin(targetPath)
+	origin, err := g.RepoOriginWithPreferredRemote(targetPath, preferredRemote)
 	if err != nil {
 		return "", err
 	}
@@ -233,7 +233,7 @@ func (a *App) ensureLocalCopy(
 			a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonCheckoutFailed)
 			return nil
 		}
-		if err := a.Git.EnsureBranch(targetPath, winner.Record.Branch); err != nil {
+		if err := a.Git.EnsureBranchWithPreferredRemote(targetPath, winner.Record.Branch, meta.PreferredRemote); err != nil {
 			a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonCheckoutFailed)
 			return nil
 		}
@@ -250,7 +250,7 @@ func (a *App) ensureLocalCopy(
 				a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonCheckoutFailed)
 				return nil
 			}
-			if err := a.Git.EnsureBranch(targetPath, winner.Record.Branch); err != nil {
+			if err := a.Git.EnsureBranchWithPreferredRemote(targetPath, winner.Record.Branch, meta.PreferredRemote); err != nil {
 				a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonCheckoutFailed)
 				return nil
 			}
@@ -261,14 +261,14 @@ func (a *App) ensureLocalCopy(
 		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonTargetPathNonRepo)
 		return nil
 	}
-	origin, _ := a.Git.RepoOrigin(targetPath)
+	origin, _ := a.Git.RepoOriginWithPreferredRemote(targetPath, meta.PreferredRemote)
 	originID, _ := domain.NormalizeOriginToRepoID(origin)
 	if originID != meta.RepoID {
 		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonTargetPathRepoMismatch)
 		return nil
 	}
 
-	if err := a.Git.EnsureBranch(targetPath, winner.Record.Branch); err != nil {
+	if err := a.Git.EnsureBranchWithPreferredRemote(targetPath, winner.Record.Branch, meta.PreferredRemote); err != nil {
 		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, domain.ReasonCheckoutFailed)
 		return nil
 	}

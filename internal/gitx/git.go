@@ -55,7 +55,11 @@ func (r Runner) IsGitRepo(path string) bool {
 }
 
 func (r Runner) RepoOrigin(path string) (string, error) {
-	remote, err := r.PreferredRemote(path)
+	return r.RepoOriginWithPreferredRemote(path, "")
+}
+
+func (r Runner) RepoOriginWithPreferredRemote(path string, preferredRemote string) (string, error) {
+	remote, err := r.pickRemote(path, preferredRemote)
 	if err != nil {
 		return "", err
 	}
@@ -105,6 +109,23 @@ func (r Runner) PreferredRemote(path string) (string, error) {
 		}
 	}
 	return names[0], nil
+}
+
+func (r Runner) pickRemote(path string, preferredRemote string) (string, error) {
+	preferredRemote = strings.TrimSpace(preferredRemote)
+	if preferredRemote != "" {
+		names, err := r.RemoteNames(path)
+		if err != nil {
+			return "", err
+		}
+		for _, name := range names {
+			if name == preferredRemote {
+				return preferredRemote, nil
+			}
+		}
+		return "", fmt.Errorf("preferred remote %q not found", preferredRemote)
+	}
+	return r.PreferredRemote(path)
 }
 
 func remoteFromUpstream(upstream string) string {
@@ -241,7 +262,11 @@ func (r Runner) Push(path string) error {
 }
 
 func (r Runner) PushUpstream(path, branch string) error {
-	remote, err := r.PreferredRemote(path)
+	return r.PushUpstreamWithPreferredRemote(path, branch, "")
+}
+
+func (r Runner) PushUpstreamWithPreferredRemote(path, branch, preferredRemote string) error {
+	remote, err := r.pickRemote(path, preferredRemote)
 	if err != nil {
 		return err
 	}
@@ -263,7 +288,11 @@ func (r Runner) Commit(path, message string) error {
 }
 
 func (r Runner) Checkout(path, branch string) error {
-	remote, err := r.PreferredRemote(path)
+	return r.CheckoutWithPreferredRemote(path, branch, "")
+}
+
+func (r Runner) CheckoutWithPreferredRemote(path, branch, preferredRemote string) error {
+	remote, err := r.pickRemote(path, preferredRemote)
 	if err != nil {
 		return err
 	}
@@ -286,7 +315,11 @@ func (r Runner) Clone(origin, path string) error {
 }
 
 func (r Runner) EnsureBranch(path, branch string) error {
-	return r.Checkout(path, branch)
+	return r.CheckoutWithPreferredRemote(path, branch, "")
+}
+
+func (r Runner) EnsureBranchWithPreferredRemote(path, branch, preferredRemote string) error {
+	return r.CheckoutWithPreferredRemote(path, branch, preferredRemote)
 }
 
 func (r Runner) MergeAbort(path string) error {

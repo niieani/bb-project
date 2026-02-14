@@ -303,6 +303,10 @@ func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, 
 
 func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, action string, commitMessage string) error {
 	path := target.Record.Path
+	preferredRemote := ""
+	if target.Meta != nil {
+		preferredRemote = strings.TrimSpace(target.Meta.PreferredRemote)
+	}
 	switch action {
 	case FixActionAbortOperation:
 		switch target.Record.OperationInProgress {
@@ -338,7 +342,7 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 			if strings.TrimSpace(branch) == "" {
 				return errors.New("cannot determine branch for upstream push")
 			}
-			return a.Git.PushUpstream(path, branch)
+			return a.Git.PushUpstreamWithPreferredRemote(path, branch, preferredRemote)
 		}
 		return a.Git.Push(path)
 	case FixActionPullFFOnly:
@@ -356,7 +360,7 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 		if strings.TrimSpace(branch) == "" {
 			return errors.New("cannot determine branch for upstream push")
 		}
-		return a.Git.PushUpstream(path, branch)
+		return a.Git.PushUpstreamWithPreferredRemote(path, branch, preferredRemote)
 	case FixActionEnableAutoPush:
 		if strings.TrimSpace(target.Record.RepoID) == "" {
 			return errors.New("repo_id is required for enable-auto-push")

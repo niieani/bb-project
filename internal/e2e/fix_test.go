@@ -105,6 +105,31 @@ func TestFixCases(t *testing.T) {
 		}
 	})
 
+	t.Run("preferred remote override is honored", func(t *testing.T) {
+		h, m, catalogRoot := setupSingleMachine(t)
+		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+		secondaryRemote := filepath.Join(h.RemotesRoot, "you", "demo-secondary.git")
+		m.MustRunGit(now, catalogRoot, "init", "--bare", secondaryRemote)
+		m.MustRunGit(now, repoPath, "remote", "add", "upstream", secondaryRemote)
+		if out, err := m.RunBB(now.Add(30*time.Second), "scan"); err != nil {
+			t.Fatalf("scan failed: %v\n%s", err, out)
+		}
+
+		if out, err := m.RunBB(now.Add(1*time.Minute), "repo", "remote", "demo", "--preferred-remote=upstream"); err != nil {
+			t.Fatalf("repo remote command failed: %v\n%s", err, out)
+		}
+
+		m.MustRunGit(now, repoPath, "checkout", "-b", "feature/preferred-remote")
+		if out, err := m.RunBB(now.Add(2*time.Minute), "fix", "demo", "set-upstream-push"); err != nil {
+			t.Fatalf("set-upstream-push failed: %v\n%s", err, out)
+		}
+
+		upstream := strings.TrimSpace(m.MustRunGit(now, repoPath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"))
+		if upstream != "upstream/feature/preferred-remote" {
+			t.Fatalf("upstream = %q, want upstream/feature/preferred-remote", upstream)
+		}
+	})
+
 	t.Run("enable auto push action", func(t *testing.T) {
 		_, m, catalogRoot := setupSingleMachine(t)
 		_, _ = createRepoWithOrigin(t, m, catalogRoot, "demo", now)

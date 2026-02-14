@@ -188,6 +188,10 @@ Updates `auto_push` policy in repo metadata.
 - exact `repo_id`
 - repo `name` (must not be ambiguous)
 
+### `bb repo remote <repo> --preferred-remote=<name>`
+
+Sets the repo-level preferred remote used when `bb` needs to choose a remote for operations (for example upstream setup and branch tracking).
+
 ### `bb catalog` subcommands
 
 - `bb catalog add <name> <root>`

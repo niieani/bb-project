@@ -24,8 +24,10 @@ type fakeApp struct {
 	doctorIncl []string
 	ensureIncl []string
 
-	repoPolicySelector string
-	repoPolicyAutoPush bool
+	repoPolicySelector  string
+	repoPolicyAutoPush  bool
+	repoRemoteSelector  string
+	repoPreferredRemote string
 
 	catalogAddName string
 	catalogAddRoot string
@@ -47,6 +49,8 @@ type fakeApp struct {
 	ensureErr       error
 	repoPolicyCode  int
 	repoPolicyErr   error
+	repoRemoteCode  int
+	repoRemoteErr   error
 	catalogAddCode  int
 	catalogAddErr   error
 	catalogRMCode   int
@@ -102,6 +106,12 @@ func (f *fakeApp) RunRepoPolicy(repoSelector string, autoPush bool) (int, error)
 	f.repoPolicySelector = repoSelector
 	f.repoPolicyAutoPush = autoPush
 	return f.repoPolicyCode, f.repoPolicyErr
+}
+
+func (f *fakeApp) RunRepoPreferredRemote(repoSelector string, preferredRemote string) (int, error) {
+	f.repoRemoteSelector = repoSelector
+	f.repoPreferredRemote = preferredRemote
+	return f.repoRemoteCode, f.repoRemoteErr
 }
 
 func (f *fakeApp) RunCatalogAdd(name, root string) (int, error) {
@@ -422,6 +432,36 @@ func TestRunRepoPolicyValidationAndForwarding(t *testing.T) {
 		}
 		if fake.repoPolicySelector != "demo" || fake.repoPolicyAutoPush {
 			t.Fatalf("repo policy forwarding mismatch: selector=%q autoPush=%v", fake.repoPolicySelector, fake.repoPolicyAutoPush)
+		}
+	})
+
+	t.Run("remote requires flag", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, calls, _ := runCLI(t, fake, []string{"repo", "remote", "demo"})
+		if code != 2 {
+			t.Fatalf("exit code = %d, want 2", code)
+		}
+		if calls != 0 {
+			t.Fatalf("app factory calls = %d, want 0", calls)
+		}
+		mustContain(t, stderr, "required")
+		mustContain(t, stderr, "preferred-remote")
+	})
+
+	t.Run("remote forwards values", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"repo", "remote", "demo", "--preferred-remote=upstream"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.repoRemoteSelector != "demo" {
+			t.Fatalf("repo selector = %q, want demo", fake.repoRemoteSelector)
+		}
+		if fake.repoPreferredRemote != "upstream" {
+			t.Fatalf("preferred remote = %q, want upstream", fake.repoPreferredRemote)
 		}
 	})
 }

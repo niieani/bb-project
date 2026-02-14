@@ -882,6 +882,45 @@ func (a *App) RunRepoPolicy(repoSelector string, autoPush bool) (int, error) {
 	return 0, nil
 }
 
+func (a *App) RunRepoPreferredRemote(repoSelector string, preferredRemote string) (int, error) {
+	a.logf("repo remote: acquiring global lock")
+	lock, err := state.AcquireLock(a.Paths)
+	if err != nil {
+		return 2, err
+	}
+	defer func() {
+		_ = lock.Release()
+		a.logf("repo remote: released global lock")
+	}()
+
+	repos, err := state.LoadAllRepoMetadata(a.Paths)
+	if err != nil {
+		return 2, err
+	}
+	idx := -1
+	for i, r := range repos {
+		if r.RepoID == repoSelector || r.Name == repoSelector {
+			if idx >= 0 {
+				return 2, fmt.Errorf("repo selector %q is ambiguous", repoSelector)
+			}
+			idx = i
+		}
+	}
+	if idx < 0 {
+		return 2, fmt.Errorf("repo %q not found", repoSelector)
+	}
+	preferredRemote = strings.TrimSpace(preferredRemote)
+	if preferredRemote == "" {
+		return 2, errors.New("preferred remote must not be empty")
+	}
+	repos[idx].PreferredRemote = preferredRemote
+	if err := state.SaveRepoMetadata(a.Paths, repos[idx]); err != nil {
+		return 2, err
+	}
+	a.logf("repo remote: set preferred_remote=%q for %s", preferredRemote, repos[idx].RepoID)
+	return 0, nil
+}
+
 func (a *App) RunEnsure(include []string) (int, error) {
 	a.logf("ensure: delegating to sync")
 	return a.RunSync(SyncOptions{IncludeCatalogs: include})

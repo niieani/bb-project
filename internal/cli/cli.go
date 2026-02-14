@@ -22,6 +22,7 @@ type appRunner interface {
 	RunDoctor(include []string) (int, error)
 	RunEnsure(include []string) (int, error)
 	RunRepoPolicy(repoSelector string, autoPush bool) (int, error)
+	RunRepoPreferredRemote(repoSelector string, preferredRemote string) (int, error)
 	RunCatalogAdd(name, root string) (int, error)
 	RunCatalogRM(name string) (int, error)
 	RunCatalogDefault(name string) (int, error)
@@ -419,7 +420,24 @@ func newRepoCommand(runtime *runtimeState) *cobra.Command {
 	policyCmd.Flags().StringVar(&autoPushRaw, "auto-push", "", "Set auto-push policy (true|false).")
 	_ = policyCmd.MarkFlagRequired("auto-push")
 
-	repoCmd.AddCommand(policyCmd)
+	var preferredRemote string
+	remoteCmd := &cobra.Command{
+		Use:   "remote <repo>",
+		Short: "Set repository preferred remote for sync/fix operations.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunRepoPreferredRemote(args[0], preferredRemote)
+			return withExitCode(code, err)
+		},
+	}
+	remoteCmd.Flags().StringVar(&preferredRemote, "preferred-remote", "", "Preferred remote name for this repository (for example origin or upstream).")
+	_ = remoteCmd.MarkFlagRequired("preferred-remote")
+
+	repoCmd.AddCommand(policyCmd, remoteCmd)
 	return repoCmd
 }
 

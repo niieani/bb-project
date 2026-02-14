@@ -85,6 +85,7 @@ type RepoMetadataFile struct {
 	OriginURL           string     `yaml:"origin_url"`
 	Visibility          Visibility `yaml:"visibility"`
 	PreferredCatalog    string     `yaml:"preferred_catalog"`
+	PreferredRemote     string     `yaml:"preferred_remote"`
 	AutoPush            bool       `yaml:"auto_push"`
 	BranchFollowEnabled bool       `yaml:"branch_follow_enabled"`
 }
