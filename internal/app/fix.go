@@ -448,6 +448,11 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 	case FixActionPush:
 		return a.Git.Push(path)
 	case FixActionCreateProject:
+		if opts.GenerateGitignore && len(opts.GitignorePatterns) > 0 {
+			if err := writeGeneratedGitignore(path, opts.GitignorePatterns); err != nil {
+				return err
+			}
+		}
 		return a.createProjectFromFix(cfg, target, opts.CreateProjectName, opts.CreateProjectVisibility)
 	case FixActionForkAndRetarget:
 		return a.forkAndRetargetFromFix(cfg, target)

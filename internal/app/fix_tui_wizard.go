@@ -76,6 +76,7 @@ const (
 	fixWizardFocusActions fixWizardFocusArea = iota
 	fixWizardFocusCommit
 	fixWizardFocusProjectName
+	fixWizardFocusGitignore
 	fixWizardFocusVisibility
 )
 
@@ -141,7 +142,7 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	projectNameInput.SetValue("")
 	projectNameInput.Blur()
 
-	showGitignoreToggle := decision.Action == FixActionStageCommitPush &&
+	showGitignoreToggle := (decision.Action == FixActionStageCommitPush || decision.Action == FixActionCreateProject) &&
 		repoRisk.MissingRootGitignore &&
 		len(repoRisk.SuggestedGitignorePatterns) > 0
 
@@ -244,7 +245,7 @@ func (m *fixTUIModel) applyWizardCurrent() {
 	} else {
 		detail := ""
 		if opts.GenerateGitignore {
-			detail = "generated .gitignore before commit"
+			detail = "generated root .gitignore"
 		}
 		m.appendSummaryResult(m.wizard.Action, "applied", detail)
 	}
@@ -282,12 +283,15 @@ func (m *fixTUIModel) syncWizardFieldFocus() {
 }
 
 func (m *fixTUIModel) wizardFocusOrder() []fixWizardFocusArea {
-	order := make([]fixWizardFocusArea, 0, 4)
+	order := make([]fixWizardFocusArea, 0, 5)
 	if m.wizard.EnableCommitMessage {
 		order = append(order, fixWizardFocusCommit)
 	}
 	if m.wizard.EnableProjectName {
 		order = append(order, fixWizardFocusProjectName)
+	}
+	if m.wizard.ShowGitignoreToggle {
+		order = append(order, fixWizardFocusGitignore)
 	}
 	if m.wizard.Action == FixActionCreateProject {
 		order = append(order, fixWizardFocusVisibility)
@@ -423,6 +427,33 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.wizard.ProjectName, cmd = m.wizard.ProjectName.Update(msg)
 		return m, cmd
 	}
+	if m.wizard.FocusArea == fixWizardFocusGitignore {
+		if key.Matches(msg, m.keys.Cancel) {
+			m.viewMode = fixViewList
+			m.status = "cancelled remaining risky confirmations"
+			return m, nil
+		}
+		switch msg.String() {
+		case " ":
+			m.wizard.GenerateGitignore = !m.wizard.GenerateGitignore
+			return m, nil
+		case "enter":
+			m.wizardMoveFocus(1, false)
+			return m, nil
+		case "down":
+			if m.wizardMoveFocus(1, false) {
+				return m, nil
+			}
+			m.scrollWizardDown(1)
+			return m, nil
+		case "up":
+			if m.wizardMoveFocus(-1, false) {
+				return m, nil
+			}
+			m.scrollWizardUp(1)
+			return m, nil
+		}
+	}
 
 	if key.Matches(msg, m.keys.Cancel) {
 		m.viewMode = fixViewList
@@ -468,17 +499,17 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scrollWizardUp(max(1, m.wizard.BodyViewport.Height-1))
 		return m, nil
 	}
-		if msg.String() == "left" {
-			if m.wizard.FocusArea == fixWizardFocusVisibility {
-				m.shiftWizardVisibility(-1)
-				return m, nil
-			}
-			m.wizard.ActionFocus--
-			if m.wizard.ActionFocus < fixWizardActionCancel {
-				m.wizard.ActionFocus = fixWizardActionApply
-			}
+	if msg.String() == "left" {
+		if m.wizard.FocusArea == fixWizardFocusVisibility {
+			m.shiftWizardVisibility(-1)
 			return m, nil
 		}
+		m.wizard.ActionFocus--
+		if m.wizard.ActionFocus < fixWizardActionCancel {
+			m.wizard.ActionFocus = fixWizardActionApply
+		}
+		return m, nil
+	}
 	if msg.String() == "right" {
 		if m.wizard.FocusArea == fixWizardFocusVisibility {
 			m.shiftWizardVisibility(+1)
@@ -490,7 +521,7 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if msg.String() == " " && m.wizard.ShowGitignoreToggle {
+	if msg.String() == " " && m.wizard.FocusArea == fixWizardFocusGitignore {
 		m.wizard.GenerateGitignore = !m.wizard.GenerateGitignore
 		return m, nil
 	}
@@ -576,7 +607,7 @@ func (m *fixTUIModel) viewWizardStaticControls() string {
 	}
 	if m.wizard.ShowGitignoreToggle {
 		controls = append(controls, renderToggleField(
-			false,
+			m.wizard.FocusArea == fixWizardFocusGitignore,
 			"Generate .gitignore before commit",
 			"Only when root .gitignore is missing.",
 			m.wizard.GenerateGitignore,
@@ -612,7 +643,7 @@ func (m *fixTUIModel) viewWizardTopLine() string {
 }
 
 func (m *fixTUIModel) wizardFooterHint() string {
-	const text = "Tab/Shift+Tab: focus  Up/Down: scroll or move focus at edge  Left/Right: change enum/buttons  Enter: activate  Esc: cancel"
+	const text = "Tab/Shift+Tab: focus  Up/Down: scroll or move focus at edge  Left/Right: change enum/buttons  Space: toggle  Enter: activate  Esc: cancel"
 	return hintStyle.Render(m.clampSingleLine(text, m.wizardBodyLineWidth()))
 }
 
@@ -681,8 +712,6 @@ func (m *fixTUIModel) viewWizardContextContent() string {
 		detail := "Noisy paths were detected in uncommitted changes."
 		if m.wizard.ShowGitignoreToggle {
 			detail += " If you continue, bb can generate a root .gitignore before commit (see toggle below)."
-		} else if m.wizard.Action == FixActionCreateProject && m.wizardQueueHasActionAfterCurrent(FixActionStageCommitPush) {
-			detail += " This create-project step will not generate .gitignore. A later \"Stage, commit & push\" step can generate it before commit."
 		} else {
 			detail += " This step will not generate .gitignore."
 		}
@@ -881,15 +910,6 @@ func (m *fixTUIModel) wizardInnerWidth() int {
 		return 0
 	}
 	return inner
-}
-
-func (m *fixTUIModel) wizardQueueHasActionAfterCurrent(action string) bool {
-	for i := m.wizard.Index + 1; i < len(m.wizard.Queue); i++ {
-		if m.wizard.Queue[i].Action == action {
-			return true
-		}
-	}
-	return false
 }
 
 func (m *fixTUIModel) renderChangedFilesList() string {

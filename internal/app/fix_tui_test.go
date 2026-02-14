@@ -1423,7 +1423,7 @@ func TestFixTUIWizardMissingGitignoreExplainsGenerationForStageCommit(t *testing
 	}
 }
 
-func TestFixTUIWizardCreateProjectMissingGitignoreMentionsLaterStageStep(t *testing.T) {
+func TestFixTUIWizardCreateProjectMissingGitignoreOffersGenerationToggle(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
@@ -1449,14 +1449,57 @@ func TestFixTUIWizardCreateProjectMissingGitignoreMentionsLaterStageStep(t *test
 	})
 
 	view := m.viewWizardContent()
-	if !strings.Contains(view, "create-project step will not generate .gitignore") {
-		t.Fatalf("expected create-project clarification about .gitignore behavior, got %q", view)
+	if !strings.Contains(view, "bb can generate a root .gitignore before commit") {
+		t.Fatalf("expected explicit .gitignore generation note for create-project, got %q", view)
 	}
-	if !strings.Contains(view, "later \"Stage, commit & push\" step can generate it before commit") {
-		t.Fatalf("expected note about later stage-commit step, got %q", view)
+	if !strings.Contains(view, "Generate .gitignore before commit") {
+		t.Fatalf("expected .gitignore toggle in create-project wizard, got %q", view)
 	}
-	if strings.Contains(view, "Generate .gitignore before commit") {
-		t.Fatalf("create-project page should not render .gitignore toggle, got %q", view)
+}
+
+func TestFixTUIWizardGitignoreToggleIsFocusableAndSelectable(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Risk: fixRiskSnapshot{
+				MissingRootGitignore:       true,
+				NoisyChangedPaths:          []string{"node_modules/pkg/index.js"},
+				SuggestedGitignorePatterns: []string{"node_modules/"},
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	if !m.wizard.GenerateGitignore {
+		t.Fatal("expected gitignore generation toggle to default on")
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // commit -> gitignore toggle
+	if m.wizard.FocusArea != fixWizardFocusGitignore {
+		t.Fatalf("focus area after down = %v, want gitignore toggle", m.wizard.FocusArea)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if m.wizard.GenerateGitignore {
+		t.Fatal("expected space to toggle gitignore generation off when focused")
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // toggle -> actions
+	if m.wizard.FocusArea != fixWizardFocusActions {
+		t.Fatalf("focus area after enter on toggle = %v, want actions", m.wizard.FocusArea)
+	}
+	if m.viewMode != fixViewWizard {
+		t.Fatalf("view mode after enter on toggle = %v, want wizard", m.viewMode)
 	}
 }
 
