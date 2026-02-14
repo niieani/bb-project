@@ -65,9 +65,9 @@ type fixSummaryResult struct {
 }
 
 const (
-	fixWizardActionApply = iota
+	fixWizardActionCancel = iota
 	fixWizardActionSkip
-	fixWizardActionCancel
+	fixWizardActionApply
 )
 
 type fixWizardFocusArea int
@@ -168,7 +168,7 @@ func (m *fixTUIModel) loadWizardCurrent() {
 		m.wizard.FocusArea = fixWizardFocusProjectName
 	}
 	m.syncWizardFieldFocus()
-	m.wizard.ActionFocus = fixWizardActionApply
+	m.wizard.ActionFocus = fixWizardActionCancel
 	m.syncWizardViewport()
 }
 
@@ -435,10 +435,13 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if key.Matches(msg, m.keys.Apply) {
 		switch m.wizard.ActionFocus {
-		case fixWizardActionApply:
-			m.applyWizardCurrent()
+		case fixWizardActionCancel:
+			m.viewMode = fixViewList
+			m.status = "cancelled remaining risky confirmations"
 		case fixWizardActionSkip:
 			m.skipWizardCurrent()
+		case fixWizardActionApply:
+			m.applyWizardCurrent()
 		default:
 			m.viewMode = fixViewList
 			m.status = "cancelled remaining risky confirmations"
@@ -465,25 +468,25 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scrollWizardUp(max(1, m.wizard.BodyViewport.Height-1))
 		return m, nil
 	}
-	if msg.String() == "left" {
-		if m.wizard.FocusArea == fixWizardFocusVisibility {
-			m.shiftWizardVisibility(-1)
+		if msg.String() == "left" {
+			if m.wizard.FocusArea == fixWizardFocusVisibility {
+				m.shiftWizardVisibility(-1)
+				return m, nil
+			}
+			m.wizard.ActionFocus--
+			if m.wizard.ActionFocus < fixWizardActionCancel {
+				m.wizard.ActionFocus = fixWizardActionApply
+			}
 			return m, nil
 		}
-		m.wizard.ActionFocus--
-		if m.wizard.ActionFocus < fixWizardActionApply {
-			m.wizard.ActionFocus = fixWizardActionCancel
-		}
-		return m, nil
-	}
 	if msg.String() == "right" {
 		if m.wizard.FocusArea == fixWizardFocusVisibility {
 			m.shiftWizardVisibility(+1)
 			return m, nil
 		}
 		m.wizard.ActionFocus++
-		if m.wizard.ActionFocus > fixWizardActionCancel {
-			m.wizard.ActionFocus = fixWizardActionApply
+		if m.wizard.ActionFocus > fixWizardActionApply {
+			m.wizard.ActionFocus = fixWizardActionCancel
 		}
 		return m, nil
 	}
@@ -812,25 +815,25 @@ func (m *fixTUIModel) viewSummaryContent() string {
 }
 
 func renderWizardActionButtons(focus int) string {
-	applyStyle := buttonPrimaryStyle
-	skipStyle := buttonStyle
 	cancelStyle := buttonDangerStyle
+	skipStyle := buttonStyle
+	applyStyle := buttonPrimaryStyle
 
-	if focus == fixWizardActionApply {
-		applyStyle = buttonPrimaryFocusStyle
+	if focus == fixWizardActionCancel {
+		cancelStyle = buttonDangerFocusStyle
 	}
 	if focus == fixWizardActionSkip {
 		skipStyle = buttonFocusStyle
 	}
-	if focus == fixWizardActionCancel {
-		cancelStyle = buttonDangerFocusStyle
+	if focus == fixWizardActionApply {
+		applyStyle = buttonPrimaryFocusStyle
 	}
 
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		applyStyle.Render("Apply"),
-		skipStyle.Render("Skip"),
 		cancelStyle.Render("Cancel"),
+		skipStyle.Render("Skip"),
+		applyStyle.Render("Apply"),
 	)
 }
 

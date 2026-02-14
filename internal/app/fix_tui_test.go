@@ -759,6 +759,99 @@ func TestFixTUIWizardViewShowsActionButtons(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardDefaultsActionFocusToCancel(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+
+	actions := []string{
+		FixActionPush,
+		FixActionSetUpstreamPush,
+		FixActionStageCommitPush,
+		FixActionCreateProject,
+		FixActionAbortOperation,
+	}
+	for _, action := range actions {
+		action := action
+		t.Run(action, func(t *testing.T) {
+			t.Parallel()
+			m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: action}})
+			if got := m.wizard.ActionFocus; got != fixWizardActionCancel {
+				t.Fatalf("default action focus = %d, want cancel(%d) for action %q", got, fixWizardActionCancel, action)
+			}
+		})
+	}
+}
+
+func TestFixTUIWizardButtonsRenderCancelFirst(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+
+	view := ansi.Strip(m.viewWizardContent())
+	cancelIdx := strings.Index(view, "Cancel")
+	skipIdx := strings.Index(view, "Skip")
+	applyIdx := strings.Index(view, "Apply")
+	if cancelIdx < 0 || skipIdx < 0 || applyIdx < 0 {
+		t.Fatalf("wizard buttons missing in view: %q", view)
+	}
+	if !(cancelIdx < skipIdx && skipIdx < applyIdx) {
+		t.Fatalf("expected button order Cancel -> Skip -> Apply, got %q", view)
+	}
+}
+
+func TestFixTUIWizardEnterOnDefaultCancelReturnsToList(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.viewMode != fixViewList {
+		t.Fatalf("view mode after enter on default cancel = %v, want list", m.viewMode)
+	}
+	if !strings.Contains(m.status, "cancelled remaining risky confirmations") {
+		t.Fatalf("status = %q, want cancelled confirmation status", m.status)
+	}
+}
+
 func TestFixTUIWizardViewUsesSingleTopLineWithoutExtraWizardHeaders(t *testing.T) {
 	t.Parallel()
 
