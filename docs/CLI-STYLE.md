@@ -12,6 +12,7 @@ Applies to:
 - Calm by default: structured chrome, no log spam, stable layout.
 - Keyboard-first: predictable keys and obvious focus.
 - Safe by default: mutating actions require explicit intent.
+- Vertical space is precious: prefer 1-line chrome and compact field headers.
 - Works at small sizes: test at ~`80x24` and degrade gracefully down to ~`60` columns.
 
 ## Layout (Chrome)
@@ -19,28 +20,33 @@ Applies to:
 Interactive screens share the same skeleton:
 
 - Outer padding: `1` row, `2` columns.
-- Header: product badge + title + one-line subtitle.
+- Header: product badge + title + dynamic subtitle on a single line, separated by a short delimiter (for example `|`).
 - Main: exactly one primary panel per screen/step.
 - Footer: sticky help panel at the bottom. No other key legends.
 - Callouts: warnings/errors render above the help panel (so keys stay visible).
 
+Chrome spacing rules:
+
+- No blank lines between chrome rows (header, tabs, main panel, callouts, help). Borders already consume rows; extra padding is waste.
+- No trailing empty rows or whitespace after the help panel. The help panel is the visual bottom of the screen.
+- Header should not wrap to multiple lines; prefer truncating the subtitle with `...` over spending another row.
+- If tabs/steps are not present, the main panel starts immediately under the header line.
+
 Example shape (schematic):
 
 ```text
-bb  <title>
-<one-line subtitle>
-
+bb  <title>  |  <dynamic subtitle>
 [Step] [Step] [Step]    (optional)
 ------------------------------
 | Main panel content          |
 | ...                         |
 ------------------------------
 <callout area (optional)>
-
 <help panel (sticky bottom)>
 ```
 
 Avoid unconditional trailing newlines in `View()` output when they cause top borders to scroll off-screen in shorter terminals.
+Avoid trailing spaces on any rendered line (especially the last line) because they can cause awkward wraps in narrow terminals.
 
 ## Visual System
 
@@ -68,7 +74,8 @@ Rules:
 
 - Between field blocks: exactly 1 blank line.
 - Title/description to first field: 1 blank line.
-- Inside a field block: label, then description, then control/value on its own line.
+- Inside a field block: prefer `Label - short description` on one line, then the control/value on its own line.
+- Do not add blank lines between bordered chrome elements (panels, help) just to "separate" them; the border is already the separator.
 - Pills/chips: at least 2 spaces horizontal padding; at least 2 spaces between adjacent pills.
 
 ## Interaction Model
@@ -111,8 +118,7 @@ Use tabs when a flow has multiple non-trivial steps.
 Structure every editable row the same way:
 
 ```text
-| Name
-| Used for display and remote creation.
+| Name - Used for display and remote creation.
 | [ my-repo-name______________ ]
 | (error text when invalid)
 ```
@@ -121,6 +127,7 @@ Guidelines:
 
 - Left border indicates the row boundary; focused row border uses `Accent`.
 - Label is bold; description is `Muted`.
+- If the description is long, it may wrap or drop to its own line (but default to the single-line header when it fits).
 - Validation errors are short, specific, and tell the user how to fix the input.
 
 ### Text Inputs
@@ -185,6 +192,24 @@ When you need rich styling, prefer a details panel below/alongside the list:
 - Use distinct label/value styling (muted label + higher-contrast value).
 - Avoid vertical border glyphs (`│`) that visually merge with table columns.
 
+### Scroll Indicators (More Above/Below)
+
+When a content region is scrollable (for example a viewport in a wizard/details panel), tell the user when context is clipped.
+
+- Use a short, muted indicator line at the bottom and/or top of the scrollable region.
+- Show indicators only when there is actually more content in that direction.
+- Keep the wording consistent and explicit about what to do.
+
+Examples:
+
+```text
+↓ More context below (scroll down)
+```
+
+```text
+↑ More context above (scroll up)
+```
+
 ### Badges / Chips (Non-interactive)
 
 Use badges for compact metadata, not controls.
@@ -237,8 +262,13 @@ Empty states should never be blank. Include:
 
 - Use user-facing terms, not internal IDs (for example "Enable auto-push" not `enable-auto-push`).
 - Use consistent verbs:
-  - Buttons: `Apply`, `Continue`, `Save`, `Cancel`, `Skip`.
-  - Descriptions: short sentences without jargon.
+  - `Continue`: move to the next step/screen (navigation). Avoid external side-effects.
+  - `Save`: persist user input (usually to disk/config). Prefer when the primary effect is writing configuration.
+  - `Apply`: perform the selected changes/fixes (usually mutating state outside the screen, like git operations or file edits).
+  - `Cancel`: exit without applying changes (safe default focus for risky confirmations).
+  - `Skip`: intentionally do nothing for the current item and move on (explicit no-op).
+- Descriptions: short sentences without jargon.
+- Avoid multiple "do the thing" verbs on the same screen; if you truly need both, qualify them (for example `Save config` vs `Apply fixes`).
 - Always explain what will change before running a mutating action.
 - Prefer "fix/fixable" over legacy "autofix/autofixable".
 

@@ -759,6 +759,76 @@ func TestFixTUIWizardViewShowsActionButtons(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardViewIncludesApplyingPlanBlock(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+
+	view := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(view, "Applying this fix will:") {
+		t.Fatalf("expected applying-plan block heading, got %q", view)
+	}
+	if !strings.Contains(view, "Commands:") || !strings.Contains(view, "Other actions:") {
+		t.Fatalf("expected command/action sections in applying-plan block, got %q", view)
+	}
+	if !strings.Contains(view, "git push") {
+		t.Fatalf("expected push command in applying-plan block, got %q", view)
+	}
+}
+
+func TestFixTUIWizardApplyingPlanShowsCommandsAndNonCommandActions(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "",
+			},
+			Meta: &domain.RepoMetadataFile{
+				OriginURL:        "https://github.com/you/api.git",
+				AutoPush:         true,
+				PreferredRemote:  "origin",
+				PushAccess:       domain.PushAccessReadWrite,
+				PreferredCatalog: "software",
+			},
+			Risk: fixRiskSnapshot{
+				MissingRootGitignore:       true,
+				NoisyChangedPaths:          []string{"node_modules/pkg/index.js"},
+				SuggestedGitignorePatterns: []string{"node_modules/"},
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	view := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(view, "[command] git add -A") {
+		t.Fatalf("expected git add command in applying-plan block, got %q", view)
+	}
+	if !strings.Contains(view, "[command] git commit -m") {
+		t.Fatalf("expected git commit command in applying-plan block, got %q", view)
+	}
+	if !strings.Contains(view, "[action] Generate root .gitignore") {
+		t.Fatalf("expected non-command gitignore action in applying-plan block, got %q", view)
+	}
+}
+
 func TestFixTUIWizardDefaultsActionFocusToCancel(t *testing.T) {
 	t.Parallel()
 
@@ -816,14 +886,21 @@ func TestFixTUIWizardButtonsRenderCancelFirst(t *testing.T) {
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
 
 	view := ansi.Strip(m.viewWizardContent())
-	cancelIdx := strings.Index(view, "Cancel")
-	skipIdx := strings.Index(view, "Skip")
-	applyIdx := strings.Index(view, "Apply")
+	buttonsLine := ""
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "Cancel") && strings.Contains(line, "Skip") && strings.Contains(line, "Apply") {
+			buttonsLine = line
+			break
+		}
+	}
+	cancelIdx := strings.Index(buttonsLine, "Cancel")
+	skipIdx := strings.Index(buttonsLine, "Skip")
+	applyIdx := strings.Index(buttonsLine, "Apply")
 	if cancelIdx < 0 || skipIdx < 0 || applyIdx < 0 {
 		t.Fatalf("wizard buttons missing in view: %q", view)
 	}
 	if !(cancelIdx < skipIdx && skipIdx < applyIdx) {
-		t.Fatalf("expected button order Cancel -> Skip -> Apply, got %q", view)
+		t.Fatalf("expected button order Cancel -> Skip -> Apply, got line %q", buttonsLine)
 	}
 }
 

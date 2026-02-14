@@ -32,12 +32,15 @@ type fixWizardState struct {
 	Queue []fixWizardDecision
 	Index int
 
-	RepoPath string
-	RepoName string
-	Branch   string
-	Upstream string
-	Action   string
-	Risk     fixRiskSnapshot
+	RepoPath        string
+	RepoName        string
+	Branch          string
+	Upstream        string
+	OriginURL       string
+	PreferredRemote string
+	Operation       domain.Operation
+	Action          string
+	Risk            fixRiskSnapshot
 
 	EnableCommitMessage bool
 	CommitMessage       textinput.Model
@@ -81,12 +84,8 @@ const (
 )
 
 func isRiskyFixAction(action string) bool {
-	switch action {
-	case FixActionAbortOperation, FixActionPush, FixActionSetUpstreamPush, FixActionStageCommitPush, FixActionCreateProject, FixActionForkAndRetarget:
-		return true
-	default:
-		return false
-	}
+	spec, ok := fixActionSpecFor(action)
+	return ok && spec.Risky
 }
 
 func (m *fixTUIModel) startWizardQueue(queue []fixWizardDecision) {
@@ -113,12 +112,20 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	repoRisk := fixRiskSnapshot{}
 	branch := ""
 	upstream := ""
+	originURL := ""
+	preferredRemote := ""
+	operation := domain.OperationNone
 	for _, repo := range m.repos {
 		if repo.Record.Path == decision.RepoPath {
 			repoName = repo.Record.Name
 			repoRisk = repo.Risk
 			branch = strings.TrimSpace(repo.Record.Branch)
 			upstream = strings.TrimSpace(repo.Record.Upstream)
+			originURL = strings.TrimSpace(repo.Record.OriginURL)
+			operation = repo.Record.OperationInProgress
+			if repo.Meta != nil {
+				preferredRemote = strings.TrimSpace(repo.Meta.PreferredRemote)
+			}
 			break
 		}
 	}
@@ -148,6 +155,9 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	m.wizard.RepoName = repoName
 	m.wizard.Branch = branch
 	m.wizard.Upstream = upstream
+	m.wizard.OriginURL = originURL
+	m.wizard.PreferredRemote = preferredRemote
+	m.wizard.Operation = operation
 	m.wizard.Action = decision.Action
 	m.wizard.Risk = repoRisk
 	m.wizard.EnableCommitMessage = decision.Action == FixActionStageCommitPush
@@ -728,6 +738,8 @@ func (m *fixTUIModel) viewWizardContextContent() string {
 	}, "\n")
 	b.WriteString(fieldStyle.Render(context))
 	b.WriteString("\n\n")
+	b.WriteString(m.renderWizardApplyPlan())
+	b.WriteString("\n\n")
 	b.WriteString(renderFieldBlock(false, "Changed files", "Files that will be included by this fix.", m.renderChangedFilesList(), ""))
 
 	if len(m.wizard.Risk.SecretLikeChangedPaths) > 0 {
@@ -765,6 +777,73 @@ func (m *fixTUIModel) viewWizardContextContent() string {
 		))
 	}
 	return b.String()
+}
+
+func (m *fixTUIModel) wizardActionPlanContext() fixActionPlanContext {
+	ctx := fixActionPlanContext{
+		Operation:               m.wizard.Operation,
+		Branch:                  strings.TrimSpace(m.wizard.Branch),
+		Upstream:                strings.TrimSpace(m.wizard.Upstream),
+		OriginURL:               strings.TrimSpace(m.wizard.OriginURL),
+		PreferredRemote:         strings.TrimSpace(m.wizard.PreferredRemote),
+		CreateProjectVisibility: m.wizard.Visibility,
+		MissingRootGitignore:    m.wizard.Risk.MissingRootGitignore,
+	}
+	if m.wizard.EnableProjectName {
+		ctx.CreateProjectName = strings.TrimSpace(m.wizard.ProjectName.Value())
+	}
+	if m.wizard.EnableCommitMessage {
+		raw := strings.TrimSpace(m.wizard.CommitMessage.Value())
+		if raw == "" || raw == DefaultFixCommitMessage {
+			raw = "auto"
+		}
+		ctx.CommitMessage = raw
+	}
+	if m.wizard.ShowGitignoreToggle && m.wizard.GenerateGitignore {
+		ctx.GenerateGitignore = true
+		ctx.GitignorePatterns = append([]string(nil), m.wizardGitignoreTogglePatterns()...)
+	}
+	return ctx
+}
+
+func (m *fixTUIModel) renderWizardApplyPlan() string {
+	entries := fixActionPlanFor(m.wizard.Action, m.wizardActionPlanContext())
+
+	commands := make([]string, 0, len(entries))
+	actions := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Summary) == "" {
+			continue
+		}
+		if entry.Command {
+			commands = append(commands, "• [command] "+entry.Summary)
+			continue
+		}
+		actions = append(actions, "• [action] "+entry.Summary)
+	}
+
+	lines := []string{
+		"Commands:",
+	}
+	if len(commands) == 0 {
+		lines = append(lines, "• [command] none")
+	} else {
+		lines = append(lines, commands...)
+	}
+	lines = append(lines, "", "Other actions:")
+	if len(actions) == 0 {
+		lines = append(lines, "• [action] none")
+	} else {
+		lines = append(lines, actions...)
+	}
+
+	return renderFieldBlock(
+		false,
+		"Applying this fix will:",
+		"Review commands and side effects that run when you choose Apply.",
+		strings.Join(lines, "\n"),
+		"",
+	)
 }
 
 func (m *fixTUIModel) syncWizardViewport() {

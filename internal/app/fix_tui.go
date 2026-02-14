@@ -1562,25 +1562,11 @@ func fixActionLabel(action string) string {
 		return fixNoAction
 	case fixAllActions:
 		return "All fixes"
-	case FixActionAbortOperation:
-		return "Abort operation"
-	case FixActionPush:
-		return "Push commits"
-	case FixActionStageCommitPush:
-		return "Stage, commit & push"
-	case FixActionPullFFOnly:
-		return "Pull (ff-only)"
-	case FixActionSetUpstreamPush:
-		return "Set upstream & push"
-	case FixActionCreateProject:
-		return "Create project & push"
-	case FixActionForkAndRetarget:
-		return "Fork & retarget remote"
-	case FixActionEnableAutoPush:
-		return "Allow auto-push in sync"
-	default:
-		return action
 	}
+	if spec, ok := fixActionSpecFor(action); ok {
+		return spec.Label
+	}
+	return action
 }
 
 func fixActionDescription(action string) string {
@@ -1589,25 +1575,11 @@ func fixActionDescription(action string) string {
 		return "Do nothing for this repository in the current run."
 	case fixAllActions:
 		return "Run all currently eligible fixes for this repository."
-	case FixActionAbortOperation:
-		return "Cancel the active git operation (merge, rebase, cherry-pick, or bisect)."
-	case FixActionPush:
-		return "Push local commits that are ahead of upstream."
-	case FixActionStageCommitPush:
-		return "Stage all local changes and create a commit; push when a remote target is configured."
-	case FixActionPullFFOnly:
-		return "Fast-forward your branch to upstream without creating a merge commit."
-	case FixActionSetUpstreamPush:
-		return "Set this branch's upstream tracking target and push."
-	case FixActionCreateProject:
-		return "Create remote project, set origin, register metadata, and push current branch."
-	case FixActionForkAndRetarget:
-		return "Fork the upstream repository, add your fork as a remote, retarget this branch upstream, and update repo metadata."
-	case FixActionEnableAutoPush:
-		return "Allow future bb sync runs to auto-push this repo by enabling its auto-push policy."
-	default:
-		return "Action has no help text yet."
 	}
+	if spec, ok := fixActionSpecFor(action); ok {
+		return spec.Description
+	}
+	return "Action has no help text yet."
 }
 
 func formatRepoDisplayName(repo fixRepoState) string {
