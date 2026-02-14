@@ -2,7 +2,7 @@ package domain
 
 import "testing"
 
-func TestNormalizeOriginToRepoID(t *testing.T) {
+func TestNormalizeOriginIdentity(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -20,21 +20,21 @@ func TestNormalizeOriginToRepoID(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := NormalizeOriginToRepoID(tt.origin)
+			got, err := NormalizeOriginIdentity(tt.origin)
 			if err != nil {
-				t.Fatalf("NormalizeOriginToRepoID() error = %v", err)
+				t.Fatalf("NormalizeOriginIdentity() error = %v", err)
 			}
 			if got != tt.want {
-				t.Fatalf("NormalizeOriginToRepoID() = %q, want %q", got, tt.want)
+				t.Fatalf("NormalizeOriginIdentity() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestNormalizeOriginToRepoIDError(t *testing.T) {
+func TestNormalizeOriginIdentityError(t *testing.T) {
 	t.Parallel()
 
-	if _, err := NormalizeOriginToRepoID("not a url"); err == nil {
+	if _, err := NormalizeOriginIdentity("not a url"); err == nil {
 		t.Fatal("expected error for invalid origin")
 	}
 }

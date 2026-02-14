@@ -206,7 +206,7 @@ func (a *App) RunInit(opts InitOptions) error {
 	}
 	if origin != "" {
 		a.logf("init: found existing origin %s", origin)
-		matches, err := originsMatchByRepoID(origin, expectedOrigin)
+		matches, err := originsMatchNormalized(origin, expectedOrigin)
 		if err != nil {
 			return fmt.Errorf("invalid existing origin: %w", err)
 		}
@@ -371,16 +371,16 @@ func (a *App) expectedOrigin(owner, repo, protocol string) (string, error) {
 	return origin, nil
 }
 
-func originsMatchByRepoID(observedOrigin string, expectedOrigin string) (bool, error) {
-	observedID, err := domain.NormalizeOriginToRepoID(observedOrigin)
+func originsMatchNormalized(observedOrigin string, expectedOrigin string) (bool, error) {
+	observedIdentity, err := domain.NormalizeOriginIdentity(observedOrigin)
 	if err != nil {
 		return false, err
 	}
-	expectedID, err := domain.NormalizeOriginToRepoID(expectedOrigin)
+	expectedIdentity, err := domain.NormalizeOriginIdentity(expectedOrigin)
 	if err != nil {
 		return false, err
 	}
-	return observedID == expectedID, nil
+	return observedIdentity == expectedIdentity, nil
 }
 
 func (a *App) createRemoteRepo(owner, repo string, visibility domain.Visibility, protocol string, repoPath string) (string, error) {
@@ -423,6 +423,8 @@ func (a *App) createRemoteRepo(owner, repo string, visibility domain.Visibility,
 func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, name, origin string, visibility domain.Visibility, preferredCatalog string) (domain.RepoMetadataFile, bool, error) {
 	meta, err := state.LoadRepoMetadata(a.Paths, repoKey)
 	created := false
+	loaded := domain.RepoMetadataFile{}
+	hasExisting := false
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return domain.RepoMetadataFile{}, false, err
@@ -446,6 +448,8 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, name, origin st
 		}
 		created = true
 	} else {
+		hasExisting = true
+		loaded = meta
 		if meta.RepoKey == "" {
 			meta.RepoKey = repoKey
 		}
@@ -465,11 +469,20 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, name, origin st
 			// keep explicit false; default is true only when missing on creation
 		}
 	}
-	if err := state.SaveRepoMetadata(a.Paths, meta); err != nil {
+	normalized := normalizedRepoMetadata(meta)
+	if hasExisting && normalizedRepoMetadata(loaded) == normalized {
+		return normalized, created, nil
+	}
+	if err := state.SaveRepoMetadata(a.Paths, normalized); err != nil {
 		return domain.RepoMetadataFile{}, false, err
 	}
 	a.logf("state: wrote repo metadata %s", state.RepoMetaPath(a.Paths, repoKey))
-	return meta, created, nil
+	return normalized, created, nil
+}
+
+func normalizedRepoMetadata(meta domain.RepoMetadataFile) domain.RepoMetadataFile {
+	meta.Version = domain.Version
+	return meta
 }
 
 type discoveredRepo struct {

@@ -11,7 +11,7 @@ import (
 
 var scpLikeOriginPattern = regexp.MustCompile(`^([^@\s]+)@([^:\s]+):(.+)$`)
 
-func NormalizeOriginToRepoID(origin string) (string, error) {
+func NormalizeOriginIdentity(origin string) (string, error) {
 	origin = strings.TrimSpace(origin)
 	if origin == "" {
 		return "", errors.New("empty origin")

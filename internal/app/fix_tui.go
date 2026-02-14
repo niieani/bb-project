@@ -1327,11 +1327,11 @@ func githubRepoURLForRecord(rec domain.MachineRepoRecord) string {
 	if originURL == "" {
 		return ""
 	}
-	repoID, err := domain.NormalizeOriginToRepoID(originURL)
+	originIdentity, err := domain.NormalizeOriginIdentity(originURL)
 	if err != nil {
 		return ""
 	}
-	host, path, ok := strings.Cut(repoID, "/")
+	host, path, ok := strings.Cut(originIdentity, "/")
 	if !ok || strings.TrimSpace(path) == "" {
 		return ""
 	}

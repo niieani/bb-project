@@ -221,7 +221,7 @@ func validateTargetPath(g gitx.Runner, targetPath string, expectedOriginURL stri
 	if err != nil {
 		return "", err
 	}
-	matches, err := originsMatchByRepoID(origin, expectedOriginURL)
+	matches, err := originsMatchNormalized(origin, expectedOriginURL)
 	if err != nil {
 		return domain.ReasonTargetPathRepoMismatch, nil
 	}
@@ -276,7 +276,7 @@ func (a *App) ensureLocalCopy(
 		return nil
 	}
 	origin, _ := a.Git.RepoOriginWithPreferredRemote(targetPath, meta.PreferredRemote)
-	matches, _ := originsMatchByRepoID(origin, meta.OriginURL)
+	matches, _ := originsMatchNormalized(origin, meta.OriginURL)
 	if !matches {
 		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonTargetPathRepoMismatch)
 		return nil

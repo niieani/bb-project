@@ -512,7 +512,7 @@ func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, p
 		return err
 	}
 	if origin != "" {
-		matches, err := originsMatchByRepoID(origin, expectedOrigin)
+		matches, err := originsMatchNormalized(origin, expectedOrigin)
 		if err != nil {
 			return fmt.Errorf("invalid existing origin: %w", err)
 		}
