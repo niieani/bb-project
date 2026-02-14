@@ -41,8 +41,10 @@ const (
 )
 
 type Catalog struct {
-	Name string `yaml:"name"`
-	Root string `yaml:"root"`
+	Name                              string `yaml:"name"`
+	Root                              string `yaml:"root"`
+	AllowAutoPushDefaultBranchPrivate *bool  `yaml:"allow_auto_push_default_branch_private,omitempty"`
+	AllowAutoPushDefaultBranchPublic  *bool  `yaml:"allow_auto_push_default_branch_public,omitempty"`
 }
 
 type ConfigFile struct {

@@ -222,6 +222,24 @@ func TestSyncBasicCases(t *testing.T) {
 		}
 	})
 
+	t.Run("TC-SYNC-013A", func(t *testing.T) {
+		_, _, mB, _, repoB, now := bootstrapRepoAcrossTwoMachines(t)
+		privateBlocked := false
+		setCatalogDefaultBranchAutoPushPolicy(t, mB, "software", &privateBlocked, nil)
+
+		mB.MustWriteFile(filepath.Join(repoB, "ahead.txt"), "ahead\n")
+		mB.MustRunGit(now, repoB, "add", "ahead.txt")
+		mB.MustRunGit(now, repoB, "commit", "-m", "ahead")
+
+		if _, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err == nil {
+			t.Fatal("expected sync unsyncable when default-branch auto-push is disabled for private repos")
+		}
+		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
+		if !containsReason(rec.UnsyncableReasons, domain.ReasonPushPolicyBlocked) {
+			t.Fatalf("expected push_policy_blocked reason, got %v", rec.UnsyncableReasons)
+		}
+	})
+
 	t.Run("TC-SYNC-014", func(t *testing.T) {
 		h, mA, mB, rootA, rootB := setupTwoMachines(t)
 		now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)

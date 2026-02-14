@@ -38,3 +38,21 @@ func FindCatalog(machine MachineFile, name string) (Catalog, bool) {
 	}
 	return Catalog{}, false
 }
+
+func (c Catalog) AllowsDefaultBranchAutoPush(visibility Visibility) bool {
+	switch visibility {
+	case VisibilityPrivate:
+		return boolOrDefault(c.AllowAutoPushDefaultBranchPrivate, true)
+	case VisibilityPublic:
+		return boolOrDefault(c.AllowAutoPushDefaultBranchPublic, false)
+	default:
+		return boolOrDefault(c.AllowAutoPushDefaultBranchPublic, false)
+	}
+}
+
+func boolOrDefault(value *bool, def bool) bool {
+	if value == nil {
+		return def
+	}
+	return *value
+}

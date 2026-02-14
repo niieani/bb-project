@@ -314,7 +314,7 @@ func TestWizardCatalogButtonsCanOpenAddEditorAndContinue(t *testing.T) {
 
 	m.catalogEdit = nil
 	m.catalogFocus = catalogFocusButtons
-	m.catalogBtn = 3 // continue
+	m.catalogBtn = 5 // continue
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.step != stepReview {
 		t.Fatalf("step = %v, want %v", m.step, stepReview)
@@ -337,6 +337,33 @@ func TestWizardCatalogButtonsSetDefault(t *testing.T) {
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.machine.DefaultCatalog != "alt" {
 		t.Fatalf("default catalog = %q, want %q", m.machine.DefaultCatalog, "alt")
+	}
+}
+
+func TestWizardCatalogButtonsToggleDefaultBranchAutoPushPolicies(t *testing.T) {
+	m := testConfigWizardModel(t)
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.catalogFocus = catalogFocusButtons
+	m.catalogBtn = 3 // toggle private
+	m.onStepChanged()
+	m.catalogTable.SetCursor(0)
+
+	if !m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPrivate) {
+		t.Fatal("expected private default policy to start as on")
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPrivate) {
+		t.Fatal("expected private default policy to toggle off")
+	}
+
+	m.catalogBtn = 4 // toggle public
+	if m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPublic) {
+		t.Fatal("expected public default policy to start as off")
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPublic) {
+		t.Fatal("expected public default policy to toggle on")
 	}
 }
 

@@ -453,9 +453,9 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoID, name, origin str
 }
 
 type discoveredRepo struct {
-	CatalogName string
-	Path        string
-	Name        string
+	Catalog domain.Catalog
+	Path    string
+	Name    string
 }
 
 func (a *App) scanAndPublish(cfg domain.ConfigFile, machine *domain.MachineFile, opts ScanOptions) (bool, error) {
@@ -533,7 +533,7 @@ func discoverRepos(catalogs []domain.Catalog) ([]discoveredRepo, error) {
 				if rel == "." {
 					name = filepath.Base(c.Root)
 				}
-				out = append(out, discoveredRepo{CatalogName: c.Name, Path: path, Name: name})
+				out = append(out, discoveredRepo{Catalog: c, Path: path, Name: name})
 				return filepath.SkipDir
 			}
 			return nil
@@ -560,7 +560,7 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 		repoID, _ = domain.NormalizeOriginToRepoID(origin)
 	}
 	if repoID != "" {
-		_, _, err := a.ensureRepoMetadata(cfg, repoID, repo.Name, origin, domain.VisibilityUnknown, repo.CatalogName)
+		_, _, err := a.ensureRepoMetadata(cfg, repoID, repo.Name, origin, domain.VisibilityUnknown, repo.Catalog.Name)
 		if err != nil {
 			return domain.MachineRepoRecord{}, err
 		}
@@ -575,11 +575,17 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	op := a.Git.Operation(repo.Path)
 
 	autoPush := false
+	visibility := domain.VisibilityUnknown
+	preferredRemote := ""
 	if repoID != "" {
 		if meta, err := state.LoadRepoMetadata(a.Paths, repoID); err == nil {
 			autoPush = meta.AutoPush
+			visibility = meta.Visibility
+			preferredRemote = meta.PreferredRemote
 		}
 	}
+	defaultBranch, _ := a.Git.DefaultBranch(repo.Path, preferredRemote)
+	autoPush = effectiveAutoPushForObservedBranch(autoPush, repo.Catalog, visibility, branch, defaultBranch)
 
 	syncable, reasons := domain.EvaluateSyncability(domain.ObservedRepoState{
 		OriginURL:            origin,
@@ -599,7 +605,7 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	rec := domain.MachineRepoRecord{
 		RepoID:              repoID,
 		Name:                repo.Name,
-		Catalog:             repo.CatalogName,
+		Catalog:             repo.Catalog.Name,
 		Path:                repo.Path,
 		OriginURL:           origin,
 		Branch:              branch,
@@ -618,6 +624,34 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	rec.StateHash = domain.ComputeStateHash(rec)
 	a.logf("scan: repo=%s branch=%s syncable=%t ahead=%d behind=%d", repo.Path, rec.Branch, rec.Syncable, rec.Ahead, rec.Behind)
 	return rec, nil
+}
+
+func effectiveAutoPushForObservedBranch(
+	autoPush bool,
+	catalog domain.Catalog,
+	visibility domain.Visibility,
+	branch string,
+	defaultBranch string,
+) bool {
+	if !autoPush {
+		return false
+	}
+	if !isDefaultBranch(branch, defaultBranch) {
+		return true
+	}
+	return catalog.AllowsDefaultBranchAutoPush(visibility)
+}
+
+func isDefaultBranch(branch string, defaultBranch string) bool {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return false
+	}
+	defaultBranch = strings.TrimSpace(defaultBranch)
+	if defaultBranch != "" {
+		return branch == defaultBranch
+	}
+	return branch == "main" || branch == "master"
 }
 
 func (a *App) RunScan(opts ScanOptions) (int, error) {

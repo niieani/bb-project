@@ -104,7 +104,11 @@ func (a *App) ensureFromWinners(
 				continue
 			}
 
-			updated, err := a.observeRepo(cfg, discoveredRepo{CatalogName: local.Catalog, Path: local.Path, Name: local.Name}, opts.Push)
+			catalog := domain.Catalog{Name: local.Catalog}
+			if selected, ok := selectedCatalogMap[local.Catalog]; ok {
+				catalog = selected
+			}
+			updated, err := a.observeRepo(cfg, discoveredRepo{Catalog: catalog, Path: local.Path, Name: local.Name}, opts.Push)
 			if err != nil {
 				return err
 			}
@@ -282,7 +286,7 @@ func (a *App) ensureLocalCopy(
 		return nil
 	}
 
-	rec, err := a.observeRepo(cfg, discoveredRepo{CatalogName: targetCatalog.Name, Path: targetPath, Name: meta.Name}, opts.Push)
+	rec, err := a.observeRepo(cfg, discoveredRepo{Catalog: targetCatalog, Path: targetPath, Name: meta.Name}, opts.Push)
 	if err != nil {
 		return err
 	}

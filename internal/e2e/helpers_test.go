@@ -41,6 +41,30 @@ func findRepoRecordByName(t *testing.T, mf domain.MachineFile, name string) doma
 	return domain.MachineRepoRecord{}
 }
 
+func setCatalogDefaultBranchAutoPushPolicy(t *testing.T, m *testharness.Machine, catalogName string, private *bool, public *bool) {
+	t.Helper()
+	paths := state.NewPaths(m.Home)
+	mf, err := state.LoadMachine(paths, m.ID)
+	if err != nil {
+		t.Fatalf("load machine %s: %v", m.ID, err)
+	}
+	found := false
+	for i := range mf.Catalogs {
+		if mf.Catalogs[i].Name != catalogName {
+			continue
+		}
+		mf.Catalogs[i].AllowAutoPushDefaultBranchPrivate = private
+		mf.Catalogs[i].AllowAutoPushDefaultBranchPublic = public
+		found = true
+	}
+	if !found {
+		t.Fatalf("catalog %q not found on machine %s", catalogName, m.ID)
+	}
+	if err := state.SaveMachine(paths, mf); err != nil {
+		t.Fatalf("save machine %s: %v", m.ID, err)
+	}
+}
+
 func createRepoWithOrigin(t *testing.T, m *testharness.Machine, catalogRoot, name string, now time.Time) (path string, remotePath string) {
 	t.Helper()
 	path = filepath.Join(catalogRoot, name)

@@ -42,3 +42,42 @@ func TestSelectCatalogsInvalid(t *testing.T) {
 		t.Fatal("expected error for invalid catalog")
 	}
 }
+
+func TestCatalogAllowsDefaultBranchAutoPush(t *testing.T) {
+	t.Parallel()
+
+	trueValue := true
+	falseValue := false
+
+	t.Run("private defaults to true when unset", func(t *testing.T) {
+		t.Parallel()
+		c := Catalog{}
+		if !c.AllowsDefaultBranchAutoPush(VisibilityPrivate) {
+			t.Fatal("expected private default-branch auto-push to default to true")
+		}
+	})
+
+	t.Run("public defaults to false when unset", func(t *testing.T) {
+		t.Parallel()
+		c := Catalog{}
+		if c.AllowsDefaultBranchAutoPush(VisibilityPublic) {
+			t.Fatal("expected public default-branch auto-push to default to false")
+		}
+	})
+
+	t.Run("private override false", func(t *testing.T) {
+		t.Parallel()
+		c := Catalog{AllowAutoPushDefaultBranchPrivate: &falseValue}
+		if c.AllowsDefaultBranchAutoPush(VisibilityPrivate) {
+			t.Fatal("expected private override false to be honored")
+		}
+	})
+
+	t.Run("public override true", func(t *testing.T) {
+		t.Parallel()
+		c := Catalog{AllowAutoPushDefaultBranchPublic: &trueValue}
+		if !c.AllowsDefaultBranchAutoPush(VisibilityPublic) {
+			t.Fatal("expected public override true to be honored")
+		}
+	})
+}

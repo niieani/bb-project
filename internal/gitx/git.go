@@ -175,6 +175,31 @@ func (r Runner) Upstream(path string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+func (r Runner) DefaultBranch(path string, preferredRemote string) (string, error) {
+	remote, err := r.pickRemote(path, preferredRemote)
+	if err != nil {
+		return "", err
+	}
+	if remote == "" {
+		return "", nil
+	}
+	ref := "refs/remotes/" + remote + "/HEAD"
+	out, err := r.RunGit(path, "symbolic-ref", "--quiet", "--short", ref)
+	if err != nil {
+		return "", nil
+	}
+	out = strings.TrimSpace(out)
+	prefix := remote + "/"
+	if strings.HasPrefix(out, prefix) {
+		return strings.TrimPrefix(out, prefix), nil
+	}
+	_, branch, ok := strings.Cut(out, "/")
+	if !ok {
+		return out, nil
+	}
+	return branch, nil
+}
+
 func (r Runner) RemoteHeadSHA(path string) (string, error) {
 	out, err := r.RunGit(path, "rev-parse", "@{u}")
 	if err != nil {

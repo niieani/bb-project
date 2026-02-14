@@ -289,6 +289,9 @@ A repo is syncable only if all are true:
 - current branch has upstream
 - branch is not diverged
 - if ahead commits exist, push is allowed by policy or `--push`
+- on a repo's default branch, auto-push is additionally gated by the catalog policy for repo visibility:
+  - `allow_auto_push_default_branch_private` (defaults to `true` when unset)
+  - `allow_auto_push_default_branch_public` (defaults to `false` when unset)
 
 Unsyncable reasons include:
 
