@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
@@ -1107,7 +1108,7 @@ func TestFixTUIWizardTopLineUsesSingleLineProgress(t *testing.T) {
 	}
 }
 
-func TestFixTUIWizardFooterHintIsStableSingleLine(t *testing.T) {
+func TestFixTUIWizardUsesOnlyGlobalFooterHelpLegend(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
@@ -1124,16 +1125,113 @@ func TestFixTUIWizardFooterHintIsStableSingleLine(t *testing.T) {
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
 
-	m.wizard.FocusArea = fixWizardFocusProjectName
-	hintTextInput := ansi.Strip(m.wizardFooterHint())
-	m.wizard.FocusArea = fixWizardFocusActions
-	hintActions := ansi.Strip(m.wizardFooterHint())
-
-	if hintTextInput != hintActions {
-		t.Fatalf("wizard footer hint should be stable across focus changes:\ninput=%q\nactions=%q", hintTextInput, hintActions)
+	body := ansi.Strip(m.viewWizardContent())
+	if strings.Contains(body, "tab/shift+tab") || strings.Contains(body, "↑/↓") || strings.Contains(body, "←/→") {
+		t.Fatalf("wizard body should not render inline key legend, got %q", body)
 	}
-	if strings.Contains(hintTextInput, "\n") {
-		t.Fatalf("wizard footer hint should stay single-line, got %q", hintTextInput)
+
+	full := ansi.Strip(m.View())
+	if count := strings.Count(full, "tab/shift+tab"); count != 1 {
+		t.Fatalf("expected key legend to appear exactly once in global footer, count=%d view=%q", count, full)
+	}
+}
+
+func TestFixTUIWizardGlobalFooterHelpReflectsCurrentFocus(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{
+				MissingRootGitignore:       true,
+				NoisyChangedPaths:          []string{"dist/app.js"},
+				SuggestedGitignorePatterns: []string{"dist/"},
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+
+	projectHelp := shortHelpEntries(m.contextualHelpMap().ShortHelp())
+	if !helpContains(projectHelp, "enter next field") {
+		t.Fatalf("expected project-name focus help to include enter-next, got %v", projectHelp)
+	}
+	if helpContains(projectHelp, "←/→ change visibility") || helpContains(projectHelp, "←/→ select button") || helpContains(projectHelp, "space toggle") {
+		t.Fatalf("project-name focus should not include unrelated shortcuts, got %v", projectHelp)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project name -> visibility
+	visibilityHelp := shortHelpEntries(m.contextualHelpMap().ShortHelp())
+	if !helpContains(visibilityHelp, "←/→ change visibility") {
+		t.Fatalf("expected visibility focus help to include left/right visibility shortcut, got %v", visibilityHelp)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // visibility -> actions
+	actionsHelp := shortHelpEntries(m.contextualHelpMap().ShortHelp())
+	if !helpContains(actionsHelp, "enter activate") || !helpContains(actionsHelp, "←/→ select button") {
+		t.Fatalf("expected actions focus help to include action shortcuts, got %v", actionsHelp)
+	}
+}
+
+func TestFixTUIListGlobalFooterHelpShowsOnlyAvailableActions(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     2,
+			},
+			Meta: &domain.RepoMetadataFile{
+				RepoKey:    "software/api",
+				OriginURL:  "https://github.com/you/api.git",
+				AutoPush:   false,
+				PushAccess: domain.PushAccessReadWrite,
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+
+	initial := shortHelpEntries(m.contextualHelpMap().ShortHelp())
+	if helpContains(initial, "enter apply selected") || helpContains(initial, "ctrl+a apply all selected") {
+		t.Fatalf("expected apply shortcuts hidden when nothing is selected, got %v", initial)
+	}
+
+	m.cycleCurrentAction(1) // select push
+	selected := shortHelpEntries(m.contextualHelpMap().ShortHelp())
+	if len(selected) == 0 || selected[0] != "enter apply selected" {
+		t.Fatalf("expected most important shortcut first (enter apply selected), got %v", selected)
+	}
+	if !helpContains(selected, "ctrl+a apply all selected") || !helpContains(selected, "s toggle auto-push") {
+		t.Fatalf("expected selected-action footer help to include apply-all and auto-push, got %v", selected)
+	}
+	if strings.Contains(strings.Join(selected, " • "), "Left") || strings.Contains(strings.Join(selected, " • "), "Right") {
+		t.Fatalf("expected compact lowercase/symbol key labels, got %v", selected)
+	}
+
+	m.repos[0].Meta.PushAccess = domain.PushAccessReadOnly
+	m.rebuildList("/repos/api")
+	withoutAutoPush := shortHelpEntries(m.contextualHelpMap().ShortHelp())
+	if helpContains(withoutAutoPush, "s toggle auto-push") {
+		t.Fatalf("expected auto-push shortcut hidden when n/a, got %v", withoutAutoPush)
+	}
+
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 24})
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, " • ") {
+		t.Fatalf("expected global footer to use bullet separators, got %q", view)
 	}
 }
 
@@ -2411,4 +2509,27 @@ func previousNonEmptyLine(lines []string, start int) string {
 		}
 	}
 	return ""
+}
+
+func shortHelpEntries(bindings []key.Binding) []string {
+	entries := make([]string, 0, len(bindings))
+	for _, binding := range bindings {
+		help := binding.Help()
+		keyLabel := strings.TrimSpace(help.Key)
+		desc := strings.TrimSpace(help.Desc)
+		if keyLabel == "" || desc == "" {
+			continue
+		}
+		entries = append(entries, keyLabel+" "+desc)
+	}
+	return entries
+}
+
+func helpContains(entries []string, value string) bool {
+	for _, entry := range entries {
+		if entry == value {
+			return true
+		}
+	}
+	return false
 }

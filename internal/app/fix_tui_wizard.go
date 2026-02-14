@@ -580,26 +580,34 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if msg.String() == "left" {
-		if m.wizard.FocusArea == fixWizardFocusVisibility {
+		switch m.wizard.FocusArea {
+		case fixWizardFocusVisibility:
 			m.shiftWizardVisibility(-1)
 			return m, nil
-		}
-		m.wizard.ActionFocus--
-		if m.wizard.ActionFocus < fixWizardActionCancel {
-			m.wizard.ActionFocus = fixWizardActionApply
-		}
-		return m, nil
-	}
-	if msg.String() == "right" {
-		if m.wizard.FocusArea == fixWizardFocusVisibility {
-			m.shiftWizardVisibility(+1)
+		case fixWizardFocusActions:
+			m.wizard.ActionFocus--
+			if m.wizard.ActionFocus < fixWizardActionCancel {
+				m.wizard.ActionFocus = fixWizardActionApply
+			}
+			return m, nil
+		default:
 			return m, nil
 		}
-		m.wizard.ActionFocus++
-		if m.wizard.ActionFocus > fixWizardActionApply {
-			m.wizard.ActionFocus = fixWizardActionCancel
+	}
+	if msg.String() == "right" {
+		switch m.wizard.FocusArea {
+		case fixWizardFocusVisibility:
+			m.shiftWizardVisibility(+1)
+			return m, nil
+		case fixWizardFocusActions:
+			m.wizard.ActionFocus++
+			if m.wizard.ActionFocus > fixWizardActionApply {
+				m.wizard.ActionFocus = fixWizardActionCancel
+			}
+			return m, nil
+		default:
+			return m, nil
 		}
-		return m, nil
 	}
 	if msg.String() == " " && m.wizard.FocusArea == fixWizardFocusGitignore {
 		m.wizard.GenerateGitignore = !m.wizard.GenerateGitignore
@@ -612,6 +620,13 @@ func (m *fixTUIModel) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
+	if key.Matches(msg, m.keys.Quit) {
+		return m, tea.Quit
+	}
+	if key.Matches(msg, m.keys.Help) {
+		m.help.ShowAll = !m.help.ShowAll
+		return m, nil
+	}
 	if key.Matches(msg, m.keys.Apply) || key.Matches(msg, m.keys.Cancel) || key.Matches(msg, m.keys.Skip) {
 		m.viewMode = fixViewList
 		return m, nil
@@ -623,7 +638,6 @@ func (m *fixTUIModel) viewWizardContent() string {
 	m.syncWizardViewport()
 
 	controls := m.viewWizardStaticControls()
-	hint := m.wizardFooterHint()
 	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus), m.wizardBodyLineWidth())
 	topIndicator := m.wizardScrollIndicatorTop()
 	bottomIndicator := m.wizardScrollIndicatorBottom()
@@ -640,8 +654,6 @@ func (m *fixTUIModel) viewWizardContent() string {
 	}
 	b.WriteString("\n\n")
 	b.WriteString(actions)
-	b.WriteString("\n")
-	b.WriteString(hint)
 	return b.String()
 }
 
@@ -720,11 +732,6 @@ func (m *fixTUIModel) viewWizardTopLine() string {
 		line = lipgloss.JoinHorizontal(lipgloss.Top, line, " ", context)
 	}
 	return m.clampSingleLine(line, m.pageLineWidth())
-}
-
-func (m *fixTUIModel) wizardFooterHint() string {
-	const text = "Tab/Shift+Tab: focus  Up/Down: scroll or move focus at edge  Left/Right: change enum/buttons  Space: toggle  Enter: activate  Esc: cancel"
-	return hintStyle.Render(m.clampSingleLine(text, m.wizardBodyLineWidth()))
 }
 
 func (m *fixTUIModel) pageLineWidth() int {
@@ -923,13 +930,12 @@ func (m *fixTUIModel) syncWizardViewport() {
 	content := m.viewWizardContextContent()
 	controls := m.viewWizardStaticControls()
 	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus), m.wizardBodyLineWidth())
-	hint := m.wizardFooterHint()
 	// Non-scrollable rows:
 	// - top indicator row
 	// - bottom indicator row
 	// - one spacer line before actions (or controls/actions block)
-	// - action row + hint row
-	staticLines := lipgloss.Height(actions) + lipgloss.Height(hint) + 3
+	// - action row
+	staticLines := lipgloss.Height(actions) + 3
 	if controls != "" {
 		// With controls shown, the single spacer before actions becomes:
 		// one spacer before controls + one spacer before actions.
@@ -999,7 +1005,7 @@ func (m *fixTUIModel) wizardHelpHeight() int {
 	if w := m.viewContentWidth(); w > 0 {
 		helpPanel = helpPanel.Width(w)
 	}
-	return lipgloss.Height(helpPanel.Render(m.help.View(m.keys)))
+	return lipgloss.Height(helpPanel.Render(m.help.View(m.contextualHelpMap())))
 }
 
 func longestANSIWidth(s string) int {

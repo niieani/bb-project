@@ -104,6 +104,15 @@ Text input rule:
 
 - When any text input is focused, treat printable keys as text input only. Do not bind single-letter shortcuts that steal characters.
 
+### Footer Help Legend
+
+- Use exactly one keyboard legend: the sticky global footer help panel.
+- Never render a second key legend inside panel bodies, wizard steps, or details blocks.
+- The legend must be state-aware: show only shortcuts that are currently available/effective for the active screen and focus.
+- Order shortcuts by importance for the current context (primary action first, then navigation, then secondary actions).
+- Use compact key labels with symbols and lowercase text (`←/→`, `↑/↓`, `enter`, `esc`, `ctrl+a`).
+- Keep separator formatting consistent as ` • ` between shortcut entries.
+
 ## Components & Patterns
 
 ### Tabs / Steps (Wizards)

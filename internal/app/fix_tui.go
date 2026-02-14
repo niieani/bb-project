@@ -36,6 +36,11 @@ type fixTUIKeyMap struct {
 	Cancel   key.Binding
 }
 
+type fixTUIHelpMap struct {
+	short []key.Binding
+	full  [][]key.Binding
+}
+
 func defaultFixTUIKeyMap() fixTUIKeyMap {
 	return fixTUIKeyMap{
 		Up: key.NewBinding(
@@ -107,6 +112,209 @@ func (k fixTUIKeyMap) FullHelp() [][]key.Binding {
 		{k.Apply, k.Setting, k.Skip, k.ApplyAll, k.Refresh, k.Ignore, k.Unignore},
 		{k.Help, k.Cancel, k.Quit},
 	}
+}
+
+func (m fixTUIHelpMap) ShortHelp() []key.Binding {
+	return m.short
+}
+
+func (m fixTUIHelpMap) FullHelp() [][]key.Binding {
+	return m.full
+}
+
+func newHelpBinding(keys []string, keyLabel string, desc string) key.Binding {
+	if len(keys) == 0 {
+		keys = []string{keyLabel}
+	}
+	return key.NewBinding(
+		key.WithKeys(keys...),
+		key.WithHelp(keyLabel, desc),
+	)
+}
+
+func (m *fixTUIModel) contextualHelpMap() fixTUIHelpMap {
+	switch m.viewMode {
+	case fixViewWizard:
+		return m.wizardHelpMap()
+	case fixViewSummary:
+		return m.summaryHelpMap()
+	default:
+		return m.listHelpMap()
+	}
+}
+
+func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
+	short := make([]key.Binding, 0, 9)
+	primary := make([]key.Binding, 0, 4)
+	secondary := make([]key.Binding, 0, 5)
+	tertiary := make([]key.Binding, 0, 2)
+
+	repo, hasRepo := m.currentRepo()
+	options := []string(nil)
+	if hasRepo {
+		actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+			Interactive: true,
+			Risk:        repo.Risk,
+		})
+		options = selectableFixActions(fixActionsForSelection(actions))
+	}
+
+	canApplySelected := false
+	if hasRepo {
+		idx := m.selectedAction[repo.Record.Path]
+		canApplySelected = idx >= 0 && idx < len(options)
+	}
+	canApplyAll := m.hasAnySelectedFixes()
+	canMoveRepo := len(m.visible) > 1
+	canChangeFix := len(options) > 0
+	canToggleAutoPush := hasRepo && repoMetaAllowsAutoPush(repo.Meta)
+	canIgnoreRepo := hasRepo
+	canClearIgnored := len(m.ignored) > 0
+
+	if canApplySelected {
+		b := newHelpBinding([]string{"enter"}, "enter", "apply selected")
+		short = append(short, b)
+		primary = append(primary, b)
+	}
+	if canApplyAll {
+		b := newHelpBinding([]string{"ctrl+a"}, "ctrl+a", "apply all selected")
+		short = append(short, b)
+		primary = append(primary, b)
+	}
+	if canMoveRepo {
+		b := newHelpBinding([]string{"up", "down"}, "↑/↓", "move repo")
+		short = append(short, b)
+		primary = append(primary, b)
+	}
+	if canChangeFix {
+		b := newHelpBinding([]string{"left", "right"}, "←/→", "change fix")
+		short = append(short, b)
+		primary = append(primary, b)
+	}
+	if canToggleAutoPush {
+		b := newHelpBinding([]string{"s"}, "s", "toggle auto-push")
+		short = append(short, b)
+		secondary = append(secondary, b)
+	}
+	if canIgnoreRepo {
+		b := newHelpBinding([]string{"i"}, "i", "ignore repo")
+		short = append(short, b)
+		secondary = append(secondary, b)
+	}
+	if canClearIgnored {
+		b := newHelpBinding([]string{"u"}, "u", "clear ignored")
+		short = append(short, b)
+		secondary = append(secondary, b)
+	}
+	refresh := newHelpBinding([]string{"r"}, "r", "refresh")
+	short = append(short, refresh)
+	secondary = append(secondary, refresh)
+
+	quit := newHelpBinding([]string{"q", "ctrl+c"}, "q", "quit")
+	short = append(short, quit)
+	tertiary = append(tertiary, quit)
+
+	helpToggle := newHelpBinding([]string{"?"}, "?", "more keys")
+	tertiary = append(tertiary, helpToggle)
+
+	rows := make([][]key.Binding, 0, 3)
+	if len(primary) > 0 {
+		rows = append(rows, primary)
+	}
+	if len(secondary) > 0 {
+		rows = append(rows, secondary)
+	}
+	if len(tertiary) > 0 {
+		rows = append(rows, tertiary)
+	}
+	return fixTUIHelpMap{short: short, full: rows}
+}
+
+func (m *fixTUIModel) wizardHelpMap() fixTUIHelpMap {
+	short := make([]key.Binding, 0, 8)
+	primary := make([]key.Binding, 0, 5)
+	secondary := make([]key.Binding, 0, 3)
+
+	enterDesc := "activate"
+	if m.wizard.FocusArea != fixWizardFocusActions {
+		enterDesc = "next field"
+	}
+	enter := newHelpBinding([]string{"enter"}, "enter", enterDesc)
+	short = append(short, enter)
+	primary = append(primary, enter)
+
+	switch m.wizard.FocusArea {
+	case fixWizardFocusVisibility:
+		b := newHelpBinding([]string{"left", "right"}, "←/→", "change visibility")
+		short = append(short, b)
+		primary = append(primary, b)
+	case fixWizardFocusActions:
+		b := newHelpBinding([]string{"left", "right"}, "←/→", "select button")
+		short = append(short, b)
+		primary = append(primary, b)
+	case fixWizardFocusGitignore:
+		b := newHelpBinding([]string{" "}, "space", "toggle")
+		short = append(short, b)
+		primary = append(primary, b)
+	}
+
+	cancel := newHelpBinding([]string{"esc"}, "esc", "cancel wizard")
+	short = append(short, cancel)
+	primary = append(primary, cancel)
+
+	skip := newHelpBinding([]string{"ctrl+x"}, "ctrl+x", "skip repo")
+	short = append(short, skip)
+	primary = append(primary, skip)
+
+	move := newHelpBinding([]string{"up", "down"}, "↑/↓", "move focus/scroll")
+	short = append(short, move)
+	secondary = append(secondary, move)
+
+	focus := newHelpBinding([]string{"tab", "shift+tab"}, "tab/shift+tab", "cycle focus")
+	short = append(short, focus)
+	secondary = append(secondary, focus)
+
+	rows := [][]key.Binding{primary, secondary}
+	if m.wizardHasContextOverflow() {
+		page := newHelpBinding([]string{"pgup", "pgdown"}, "pgup/pgdn", "page scroll")
+		short = append(short, page)
+		rows = append(rows, []key.Binding{page})
+	}
+	return fixTUIHelpMap{short: short, full: rows}
+}
+
+func (m *fixTUIModel) summaryHelpMap() fixTUIHelpMap {
+	back := newHelpBinding([]string{"enter"}, "enter", "back to list")
+	cancel := newHelpBinding([]string{"esc"}, "esc", "back to list")
+	skip := newHelpBinding([]string{"ctrl+x"}, "ctrl+x", "back to list")
+	quit := newHelpBinding([]string{"q", "ctrl+c"}, "q", "quit")
+	helpToggle := newHelpBinding([]string{"?"}, "?", "more keys")
+
+	return fixTUIHelpMap{
+		short: []key.Binding{back, cancel, quit},
+		full: [][]key.Binding{
+			{back, cancel, skip},
+			{quit, helpToggle},
+		},
+	}
+}
+
+func (m *fixTUIModel) hasAnySelectedFixes() bool {
+	for _, repo := range m.visible {
+		idx := m.selectedAction[repo.Record.Path]
+		if idx < 0 {
+			continue
+		}
+		actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+			Interactive: true,
+			Risk:        repo.Risk,
+		})
+		options := selectableFixActions(fixActionsForSelection(actions))
+		if idx < len(options) {
+			return true
+		}
+	}
+	return false
 }
 
 type fixTUIModel struct {
@@ -708,7 +916,7 @@ func (m *fixTUIModel) View() string {
 		b.WriteString(alertStyle.Render(errorStyle.Render(m.errText)))
 	}
 
-	helpView := m.help.View(m.keys)
+	helpView := m.help.View(m.contextualHelpMap())
 	helpPanel := helpPanelStyle
 	if w := m.viewContentWidth(); w > 0 {
 		helpPanel = helpPanel.Width(w)
@@ -923,7 +1131,7 @@ func (m *fixTUIModel) resizeRepoList() {
 	if w := m.viewContentWidth(); w > 0 {
 		helpPanel = helpPanel.Width(w)
 	}
-	helpHeight := lipgloss.Height(helpPanel.Render(m.help.View(m.keys)))
+	helpHeight := lipgloss.Height(helpPanel.Render(m.help.View(m.contextualHelpMap())))
 
 	reserved := 0
 	reserved += fixPageStyle.GetVerticalFrameSize()
