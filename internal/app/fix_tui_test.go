@@ -828,6 +828,17 @@ func TestFixTUIFooterDoesNotLeaveExtraTrailingBlankRows(t *testing.T) {
 	}
 }
 
+func TestFixActionLabelAndDescriptionIncludeCreateProject(t *testing.T) {
+	t.Parallel()
+
+	if got := fixActionLabel(FixActionCreateProject); got == FixActionCreateProject {
+		t.Fatalf("create-project label should be user-friendly, got raw action %q", got)
+	}
+	if got := fixActionDescription(FixActionCreateProject); strings.Contains(got, "no help text") {
+		t.Fatalf("create-project should have description, got %q", got)
+	}
+}
+
 func TestFixTUIViewShowsMainPanelTopBorderBeforeContent(t *testing.T) {
 	t.Parallel()
 

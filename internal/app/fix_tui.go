@@ -327,6 +327,9 @@ var (
 	fixActionUpstreamStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("177"))
 
+	fixActionCreateProjectStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("113"))
+
 	fixActionAutoPushStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("70"))
 
@@ -1247,6 +1250,8 @@ func fixActionStyleFor(action string) lipgloss.Style {
 		return fixActionPullStyle
 	case FixActionSetUpstreamPush:
 		return fixActionUpstreamStyle
+	case FixActionCreateProject:
+		return fixActionCreateProjectStyle
 	case FixActionEnableAutoPush:
 		return fixActionAutoPushStyle
 	case FixActionAbortOperation:
@@ -1272,6 +1277,8 @@ func fixActionLabel(action string) string {
 		return "Pull (ff-only)"
 	case FixActionSetUpstreamPush:
 		return "Set upstream & push"
+	case FixActionCreateProject:
+		return "Create project & push"
 	case FixActionEnableAutoPush:
 		return "Allow auto-push in sync"
 	default:
@@ -1295,6 +1302,8 @@ func fixActionDescription(action string) string {
 		return "Fast-forward your branch to upstream without creating a merge commit."
 	case FixActionSetUpstreamPush:
 		return "Set this branch's upstream tracking target and push."
+	case FixActionCreateProject:
+		return "Create remote project, set origin, register metadata, and push current branch."
 	case FixActionEnableAutoPush:
 		return "Allow future bb sync runs to auto-push this repo by enabling its auto-push policy."
 	default:
