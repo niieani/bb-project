@@ -98,7 +98,7 @@ Implementation constraints:
 ## Terminology
 
 - `repo_key`: catalog/path identity (`<catalog>/<relative-path>`) used for shared metadata and winner selection.
-- `repo_id`: canonical repository identifier derived from normalized `origin` URL.
+- `origin identity`: canonical repository identity derived from normalized `origin_url` and used for safety checks.
 - `catalog`: named root directory containing projects.
 - `default_catalog`: catalog used when command does not specify one.
 - `syncable`: repository state is safe for automation.
@@ -175,7 +175,6 @@ notify:
 ```yaml
 version: 1
 repo_key: software/bb-project
-repo_id: github.com/you/bb-project
 name: bb-project
 origin_url: git@github.com:you/bb-project.git
 visibility: private # private | public | unknown
@@ -201,7 +200,6 @@ catalogs:
 updated_at: "2026-02-13T20:31:00Z"
 repos:
   - repo_key: software/bb-project
-    repo_id: github.com/you/bb-project
     name: bb-project
     catalog: software
     path: /Volumes/Projects/Software/bb-project
@@ -227,7 +225,7 @@ repos:
 ```yaml
 version: 1
 last_sent:
-  github.com/you/bb-project:
+  "repo_key:software/bb-project":
     fingerprint: "dirty+ahead"
     sent_at: "2026-02-13T20:35:00Z"
 ```
@@ -330,7 +328,6 @@ selected_catalogs =
 auto_discover_repos_under(selected_catalog_roots)
 for each local repo in selected catalogs that matches catalog.repo_path_depth:
   derive repo_key = <catalog>/<relative path>
-  resolve repo_id from normalized origin URL
   ensure repos/<repo-key>.yaml exists
   if repo metadata created now:
     set preferred_catalog from discovered catalog
@@ -372,7 +369,7 @@ for each repo_key with shared metadata:
     if target_path is not git repository:
       mark repo unsyncable target_path_nonempty_not_repo
       continue
-    if target_path git origin does not match metadata repo_id:
+    if target_path git origin does not match metadata origin identity:
       mark repo unsyncable target_path_repo_mismatch
       continue
 
@@ -449,7 +446,7 @@ release lock
 Testing layers:
 
 1. Unit tests (pure logic)
-   - `repo_id` normalization.
+   - normalized origin identity comparison.
    - syncable/unsyncable evaluator.
    - state hash and `observed_at` update rules.
    - winner selection and tie-break behavior.
@@ -587,7 +584,7 @@ Test IDs are normative for coverage tracking.
 34. `TC-PATH-002`: target path exists non-empty and not git repo -> `target_path_nonempty_not_repo`.
 35. `TC-PATH-003`: target path is git repo with mismatched origin -> `target_path_repo_mismatch`.
 36. `TC-PATH-004`: target path is git repo with matching origin -> adopt existing repo, no reclone.
-37. `TC-PATH-005`: same `repo_id` at multiple local paths with different `repo_key` values remains valid (no duplicate unsyncable state).
+37. `TC-PATH-005`: same remote origin at multiple local paths with different `repo_key` values remains valid (no duplicate unsyncable state).
 38. `TC-PATH-006`: when path conflict reason is active, sync makes no project changes for that repo.
 
 39. `TC-CATALOG-001`: `bb init` without `--catalog` uses `default_catalog`.
@@ -622,8 +619,8 @@ This section defines behavior when `bb` is first enabled on machines that alread
 3. If a machine has the repo at a different local path/catalog than other machines, that is allowed unless target path conflict rules apply.
 4. If clone/ensure target path exists and is empty, clone is allowed.
 5. If target path exists and has files but is not a git repo, mark `target_path_nonempty_not_repo` and skip all sync changes for that repo on that machine.
-6. If target path is a git repo but not the expected `repo_id`, mark `target_path_repo_mismatch` and skip all sync changes for that repo on that machine.
-7. Multiple local paths with the same `repo_id` are allowed when `repo_key` differs; each path is managed independently.
+6. If target path is a git repo but not the expected normalized metadata `origin_url`, mark `target_path_repo_mismatch` and skip all sync changes for that repo on that machine.
+7. Multiple local paths with the same remote origin are allowed when `repo_key` differs; each path is managed independently.
 
 ## Failure Handling
 

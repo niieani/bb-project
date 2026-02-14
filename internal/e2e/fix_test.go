@@ -241,7 +241,7 @@ func TestFixCases(t *testing.T) {
 		}
 	})
 
-	t.Run("project selector accepts repo_id and path", func(t *testing.T) {
+	t.Run("project selector accepts repo_key and path", func(t *testing.T) {
 		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
@@ -251,8 +251,8 @@ func TestFixCases(t *testing.T) {
 		}
 		rec := findRepoRecordByName(t, loadMachineFile(t, m), "demo")
 
-		if out, err := m.RunBB(now.Add(2*time.Minute), "fix", rec.RepoID); err != nil {
-			t.Fatalf("bb fix by repo_id failed: %v\n%s", err, out)
+		if out, err := m.RunBB(now.Add(2*time.Minute), "fix", rec.RepoKey); err != nil {
+			t.Fatalf("bb fix by repo_key failed: %v\n%s", err, out)
 		}
 		if out, err := m.RunBB(now.Add(3*time.Minute), "fix", repoPath); err != nil {
 			t.Fatalf("bb fix by path failed: %v\n%s", err, out)

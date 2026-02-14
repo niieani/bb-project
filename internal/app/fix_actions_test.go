@@ -11,9 +11,9 @@ func TestEligibleFixActions(t *testing.T) {
 	t.Parallel()
 
 	base := domain.MachineRepoRecord{
+		RepoKey:             "software/api",
 		Name:                "api",
 		Path:                "/tmp/api",
-		RepoID:              "github.com/you/api",
 		OriginURL:           "git@github.com:you/api.git",
 		Branch:              "main",
 		Upstream:            "origin/main",
@@ -60,7 +60,7 @@ func TestEligibleFixActions(t *testing.T) {
 		{
 			name:    "auto push disabled allows enable action",
 			rec:     base,
-			meta:    &domain.RepoMetadataFile{RepoID: "github.com/you/api", AutoPush: false},
+			meta:    &domain.RepoMetadataFile{RepoKey: "software/api", AutoPush: false},
 			ctx:     fixEligibilityContext{},
 			actions: []string{FixActionEnableAutoPush},
 		},
@@ -134,8 +134,8 @@ func TestResolveFixTarget(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
-		{Record: domain.MachineRepoRecord{Name: "api", Path: "/repos/api", RepoID: "github.com/you/api"}},
-		{Record: domain.MachineRepoRecord{Name: "web", Path: "/repos/web", RepoID: "github.com/you/web"}},
+		{Record: domain.MachineRepoRecord{Name: "api", Path: "/repos/api", RepoKey: "software/api", OriginURL: "https://github.com/you/api.git"}},
+		{Record: domain.MachineRepoRecord{Name: "web", Path: "/repos/web", RepoKey: "software/web", OriginURL: "https://github.com/you/web.git"}},
 	}
 
 	got, err := resolveFixTarget("/repos/api", repos)
@@ -146,9 +146,9 @@ func TestResolveFixTarget(t *testing.T) {
 		t.Fatalf("resolved name = %q, want api", got.Record.Name)
 	}
 
-	got, err = resolveFixTarget("github.com/you/web", repos)
+	got, err = resolveFixTarget("software/web", repos)
 	if err != nil {
-		t.Fatalf("resolve by repo_id failed: %v", err)
+		t.Fatalf("resolve by repo_key failed: %v", err)
 	}
 	if got.Record.Name != "web" {
 		t.Fatalf("resolved name = %q, want web", got.Record.Name)
@@ -163,15 +163,15 @@ func TestResolveFixTarget(t *testing.T) {
 	}
 }
 
-func TestResolveFixTargetRepoIDAmbiguous(t *testing.T) {
+func TestResolveFixTargetNameAmbiguous(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
-		{Record: domain.MachineRepoRecord{Name: "api-a", Path: "/repos/api-a", RepoKey: "software/api-a", RepoID: "github.com/you/api"}},
-		{Record: domain.MachineRepoRecord{Name: "api-b", Path: "/repos/api-b", RepoKey: "software/api-b", RepoID: "github.com/you/api"}},
+		{Record: domain.MachineRepoRecord{Name: "api", Path: "/repos/api-a", RepoKey: "software/api-a", OriginURL: "https://github.com/you/api-a.git"}},
+		{Record: domain.MachineRepoRecord{Name: "api", Path: "/repos/api-b", RepoKey: "software/api-b", OriginURL: "https://github.com/you/api-b.git"}},
 	}
 
-	_, err := resolveFixTarget("github.com/you/api", repos)
+	_, err := resolveFixTarget("api", repos)
 	if err == nil {
 		t.Fatal("expected ambiguous selector error")
 	}

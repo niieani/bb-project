@@ -184,7 +184,7 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	if rec.OriginURL != "" && rec.Upstream == "" && rec.Branch != "" && !rec.Diverged {
 		actions = append(actions, FixActionSetUpstreamPush)
 	}
-	if meta != nil && !meta.AutoPush && strings.TrimSpace(rec.RepoID) != "" {
+	if meta != nil && !meta.AutoPush && strings.TrimSpace(rec.RepoKey) != "" {
 		actions = append(actions, FixActionEnableAutoPush)
 	}
 	return actions
@@ -234,24 +234,6 @@ func resolveFixTarget(selector string, repos []fixRepoState) (fixRepoState, erro
 	if len(repoKeyMatches) > 1 {
 		paths := make([]string, 0, len(repoKeyMatches))
 		for _, match := range repoKeyMatches {
-			paths = append(paths, match.Record.Path)
-		}
-		sort.Strings(paths)
-		return fixRepoState{}, fmt.Errorf("project selector %q is ambiguous; matches: %s", selector, strings.Join(paths, ", "))
-	}
-
-	repoIDMatches := make([]fixRepoState, 0, 2)
-	for _, repo := range repos {
-		if strings.EqualFold(strings.TrimSpace(repo.Record.RepoID), selector) {
-			repoIDMatches = append(repoIDMatches, repo)
-		}
-	}
-	if len(repoIDMatches) == 1 {
-		return repoIDMatches[0], nil
-	}
-	if len(repoIDMatches) > 1 {
-		paths := make([]string, 0, len(repoIDMatches))
-		for _, match := range repoIDMatches {
 			paths = append(paths, match.Record.Path)
 		}
 		sort.Strings(paths)
@@ -520,7 +502,7 @@ func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, p
 	}
 
 	visibility := resolveCreateProjectVisibility(cfg, visibilityOverride)
-	expectedOrigin, expectedRepoID, err := a.expectedOrigin(owner, projectName, cfg.GitHub.RemoteProtocol)
+	expectedOrigin, err := a.expectedOrigin(owner, projectName, cfg.GitHub.RemoteProtocol)
 	if err != nil {
 		return err
 	}
@@ -530,11 +512,11 @@ func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, p
 		return err
 	}
 	if origin != "" {
-		originID, err := domain.NormalizeOriginToRepoID(origin)
+		matches, err := originsMatchByRepoID(origin, expectedOrigin)
 		if err != nil {
 			return fmt.Errorf("invalid existing origin: %w", err)
 		}
-		if originID != expectedRepoID {
+		if !matches {
 			return fmt.Errorf("conflicting origin: existing %q does not match expected %q", origin, expectedOrigin)
 		}
 	} else {
@@ -548,14 +530,10 @@ func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, p
 		origin = createdOrigin
 	}
 
-	repoID, err := domain.NormalizeOriginToRepoID(origin)
-	if err != nil {
-		return fmt.Errorf("normalize origin: %w", err)
-	}
 	if strings.TrimSpace(target.Record.RepoKey) == "" {
 		return errors.New("repo_key is required for create-project")
 	}
-	meta, _, err := a.ensureRepoMetadata(cfg, target.Record.RepoKey, repoID, projectName, origin, visibility, target.Record.Catalog)
+	meta, _, err := a.ensureRepoMetadata(cfg, target.Record.RepoKey, projectName, origin, visibility, target.Record.Catalog)
 	if err != nil {
 		return err
 	}

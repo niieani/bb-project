@@ -20,7 +20,7 @@ Known hardening work planned for v1.1 is documented in `docs/PLAN-V1.1.md`.
 ## Core Model
 
 - `repo_key`: catalog/path identity (`<catalog>/<relative-path>`) used for repo metadata and convergence
-- `repo_id`: canonical repository ID normalized from `origin` URL (derived from `origin`)
+- `origin identity check`: normalized `origin_url` comparison used for target-path safety checks
 - `catalog`: named local root where repos live
 - `machine file`: one YAML per machine (catalogs + observed repo states)
 - `repo metadata`: shared per-repo YAML (name, visibility, policy)
@@ -172,7 +172,6 @@ Selector resolution for `<project>`:
 
 - exact local path
 - exact `repo_key`
-- exact `repo_id`
 - unique repo name
 
 Flags:
@@ -203,7 +202,6 @@ Updates `auto_push` policy in repo metadata.
 `<repo>` selector can be either:
 
 - exact `repo_key`
-- exact `repo_id`
 - repo `name` (must not be ambiguous)
 
 ### `bb repo remote <repo> --preferred-remote=<name>`

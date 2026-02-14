@@ -144,16 +144,16 @@ func TestLoadAllRepoMetadataSkipsMissingRepoKeyAndSortsByRepoKey(t *testing.T) {
 	}
 
 	if err := SaveRepoMetadata(paths, domain.RepoMetadataFile{
-		RepoKey: "software/zeta",
-		RepoID:  "github.com/you/zeta",
-		Name:    "zeta",
+		RepoKey:   "software/zeta",
+		OriginURL: "https://github.com/you/zeta.git",
+		Name:      "zeta",
 	}); err != nil {
 		t.Fatalf("save repo zeta: %v", err)
 	}
 	if err := SaveRepoMetadata(paths, domain.RepoMetadataFile{
-		RepoKey: "software/alpha",
-		RepoID:  "github.com/you/alpha",
-		Name:    "alpha",
+		RepoKey:   "software/alpha",
+		OriginURL: "https://github.com/you/alpha.git",
+		Name:      "alpha",
 	}); err != nil {
 		t.Fatalf("save repo alpha: %v", err)
 	}

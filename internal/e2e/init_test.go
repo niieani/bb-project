@@ -54,7 +54,7 @@ func TestInitCases(t *testing.T) {
 		}
 
 		meta := m.MustReadFile(firstRepoMetadataPath(t, m))
-		if !strings.Contains(meta, "repo_id:") || !strings.Contains(meta, "name: demo") {
+		if !strings.Contains(meta, "repo_key: software/demo") || !strings.Contains(meta, "name: demo") {
 			t.Fatalf("unexpected metadata:\n%s", meta)
 		}
 	})

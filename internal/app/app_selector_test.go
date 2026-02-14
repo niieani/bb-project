@@ -11,9 +11,9 @@ func TestSelectRepoMetadataIndex(t *testing.T) {
 	t.Parallel()
 
 	repos := []domain.RepoMetadataFile{
-		{RepoKey: "software/api-a", RepoID: "github.com/you/api", Name: "api-a"},
-		{RepoKey: "software/api-b", RepoID: "github.com/you/api", Name: "api-b"},
-		{RepoKey: "software/web", RepoID: "github.com/you/web", Name: "web"},
+		{RepoKey: "software/api-a", OriginURL: "https://github.com/you/api.git", Name: "api"},
+		{RepoKey: "software/api-b", OriginURL: "https://github.com/you/api.git", Name: "api"},
+		{RepoKey: "software/web", OriginURL: "https://github.com/you/web.git", Name: "web"},
 	}
 
 	idx, err := selectRepoMetadataIndex(repos, "software/web")
@@ -24,15 +24,15 @@ func TestSelectRepoMetadataIndex(t *testing.T) {
 		t.Fatalf("index by repo_key = %d, want 2", idx)
 	}
 
-	idx, err = selectRepoMetadataIndex(repos, "github.com/you/web")
+	idx, err = selectRepoMetadataIndex(repos, "web")
 	if err != nil {
-		t.Fatalf("select by repo_id returned error: %v", err)
+		t.Fatalf("select by name returned error: %v", err)
 	}
 	if idx != 2 {
-		t.Fatalf("index by repo_id = %d, want 2", idx)
+		t.Fatalf("index by name = %d, want 2", idx)
 	}
 
-	_, err = selectRepoMetadataIndex(repos, "github.com/you/api")
+	_, err = selectRepoMetadataIndex(repos, "api")
 	if err == nil {
 		t.Fatal("expected ambiguous selector error")
 	}

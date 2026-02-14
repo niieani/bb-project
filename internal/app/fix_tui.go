@@ -1323,8 +1323,12 @@ func formatRepoDisplayName(repo fixRepoState) string {
 }
 
 func githubRepoURLForRecord(rec domain.MachineRepoRecord) string {
-	repoID := strings.TrimSpace(rec.RepoID)
-	if repoID == "" {
+	originURL := strings.TrimSpace(rec.OriginURL)
+	if originURL == "" {
+		return ""
+	}
+	repoID, err := domain.NormalizeOriginToRepoID(originURL)
+	if err != nil {
 		return ""
 	}
 	host, path, ok := strings.Cut(repoID, "/")

@@ -195,7 +195,7 @@ func (a *App) RunInit(opts InitOptions) error {
 		return errors.New("github.owner is required; run 'bb config' and set github.owner")
 	}
 
-	expectedOrigin, expectedRepoID, err := a.expectedOrigin(owner, projectName, remoteProtocol)
+	expectedOrigin, err := a.expectedOrigin(owner, projectName, remoteProtocol)
 	if err != nil {
 		return err
 	}
@@ -206,11 +206,11 @@ func (a *App) RunInit(opts InitOptions) error {
 	}
 	if origin != "" {
 		a.logf("init: found existing origin %s", origin)
-		originID, err := domain.NormalizeOriginToRepoID(origin)
+		matches, err := originsMatchByRepoID(origin, expectedOrigin)
 		if err != nil {
 			return fmt.Errorf("invalid existing origin: %w", err)
 		}
-		if originID != expectedRepoID {
+		if !matches {
 			return fmt.Errorf("conflicting origin: existing %q does not match expected %q", origin, expectedOrigin)
 		}
 	} else {
@@ -226,20 +226,15 @@ func (a *App) RunInit(opts InitOptions) error {
 		origin = createdOrigin
 	}
 
-	repoID, err := domain.NormalizeOriginToRepoID(origin)
-	if err != nil {
-		return fmt.Errorf("normalize origin: %w", err)
-	}
-
-	repoMeta, created, err := a.ensureRepoMetadata(cfg, repoKey, repoID, projectName, origin, visibility, targetCatalog.Name)
+	repoMeta, created, err := a.ensureRepoMetadata(cfg, repoKey, projectName, origin, visibility, targetCatalog.Name)
 	if err != nil {
 		return err
 	}
 	if created {
-		fmt.Fprintf(a.Stdout, "registered repo metadata for %s\n", repoID)
-		a.logf("init: repo metadata created for %s", repoID)
+		fmt.Fprintf(a.Stdout, "registered repo metadata for %s\n", repoKey)
+		a.logf("init: repo metadata created for %s", repoKey)
 	} else {
-		a.logf("init: repo metadata already exists for %s", repoID)
+		a.logf("init: repo metadata already exists for %s", repoKey)
 	}
 
 	branch, _ := a.Git.CurrentBranch(targetPath)
@@ -363,19 +358,29 @@ func splitPath(p string) []string {
 	return out
 }
 
-func (a *App) expectedOrigin(owner, repo, protocol string) (origin string, repoID string, err error) {
+func (a *App) expectedOrigin(owner, repo, protocol string) (string, error) {
 	if fakeRoot := strings.TrimSpace(os.Getenv("BB_TEST_REMOTE_ROOT")); fakeRoot != "" {
-		origin = filepath.Join(fakeRoot, owner, repo+".git")
-		repoID, err = domain.NormalizeOriginToRepoID(origin)
-		return origin, repoID, err
+		return filepath.Join(fakeRoot, owner, repo+".git"), nil
 	}
+	origin := ""
 	if protocol == "https" {
 		origin = fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
 	} else {
 		origin = fmt.Sprintf("git@github.com:%s/%s.git", owner, repo)
 	}
-	repoID, err = domain.NormalizeOriginToRepoID(origin)
-	return origin, repoID, err
+	return origin, nil
+}
+
+func originsMatchByRepoID(observedOrigin string, expectedOrigin string) (bool, error) {
+	observedID, err := domain.NormalizeOriginToRepoID(observedOrigin)
+	if err != nil {
+		return false, err
+	}
+	expectedID, err := domain.NormalizeOriginToRepoID(expectedOrigin)
+	if err != nil {
+		return false, err
+	}
+	return observedID == expectedID, nil
 }
 
 func (a *App) createRemoteRepo(owner, repo string, visibility domain.Visibility, protocol string, repoPath string) (string, error) {
@@ -415,7 +420,7 @@ func (a *App) createRemoteRepo(owner, repo string, visibility domain.Visibility,
 	return fmt.Sprintf("git@github.com:%s/%s.git", owner, repo), nil
 }
 
-func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, repoID, name, origin string, visibility domain.Visibility, preferredCatalog string) (domain.RepoMetadataFile, bool, error) {
+func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, name, origin string, visibility domain.Visibility, preferredCatalog string) (domain.RepoMetadataFile, bool, error) {
 	meta, err := state.LoadRepoMetadata(a.Paths, repoKey)
 	created := false
 	if err != nil {
@@ -425,7 +430,6 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, repoID, name, o
 		meta = domain.RepoMetadataFile{
 			Version:             1,
 			RepoKey:             repoKey,
-			RepoID:              repoID,
 			Name:                name,
 			OriginURL:           origin,
 			Visibility:          visibility,
@@ -444,9 +448,6 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, repoID, name, o
 	} else {
 		if meta.RepoKey == "" {
 			meta.RepoKey = repoKey
-		}
-		if meta.RepoID == "" {
-			meta.RepoID = repoID
 		}
 		if meta.Name == "" {
 			meta.Name = name
@@ -578,12 +579,8 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	if err != nil {
 		return domain.MachineRepoRecord{}, err
 	}
-	repoID := ""
-	if origin != "" {
-		repoID, _ = domain.NormalizeOriginToRepoID(origin)
-	}
-	if repoID != "" && strings.TrimSpace(repo.RepoKey) != "" {
-		_, _, err := a.ensureRepoMetadata(cfg, repo.RepoKey, repoID, repo.Name, origin, domain.VisibilityUnknown, repo.Catalog.Name)
+	if origin != "" && strings.TrimSpace(repo.RepoKey) != "" {
+		_, _, err := a.ensureRepoMetadata(cfg, repo.RepoKey, repo.Name, origin, domain.VisibilityUnknown, repo.Catalog.Name)
 		if err != nil {
 			return domain.MachineRepoRecord{}, err
 		}
@@ -627,7 +624,6 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 
 	rec := domain.MachineRepoRecord{
 		RepoKey:             repo.RepoKey,
-		RepoID:              repoID,
 		Name:                repo.Name,
 		Catalog:             repo.Catalog.Name,
 		Path:                repo.Path,
@@ -735,7 +731,7 @@ func (a *App) RunStatus(jsonOut bool, include []string) (int, error) {
 				fmt.Fprintln(a.Stdout, ",")
 			}
 			first = false
-			fmt.Fprintf(a.Stdout, "    {\"repo_id\":%q,\"catalog\":%q,\"path\":%q,\"branch\":%q,\"syncable\":%t}", r.RepoID, r.Catalog, r.Path, r.Branch, r.Syncable)
+			fmt.Fprintf(a.Stdout, "    {\"repo_key\":%q,\"catalog\":%q,\"path\":%q,\"branch\":%q,\"syncable\":%t}", r.RepoKey, r.Catalog, r.Path, r.Branch, r.Syncable)
 		}
 		fmt.Fprintln(a.Stdout)
 		fmt.Fprintln(a.Stdout, "  ]")
@@ -931,7 +927,7 @@ func (a *App) RunRepoPolicy(repoSelector string, autoPush bool) (int, error) {
 	if err := state.SaveRepoMetadata(a.Paths, repos[idx]); err != nil {
 		return 2, err
 	}
-	a.logf("repo policy: set auto_push=%t for %s", autoPush, repos[idx].RepoID)
+	a.logf("repo policy: set auto_push=%t for %s", autoPush, repos[idx].RepoKey)
 	return 0, nil
 }
 
@@ -965,7 +961,7 @@ func (a *App) RunRepoPreferredRemote(repoSelector string, preferredRemote string
 	if err := state.SaveRepoMetadata(a.Paths, repos[idx]); err != nil {
 		return 2, err
 	}
-	a.logf("repo remote: set preferred_remote=%q for %s", preferredRemote, repos[idx].RepoID)
+	a.logf("repo remote: set preferred_remote=%q for %s", preferredRemote, repos[idx].RepoKey)
 	return 0, nil
 }
 
@@ -976,7 +972,7 @@ func selectRepoMetadataIndex(repos []domain.RepoMetadataFile, selector string) (
 	}
 	matches := make([]int, 0, 2)
 	for i, r := range repos {
-		if selector == strings.TrimSpace(r.RepoKey) || selector == strings.TrimSpace(r.RepoID) || selector == strings.TrimSpace(r.Name) {
+		if selector == strings.TrimSpace(r.RepoKey) || selector == strings.TrimSpace(r.Name) {
 			matches = append(matches, i)
 		}
 	}
@@ -998,9 +994,6 @@ func repoRecordIdentityKey(rec domain.MachineRepoRecord) string {
 	if strings.TrimSpace(rec.RepoKey) != "" {
 		return rec.RepoKey + "|" + rec.Path
 	}
-	if strings.TrimSpace(rec.RepoID) != "" {
-		return rec.RepoID + "|" + rec.Path
-	}
 	return rec.Path
 }
 
@@ -1008,7 +1001,7 @@ func repoRecordSortKey(rec domain.MachineRepoRecord) string {
 	if strings.TrimSpace(rec.RepoKey) != "" {
 		return rec.RepoKey
 	}
-	return rec.RepoID
+	return rec.Path
 }
 
 func (a *App) RunEnsure(include []string) (int, error) {

@@ -20,7 +20,7 @@ func (a *App) ensureFromWinners(
 ) error {
 	a.logf("sync: reconciling %d repo metadata entries", len(repoMetas))
 	for _, meta := range repoMetas {
-		if strings.TrimSpace(meta.RepoKey) == "" || strings.TrimSpace(meta.RepoID) == "" {
+		if strings.TrimSpace(meta.RepoKey) == "" || strings.TrimSpace(meta.OriginURL) == "" {
 			continue
 		}
 		keyCatalog, keyRelativePath, keyRepoName, err := domain.ParseRepoKey(meta.RepoKey)
@@ -58,7 +58,7 @@ func (a *App) ensureFromWinners(
 		targetPath := filepath.Join(targetCatalog.Root, filepath.FromSlash(keyRelativePath))
 		a.logf("sync: repo %s winner=%s branch=%s target=%s", meta.RepoKey, winner.MachineID, winner.Record.Branch, targetPath)
 
-		pathConflictReason, err := validateTargetPath(a.Git, targetPath, meta.RepoID, meta.PreferredRemote)
+		pathConflictReason, err := validateTargetPath(a.Git, targetPath, meta.OriginURL, meta.PreferredRemote)
 		if err != nil {
 			return err
 		}
@@ -195,7 +195,7 @@ func chooseTargetCatalog(machine domain.MachineFile, keyCatalog string, meta dom
 	return domain.Catalog{}, false
 }
 
-func validateTargetPath(g gitx.Runner, targetPath string, expectedRepoID string, preferredRemote string) (domain.UnsyncableReason, error) {
+func validateTargetPath(g gitx.Runner, targetPath string, expectedOriginURL string, preferredRemote string) (domain.UnsyncableReason, error) {
 	info, err := os.Stat(targetPath)
 	if os.IsNotExist(err) {
 		return "", nil
@@ -221,11 +221,11 @@ func validateTargetPath(g gitx.Runner, targetPath string, expectedRepoID string,
 	if err != nil {
 		return "", err
 	}
-	originID, err := domain.NormalizeOriginToRepoID(origin)
+	matches, err := originsMatchByRepoID(origin, expectedOriginURL)
 	if err != nil {
 		return domain.ReasonTargetPathRepoMismatch, nil
 	}
-	if originID != expectedRepoID {
+	if !matches {
 		return domain.ReasonTargetPathRepoMismatch, nil
 	}
 	return "", nil
@@ -276,8 +276,8 @@ func (a *App) ensureLocalCopy(
 		return nil
 	}
 	origin, _ := a.Git.RepoOriginWithPreferredRemote(targetPath, meta.PreferredRemote)
-	originID, _ := domain.NormalizeOriginToRepoID(origin)
-	if originID != meta.RepoID {
+	matches, _ := originsMatchByRepoID(origin, meta.OriginURL)
+	if !matches {
 		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonTargetPathRepoMismatch)
 		return nil
 	}
@@ -324,7 +324,6 @@ func (a *App) addOrUpdateSyntheticUnsyncable(machine *domain.MachineFile, meta d
 	}
 	rec := domain.MachineRepoRecord{
 		RepoKey:           meta.RepoKey,
-		RepoID:            meta.RepoID,
 		Name:              name,
 		Catalog:           catalog,
 		Path:              targetPath,

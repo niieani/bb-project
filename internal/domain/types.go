@@ -83,7 +83,6 @@ type NotifyConfig struct {
 type RepoMetadataFile struct {
 	Version             int        `yaml:"version"`
 	RepoKey             string     `yaml:"repo_key"`
-	RepoID              string     `yaml:"repo_id"`
 	Name                string     `yaml:"name"`
 	OriginURL           string     `yaml:"origin_url"`
 	Visibility          Visibility `yaml:"visibility"`
@@ -105,7 +104,6 @@ type MachineFile struct {
 
 type MachineRepoRecord struct {
 	RepoKey             string             `yaml:"repo_key"`
-	RepoID              string             `yaml:"repo_id"`
 	Name                string             `yaml:"name"`
 	Catalog             string             `yaml:"catalog"`
 	Path                string             `yaml:"path"`

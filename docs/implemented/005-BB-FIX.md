@@ -37,14 +37,14 @@ This ships the balanced first action set you selected: `push`, `stage-commit-pus
 | `stage-commit-push` | No operation; origin exists; dirty tracked or untracked; not diverged                      | `git add -A`; `git commit -m <msg>`; push (`git push` or `git push -u origin <branch>` when upstream missing) |
 | `pull-ff-only`      | No operation; clean tree; upstream exists; `behind > 0`; `ahead == 0`; not diverged        | optional `git fetch --prune` when enabled; `git pull --ff-only`                                               |
 | `set-upstream-push` | No operation; origin exists; branch exists; upstream missing                               | `git push -u origin <branch>`                                                                                 |
-| `enable-auto-push`  | Repo has `repo_id`; repo metadata exists; `auto_push=false`; usually `push_policy_blocked` | Update repo metadata `auto_push=true`                                                                         |
+| `enable-auto-push`  | Repo has `repo_key`; repo metadata exists; `auto_push=false`; usually `push_policy_blocked` | Update repo metadata `auto_push=true`                                                                         |
 
 Global gating rule from your requirement: when operation is in progress, only `abort-operation` (and interactive `ignore`) are shown.
 
 ## Command Behavior
 
 1. `bb fix` requires interactive terminal and opens TUI.
-2. `bb fix <project>` resolves project by exact path, then exact `repo_id`, then unique repo `name`; ambiguity is an error listing candidates.
+2. `bb fix <project>` resolves project by exact path, then exact `repo_key`, then unique repo `name`; ambiguity is an error listing candidates.
 3. `bb fix <project> ignore` is rejected with clear message: interactive-only action.
 4. `--message` handling for `stage-commit-push`.
    `--message=<text>` uses custom message.
@@ -103,7 +103,7 @@ Global gating rule from your requirement: when operation is in progress, only `a
    `pull-ff-only` fast-forwards behind-only repo.
    `enable-auto-push` toggles repo policy.
    `abort-operation` clears rebase/merge/cherry-pick/bisect markers.
-   Selector resolution supports path/repo_id/name and errors on ambiguity.
+   Selector resolution supports path/repo_key/name and errors on ambiguity.
 4. Full regression suite remains green via `go test ./...` after each feature slice.
 
 ## Suggested Additional Fixes (not in first shipping slice)

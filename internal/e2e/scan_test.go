@@ -25,8 +25,8 @@ func TestScanCases(t *testing.T) {
 
 		mf := loadMachineFile(t, m)
 		rec := findRepoRecordByName(t, mf, "demo")
-		if rec.RepoID == "" {
-			t.Fatal("expected discovered repo to have repo_id")
+		if rec.RepoKey == "" {
+			t.Fatal("expected discovered repo to have repo_key")
 		}
 	})
 
