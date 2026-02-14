@@ -1,212 +1,266 @@
-# CLI Style Guide (Bubble Tea + Bubbles + Lip Gloss)
+# CLI Style Guide
 
-This document defines the visual language for interactive CLI surfaces in `bb`, including `bb config` and `bb fix`.
+This guide defines the interaction and visual standards for `bb` terminal UX.
 
-## Goals
+Applies to:
 
-- Make the wizard feel structured and calm, not like raw terminal output.
-- Keep information hierarchy obvious: app chrome, step chrome, fields, and help.
-- Preserve keyboard-first interaction while making focus state unmistakable.
-- Reuse one design system across all Bubble Tea command UIs.
+- Interactive TUIs built with Bubble Tea + Bubbles + Lip Gloss.
+- Non-interactive command output (briefly; see "Non-interactive output").
 
-## Lip Gloss Inspiration Sources
+## Principles
 
-Patterns in this guide are based on local references under `references/vendor/lipgloss`:
+- Calm by default: structured chrome, no log spam, stable layout.
+- Keyboard-first: predictable keys and obvious focus.
+- Safe by default: mutating actions require explicit intent.
+- Works at small sizes: test at ~`80x24` and degrade gracefully down to ~`60` columns.
 
-- `examples/layout/main.go`
-  - Custom tab borders (`tabBorder`, `activeTabBorder`), tab gaps, card/panel framing, consistent spacing.
-- `examples/layout/main.go`
-  - Status nuggets/pills for compact state indicators.
-- `borders.go`
-  - Rounded and normal borders as primary framing primitives.
-- `table/table.go`
-  - Header/cell/selected row style layering for tabular content.
+## Layout (Chrome)
 
-## Design Tokens
+Interactive screens share the same skeleton:
 
-Use centralized tokens (AdaptiveColor where possible):
+- Outer padding: `1` row, `2` columns.
+- Header: product badge + title + one-line subtitle.
+- Main: exactly one primary panel per screen/step.
+- Footer: sticky help panel at the bottom. No other key legends.
+- Callouts: warnings/errors render above the help panel (so keys stay visible).
 
-- Text: high-contrast foreground for body copy.
-- Muted text: secondary instructions and long descriptions.
-- Border: neutral frame color for all cards and controls.
-- Panel background: subtle surface tint.
-- Accent: focus/tab/selection emphasis.
-- Accent background: focused field and selected enum chip background.
-- Success: enabled checkbox state.
-- Danger: validation and error callouts.
+Example shape (schematic):
 
-## Layout Rules
+```text
+bb  <title>
+<one-line subtitle>
 
-- Outer document padding: `1` row, `2` columns.
-- Header block:
-  - Left badge for product (`bb`).
-  - Title + one-line subtitle.
-  - Use the same header chrome across interactive commands (for example `config`, `fix`).
-- Step navigation:
-  - Lip Gloss border tabs, active tab visually distinct.
-  - Focused active tab uses highlighted background and open-bottom border.
-- Main content:
-  - One rounded panel per step.
-  - Step title + short explainer first.
-- Footer:
-  - Dedicated help panel.
-  - Error/confirm-warn callouts above help.
-  - The footer help panel is the single source of truth for keybindings.
-  - Footer help must be visually anchored to the terminal bottom (no trailing empty rows beneath it).
-  - Root `View()` output should not append an unconditional trailing newline; this can push top borders out of viewport in some terminals.
+[Step] [Step] [Step]    (optional)
+------------------------------
+| Main panel content          |
+| ...                         |
+------------------------------
+<callout area (optional)>
 
-## Spacing System
+<help panel (sticky bottom)>
+```
 
-Use explicit rhythm values and keep them consistent across all wizard steps:
+Avoid unconditional trailing newlines in `View()` output when they cause top borders to scroll off-screen in shorter terminals.
 
-- Field block gap: exactly one blank line between adjacent field blocks.
-- Section preface gap: title/description to first field uses one blank line.
-- Control spacing inside a field:
-  - Label -> description: next line.
-  - Description -> control value: next line.
-- Chip/pill controls:
-  - Minimum horizontal padding: 2 spaces on both sides.
-  - Minimum gap between adjacent enum chips: 2 spaces.
-  - Do not mix multi-line pills with single-line helper text in one baseline row; use all pills or move helper text to its own line.
+## Visual System
 
-## Field Components
+### Tokens (Colors)
 
-### Field Block
+Use a shared palette (prefer `lipgloss.AdaptiveColor`) with these semantics:
 
-Use a reusable field block for all form rows:
+- `Text`: body copy.
+- `Muted`: descriptions, hints, secondary metadata.
+- `Border`: frames for panels and controls.
+- `Panel BG`: subtle surface tint for panels.
+- `Accent`: focus, active tab, selection emphasis.
+- `Accent BG`: focused field background, selected chip background.
+- `Success`: enabled/healthy state.
+- `Warning`: cautionary state.
+- `Danger`: errors and destructive actions.
 
-- Left accent border to indicate row boundaries.
-- Focused row: border color changes to accent.
-- Internal structure:
-  - Bold label.
-  - Muted description.
-  - Control/value (input, enum, checkbox, list).
-  - Optional error text.
+Rules:
 
-### Action Buttons
+- Never rely on color alone to convey meaning; pair it with text or icons.
+- Keep border style consistent (rounded panels by default).
+- Prefer bold over bright colors to emphasize within a panel.
 
-- For list-management steps (for example Catalogs), provide explicit action buttons below the list.
-- Primary action uses emphasized style (for example `Continue`).
-- Secondary actions use neutral style (for example `Add`, `Set Default`).
-- When items exist, include `Edit` as the first action and focus it by default.
-- Destructive action uses danger style and requires explicit confirmation before applying.
-- Buttons must be keyboard-focusable and show focus state clearly.
-- Use one shared focus treatment for all button variants (secondary, primary, danger):
-  - Focused button uses a more vivid fill than its non-focused variant.
-  - Focused button keeps underline enabled as an additional cue.
-  - Focused button uses symmetric label markers (`[Label]`) to avoid one-sided visual imbalance.
-- Do not use asymmetric one-sided focus markers for button labels.
-- Keep focused and non-focused labels width-stable by reserving two wrapping characters for both states (`[Label]` when focused, ` Label ` when not).
+### Spacing Rhythm
 
-### Input
+- Between field blocks: exactly 1 blank line.
+- Title/description to first field: 1 blank line.
+- Inside a field block: label, then description, then control/value on its own line.
+- Pills/chips: at least 2 spaces horizontal padding; at least 2 spaces between adjacent pills.
 
-- Render text inputs inside a bordered container.
-- Focused input border uses accent color.
-- Keep placeholders plain and human-readable.
+## Interaction Model
 
-### Enums
+### Focus
 
-- Never use free-form text for bounded enums.
-- Render as single-line selectable pills (`● option` active, `○ option` inactive) with:
-  - Active chip: accent-tinted background + bold foreground.
-  - Inactive chip: neutral surface + muted text.
-- Interaction:
-  - `Left/Right` cycles current enum value.
-  - `Space` also cycles for consistency with toggles.
+- Only one focus group is visually focused at a time (tabs, list/table, form fields, action row).
+- When focus changes, remove focused styling from the previous group.
+- Focus state must be visible without reading the help legend.
 
-### Checkboxes / Toggles
+### Default Keys
+
+Use this baseline across TUIs unless there's a strong reason to diverge:
+
+- `Up/Down`: move between vertical items/fields.
+- `Left/Right`: change the value of the currently focused horizontal control, or switch steps when tabs are focused.
+- `Space`: toggle boolean / cycle simple options (never "submit").
+- `Enter`: advance/accept/open (never toggles booleans).
+- `Esc`: back/cancel (non-destructive).
+- `Ctrl+C`: quit (with confirmation if it would discard work).
+- `?`: toggle extended help.
+
+Text input rule:
+
+- When any text input is focused, treat printable keys as text input only. Do not bind single-letter shortcuts that steal characters.
+
+## Components & Patterns
+
+### Tabs / Steps (Wizards)
+
+Use tabs when a flow has multiple non-trivial steps.
+
+- Tabs are visually distinct from panel borders (bordered "chips", not plain text).
+- Active tab is bold; focused tab uses `Accent` + `Accent BG` and appears "connected" to the panel (open-bottom border).
+- `Left/Right` switches steps only when tabs are focused.
+- Switching steps keeps focus on the tabs (does not jump into form fields).
+
+### Field Block (Forms)
+
+Structure every editable row the same way:
+
+```text
+| Name
+| Used for display and remote creation.
+| [ my-repo-name______________ ]
+| (error text when invalid)
+```
+
+Guidelines:
+
+- Left border indicates the row boundary; focused row border uses `Accent`.
+- Label is bold; description is `Muted`.
+- Validation errors are short, specific, and tell the user how to fix the input.
+
+### Text Inputs
+
+- Always render inputs inside a bordered container.
+- Focused input uses `Accent` border (and optional `Accent BG`).
+- Placeholders are plain, human-readable examples (not internal keys).
+
+### Enums (Bounded Options)
+
+- Never use free-form text for bounded choices.
+- Render enums as single-line pills/chips.
+- Interactions: `Left/Right` changes the focused enum; `Space` may also cycle.
+- Always communicate defaults explicitly.
+
+Example:
+
+```text
+Visibility
+Controls who can see the project.
+  [● private (default)]  [○ public]
+```
+
+### Toggles (Booleans)
 
 - Use switch-like pills: `● ON` and `○ OFF`.
-- `ON` uses success foreground with subtle success background.
-- `OFF` uses muted foreground with neutral background.
-- Row label and description always adjacent to token.
+- `ON` uses `Success` tone; `OFF` uses muted/neutral tone.
+- The label/description always sits next to the toggle so meaning is visible.
 
-### Badges / Chips
+### Buttons / Action Rows
 
-- Use badges for short, non-interactive metadata tags (for example `AUTO-IGNORE`, risk flags, or compact status labels).
-- Badge shape:
-  - Single-line only.
-  - Bold text.
-  - Horizontal padding of one space on each side.
-- Keep badge labels short and scannable (prefer uppercase tokens, usually <= 14 chars).
-- Use semantic badge tones consistently:
-  - Neutral: informational metadata with no positive/negative implication.
-  - Info: contextual hints.
-  - Success: completed/safe/healthy state.
-  - Warning: cautionary state (for example noisy files to be ignored).
-  - Danger: blocking/error-critical state.
-- When rendering badges inline in aligned lists/tables, reserve a fixed-width badge slot so rows remain column-aligned when a badge is absent.
-- Badges are not focus targets; interactive controls should use the button/toggle focus patterns instead.
+Rules:
 
-## Catalog UX Standards
+- Every action is keyboard focusable with a clear focus treatment.
+- Use one focus treatment across primary/secondary/danger buttons.
+- Keep labels width-stable between focused and unfocused states.
 
-- Empty state must not appear blank.
-- Empty state should include:
-  - What a catalog is.
-  - Immediate next action (`Down` to open add form).
-  - Concrete example paths.
-- Catalog editor should use the same field blocks and input containers as other steps.
+Example focus treatment:
 
-## Fix UX Standards
+```text
+Actions: [Cancel]  Skip   Apply
+```
 
-- In fix-selection tables, default each row to explicit no-op (`-`) rather than auto-selecting a mutating action.
-- Provide a batch operation to apply all explicitly selected fixes.
-- Keep table cell content plain text (no inline ANSI/lipgloss-rendered spans), otherwise width math can break and rows may soft-wrap incorrectly.
-- Use responsive table columns; `Reasons` and `Selected Fix` should expand in wider terminals instead of truncating aggressively.
-- If category color-coding is needed, apply it in surrounding detail panels or status chips, not directly in table cell strings.
-- Keep the selected row visible while navigating large lists; viewport must follow cursor movement.
-- Avoid nested bordered containers for the same content region (for example list-inside-list-panel) because combined frame widths can trigger wrap artifacts (`─┘`, double-height rows).
-- For custom row delegates, reserve at least one wrap-guard column so rendered row width stays strictly below viewport width.
-- Keep tiering internal for sort/grouping; in the table itself communicate fixability via state wording and color, not a dedicated `Tier` column.
-- `fixable` may be shown only when available fix actions cover all current unsyncable reasons; otherwise show manual/blocked.
-- Order rows by fixability tier: fixable unsyncable first, unsyncable manual/blocked second, syncable last.
-- Action labels shown in UI must be human-readable (for example `Allow auto-push in sync`) rather than raw internal action IDs (for example `enable-auto-push`).
-- When multiple fix actions are available for a repo, include an explicit `All fixes` option in `Selected Fix`.
-- In selected-row details, always render a concise `Action help` line that explains what the currently selected fix action will do.
-- In selected-row details, avoid field-border glyphs (`│`) to prevent visual merging with table columns.
-- In selected-row details, render labels and values with distinct styles (for example accent label + higher-contrast value + muted path/context).
-- List height must be budgeted from full chrome (header, panel borders, details, footer help) so top panel borders are never clipped off-screen.
-- In confirmation wizards, place progress badges (for example `1/3`) on the same top row as the title and align them to the top-right edge.
-- For risky fix confirmation actions, order buttons left-to-right as `Cancel`, `Skip`, `Apply`, and default focus to `Cancel` to prevent accidental double-`Enter` applies.
-- Changed-files sections in fix wizards should render as explicit lists (one file per row), with colored `+`/`-` counters and a cap + indicator when rows are trimmed.
-- Prefer trimming with explicit `showing first N of M` messaging over overflowing content; never let long file lists collapse surrounding form controls.
-- Create-project visibility pickers should be two-option horizontal controls (`private`, `public`) with explicit default labeling (for example `private (default)`), and left/right should change value when that control is focused.
-- In create-project confirmations, include a dedicated editable repository-name field with an empty value and placeholder fallback to current folder/repo name.
+Confirmation ordering:
 
-## Startup/Loading Standards
+- For potentially destructive confirmations, order left-to-right: `Cancel`, secondary escape hatch (for example `Skip`), primary action (for example `Apply`).
+- Default focus is always `Cancel` to prevent accidental double-`Enter`.
 
-- Never show a blank interactive terminal with only a blinking cursor while work is in progress.
-- For any interactive screen that performs startup work before the main UI is usable, render a loading view immediately on entry.
-- Loading view must include:
-  - A spinner (or equivalent animated progress indicator).
-  - A stable one-line context sentence describing what is happening overall.
-  - A live status line that updates in real time with the current startup step.
-- The live status line should come from real execution events (for example internal progress/log steps), not synthetic timers.
-- The latest observed step should always replace the previous line so users can see forward progress.
-- Keep verbose/stderr log noise out of the TUI surface; in interactive mode, map those progress events into the loading UI instead of printing raw logs.
+### Lists & Tables
 
-## Interaction + Focus Standards
+Rules:
 
-- Only one element group may be visually focused at a time (for example tabs, table row set, button row, or editor controls).
-- When focus changes, remove active/focused styling from the previously focused group.
-- `Up/Down` moves between fields.
-- `Esc` goes back/cancel.
-- `Enter` advances/applies (never toggles boolean state).
-- `Space` toggles booleans.
-- `Left/Right` changes steps only when tabs are focused.
-- When switching tabs while tabs are focused, keep tabs focused.
-- Do not render per-step/per-panel key legends inside content; use only the global sticky footer legend.
-- In list views, `Enter` on a selected row opens contextual edit UI.
-- In button groups and action rows, `Left/Right` moves focus between adjacent actions.
-- When any text input is focused, alphabetic keys must be treated as text input only (never as command shortcuts like quit/navigation).
-- In multi-control wizards, use explicit focus movement (`up/down` or `tab`) between input fields, enum pickers, and action buttons; left/right should only operate on the currently focused horizontal control.
+- Default selections should be no-op (explicitly show `-` / "no action") rather than auto-selecting a mutating action.
+- Keep table cell content plain text (avoid embedding ANSI/lipgloss inside cell strings); style at the row/column layer instead.
+- Keep the selected row visible while navigating; viewport must follow the cursor.
+- Avoid nested bordered containers for the same region (table inside panel inside another framed box) because it frequently causes wrap artifacts.
+- When rendering custom list rows, leave at least one guard column so the rendered width stays strictly below viewport width (prevents terminal auto-wrap).
 
-## Consistency Checklist
+When you need rich styling, prefer a details panel below/alongside the list:
 
-Before shipping any new TUI screen:
+- Show "Action help" for the currently selected action.
+- Use distinct label/value styling (muted label + higher-contrast value).
+- Avoid vertical border glyphs (`│`) that visually merge with table columns.
 
-- Uses shared palette and border styles.
-- Distinguishes focused vs non-focused controls.
-- Uses meaningful labels (no internal config keys in primary UI copy).
-- Has non-empty empty states.
-- Has clear per-screen key legend text matching actual behavior.
+### Badges / Chips (Non-interactive)
+
+Use badges for compact metadata, not controls.
+
+- Single-line, bold, padded (`" LABEL "`).
+- Short labels (usually <= 14 chars) and consistent semantics:
+  - Neutral/info: informational metadata.
+  - Success: completed/safe.
+  - Warning: caution.
+  - Danger: blocking/critical.
+- In aligned lists, reserve a fixed-width badge slot so rows stay column-aligned when a badge is absent.
+
+### Callouts (Errors / Warnings)
+
+- Render callouts above the footer help panel.
+- Keep them short: what happened, why it matters, what to do next.
+- Never dump stack traces or raw git output into the panel; summarize and offer next steps.
+
+### Empty States
+
+Empty states should never be blank. Include:
+
+- A one-sentence explanation of what the screen manages.
+- The immediate next action (keys included).
+- A concrete example.
+
+### Loading / Startup
+
+- Never show a blank screen with only a cursor while work is in progress.
+- Loading view includes:
+  - Spinner.
+  - One stable context sentence.
+  - One live status line driven by real execution events (replace the line as steps change).
+- Keep stderr/log noise out of the TUI surface; map progress into the loading view.
+
+### Long Lists (Changed Files, Results, etc.)
+
+- Render as one item per row.
+- When showing file changes, include `+/-` counts when available (and use `Success`/`Danger` tones).
+- Cap long lists and say so explicitly: "showing first N of M".
+- Never let a long list push essential controls (like confirmations) off-screen.
+
+### Multi-step Wizards
+
+- Use tabs or a clear step header when steps are non-trivial.
+- Place progress on the title line and align it to the top-right when possible (for example `1/3`).
+- Budget height from full chrome (header + borders + footer) so the top panel border is never clipped off-screen.
+
+## Copy (Language)
+
+- Use user-facing terms, not internal IDs (for example "Enable auto-push" not `enable-auto-push`).
+- Use consistent verbs:
+  - Buttons: `Apply`, `Continue`, `Save`, `Cancel`, `Skip`.
+  - Descriptions: short sentences without jargon.
+- Always explain what will change before running a mutating action.
+- Prefer "fix/fixable" over legacy "autofix/autofixable".
+
+## Non-interactive Output
+
+- Print human output to stdout; errors to stderr; exit non-zero on failure.
+- Keep output scannable: short headings, one item per line, minimal noise.
+- Respect non-color environments (`NO_COLOR`) and avoid encoding meaning only via color.
+
+## Checklist (Before Shipping)
+
+- Layout: header + single main panel + sticky footer help; no nested frames.
+- Focus: exactly one focused group; focus is obvious without reading help.
+- Keys: baseline keys match behavior; help legend matches reality.
+- Safety: destructive actions require confirmation; default focus is safe.
+- Width/height: no hard-wrap artifacts at ~`80x24`; content truncates/caps with explicit messaging.
+- Copy: no internal keys/IDs in user-facing strings; errors include next steps.
+
+## Local References
+
+If you need examples for borders/tabs/layout:
+
+- `references/vendor/lipgloss/examples/layout/main.go`
+- `references/vendor/lipgloss/borders.go`
+- `references/vendor/bubbles/table/table.go`
