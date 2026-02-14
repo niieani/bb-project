@@ -23,6 +23,8 @@ type appRunner interface {
 	RunEnsure(include []string) (int, error)
 	RunRepoPolicy(repoSelector string, autoPush bool) (int, error)
 	RunRepoPreferredRemote(repoSelector string, preferredRemote string) (int, error)
+	RunRepoPushAccessSet(repoSelector string, pushAccess string) (int, error)
+	RunRepoPushAccessRefresh(repoSelector string) (int, error)
 	RunCatalogAdd(name, root string) (int, error)
 	RunCatalogRM(name string) (int, error)
 	RunCatalogDefault(name string) (int, error)
@@ -437,7 +439,38 @@ func newRepoCommand(runtime *runtimeState) *cobra.Command {
 	remoteCmd.Flags().StringVar(&preferredRemote, "preferred-remote", "", "Preferred remote name for this repository (for example origin or upstream).")
 	_ = remoteCmd.MarkFlagRequired("preferred-remote")
 
-	repoCmd.AddCommand(policyCmd, remoteCmd)
+	var pushAccess string
+	accessSetCmd := &cobra.Command{
+		Use:   "access-set <repo>",
+		Short: "Set cached repository push access (read_write|read_only|unknown).",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunRepoPushAccessSet(args[0], pushAccess)
+			return withExitCode(code, err)
+		},
+	}
+	accessSetCmd.Flags().StringVar(&pushAccess, "push-access", "", "Cached push access level (read_write|read_only|unknown).")
+	_ = accessSetCmd.MarkFlagRequired("push-access")
+
+	accessRefreshCmd := &cobra.Command{
+		Use:   "access-refresh <repo>",
+		Short: "Probe and refresh cached repository push access.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunRepoPushAccessRefresh(args[0])
+			return withExitCode(code, err)
+		},
+	}
+
+	repoCmd.AddCommand(policyCmd, remoteCmd, accessSetCmd, accessRefreshCmd)
 	return repoCmd
 }
 

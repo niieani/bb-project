@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"bb-project/internal/domain"
 	"bb-project/internal/state"
@@ -16,6 +17,7 @@ const (
 	FixActionIgnore          = "ignore"
 	FixActionAbortOperation  = "abort-operation"
 	FixActionCreateProject   = "create-project"
+	FixActionForkAndRetarget = "fork-and-retarget"
 	FixActionPush            = "push"
 	FixActionStageCommitPush = "stage-commit-push"
 	FixActionPullFFOnly      = "pull-ff-only"
@@ -184,13 +186,18 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	}
 
 	actions := make([]string, 0, 5)
+	pushAllowed := true
+	if meta != nil && strings.TrimSpace(rec.OriginURL) != "" && !pushAccessAllowsAutoPush(meta.PushAccess) {
+		pushAllowed = false
+	}
 	if rec.OriginURL == "" {
 		actions = append(actions, FixActionCreateProject)
 	}
-	if rec.OriginURL != "" && rec.Upstream != "" && rec.Ahead > 0 && !rec.Diverged {
+	if rec.OriginURL != "" && rec.Upstream != "" && rec.Ahead > 0 && !rec.Diverged && pushAllowed {
 		actions = append(actions, FixActionPush)
 	}
 	if (rec.HasDirtyTracked || rec.HasUntracked) && !rec.Diverged &&
+		(strings.TrimSpace(rec.OriginURL) == "" || pushAllowed) &&
 		!ctx.Risk.hasSecretLikeChanges() &&
 		!(ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive) {
 		actions = append(actions, FixActionStageCommitPush)
@@ -198,10 +205,13 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	if rec.Upstream != "" && rec.Behind > 0 && rec.Ahead == 0 && !rec.Diverged && !rec.HasDirtyTracked && !rec.HasUntracked {
 		actions = append(actions, FixActionPullFFOnly)
 	}
-	if rec.OriginURL != "" && rec.Upstream == "" && rec.Branch != "" && !rec.Diverged {
+	if rec.OriginURL != "" && rec.Upstream == "" && rec.Branch != "" && !rec.Diverged && pushAllowed {
 		actions = append(actions, FixActionSetUpstreamPush)
 	}
-	if meta != nil && !meta.AutoPush && strings.TrimSpace(rec.RepoKey) != "" {
+	if rec.OriginURL != "" && !pushAllowed && strings.TrimSpace(rec.RepoKey) != "" {
+		actions = append(actions, FixActionForkAndRetarget)
+	}
+	if meta != nil && !meta.AutoPush && strings.TrimSpace(rec.RepoKey) != "" && pushAccessAllowsAutoPush(meta.PushAccess) {
 		actions = append(actions, FixActionEnableAutoPush)
 	}
 	return actions
@@ -439,6 +449,8 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 		return a.Git.Push(path)
 	case FixActionCreateProject:
 		return a.createProjectFromFix(cfg, target, opts.CreateProjectName, opts.CreateProjectVisibility)
+	case FixActionForkAndRetarget:
+		return a.forkAndRetargetFromFix(cfg, target)
 	case FixActionStageCommitPush:
 		if opts.GenerateGitignore && len(opts.GitignorePatterns) > 0 {
 			if err := writeGeneratedGitignore(path, opts.GitignorePatterns); err != nil {
@@ -498,6 +510,79 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 	default:
 		return fmt.Errorf("unknown fix action %q", action)
 	}
+}
+
+func (a *App) forkAndRetargetFromFix(cfg domain.ConfigFile, target fixRepoState) error {
+	if target.Meta == nil {
+		return errors.New("repo metadata is required for fork-and-retarget")
+	}
+	owner := strings.TrimSpace(cfg.GitHub.Owner)
+	if owner == "" {
+		return errors.New("github.owner is required; run 'bb config' and set github.owner")
+	}
+
+	repoPath := target.Record.Path
+	originURL := strings.TrimSpace(target.Record.OriginURL)
+	if originURL == "" {
+		return errors.New("origin URL is required for fork-and-retarget")
+	}
+
+	forkRemoteName := strings.TrimSpace(owner)
+	if forkRemoteName == "" {
+		return errors.New("fork remote name is required")
+	}
+
+	forkURL, err := a.ensureForkRemoteRepo(originURL, owner, cfg.GitHub.RemoteProtocol, repoPath)
+	if err != nil {
+		return err
+	}
+
+	remoteExists := false
+	remoteNames, err := a.Git.RemoteNames(repoPath)
+	if err == nil {
+		for _, name := range remoteNames {
+			if name == forkRemoteName {
+				remoteExists = true
+				break
+			}
+		}
+	}
+	if remoteExists {
+		if err := a.Git.SetRemoteURL(repoPath, forkRemoteName, forkURL); err != nil {
+			return err
+		}
+	} else {
+		if err := a.Git.AddRemote(repoPath, forkRemoteName, forkURL); err != nil {
+			return err
+		}
+	}
+
+	branch := strings.TrimSpace(target.Record.Branch)
+	if branch == "" {
+		branch, _ = a.Git.CurrentBranch(repoPath)
+	}
+	if strings.TrimSpace(branch) == "" {
+		return errors.New("cannot determine branch for fork-and-retarget")
+	}
+	if err := a.Git.PushUpstreamWithPreferredRemote(repoPath, branch, forkRemoteName); err != nil {
+		return err
+	}
+
+	meta := *target.Meta
+	meta.PreferredRemote = forkRemoteName
+	meta.PushAccess = domain.PushAccessUnknown
+	meta.PushAccessCheckedAt = time.Time{}
+	meta.PushAccessCheckedRemote = ""
+	meta.PushAccessManualOverride = false
+
+	updated, _, err := a.probeAndUpdateRepoPushAccess(repoPath, meta, true)
+	if err != nil {
+		return err
+	}
+	if err := state.SaveRepoMetadata(a.Paths, updated); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, projectNameOverride string, visibilityOverride domain.Visibility) error {

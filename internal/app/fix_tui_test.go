@@ -516,6 +516,60 @@ func TestFixTUISettingToggleKeyUpdatesAutoPush(t *testing.T) {
 	}
 }
 
+func TestFixTUISettingToggleKeyBlockedForReadOnlyRemote(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				RepoKey:   "software/api",
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Syncable:  false,
+				Ahead:     1,
+				UnsyncableReasons: []domain.UnsyncableReason{
+					domain.ReasonPushAccessBlocked,
+				},
+			},
+			Meta: &domain.RepoMetadataFile{
+				RepoKey:    "software/api",
+				OriginURL:  "https://github.com/you/api.git",
+				AutoPush:   false,
+				PushAccess: domain.PushAccessReadOnly,
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+
+	if repoMetaAutoPush(m.visible[0].Meta) {
+		t.Fatal("expected auto-push to remain disabled for read-only remote")
+	}
+	if !strings.Contains(m.errText, "n/a") {
+		t.Fatalf("errText = %q, want n/a guidance", m.errText)
+	}
+
+	details := m.viewSelectedRepoDetails()
+	if !strings.Contains(details, "n/a") {
+		t.Fatalf("details should render auto-push as n/a, got %q", details)
+	}
+
+	rowItems := m.repoList.Items()
+	for _, item := range rowItems {
+		row, ok := item.(fixListItem)
+		if !ok || row.Kind != fixListItemRepo {
+			continue
+		}
+		if row.Path == "/repos/api" && row.AutoPushAvailable {
+			t.Fatal("expected list row auto-push availability to be disabled")
+		}
+	}
+}
+
 func TestFixTUIViewportTracksCursor(t *testing.T) {
 	t.Parallel()
 
@@ -1464,6 +1518,41 @@ func TestClassifyFixRepoMarksCreateProjectDirtyMissingOriginAsFixable(t *testing
 	}
 	if got := classifyFixRepo(repo, actions); got != fixRepoTierAutofixable {
 		t.Fatalf("tier = %v, want fixable when create-project can resolve all reasons", got)
+	}
+}
+
+func TestClassifyFixRepoMarksReadOnlyPushAccessAsFixableWithForkAction(t *testing.T) {
+	t.Parallel()
+
+	repo := fixRepoState{
+		Record: domain.MachineRepoRecord{
+			RepoKey:   "software/api",
+			Name:      "api",
+			Path:      "/repos/api",
+			OriginURL: "git@github.com:you/api.git",
+			Upstream:  "origin/main",
+			Syncable:  false,
+			Ahead:     1,
+			UnsyncableReasons: []domain.UnsyncableReason{
+				domain.ReasonPushAccessBlocked,
+			},
+		},
+		Meta: &domain.RepoMetadataFile{
+			RepoKey:    "software/api",
+			PushAccess: domain.PushAccessReadOnly,
+			AutoPush:   false,
+		},
+	}
+	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+		Interactive: true,
+		Risk:        repo.Risk,
+	})
+
+	if !containsAction(actions, FixActionForkAndRetarget) {
+		t.Fatalf("expected fork-and-retarget action, got %v", actions)
+	}
+	if got := classifyFixRepo(repo, actions); got != fixRepoTierAutofixable {
+		t.Fatalf("tier = %v, want fixable for read-only remote", got)
 	}
 }
 

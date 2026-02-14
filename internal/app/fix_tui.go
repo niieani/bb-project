@@ -137,18 +137,19 @@ type fixTUIModel struct {
 }
 
 type fixListItem struct {
-	Kind      fixListItemKind
-	Catalog   string
-	NamePlain string
-	Path      string
-	Name      string
-	Branch    string
-	State     string
-	AutoPush  bool
-	Reasons   string
-	Action    string
-	ActionKey string
-	Tier      fixRepoTier
+	Kind              fixListItemKind
+	Catalog           string
+	NamePlain         string
+	Path              string
+	Name              string
+	Branch            string
+	State             string
+	AutoPush          bool
+	AutoPushAvailable bool
+	Reasons           string
+	Action            string
+	ActionKey         string
+	Tier              fixRepoTier
 }
 
 type fixListItemKind int
@@ -232,14 +233,18 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		stateStyle = stateStyle.Copy().Bold(true)
 	}
 	stateCell := renderFixColumnCell(row.State, layout.State, stateStyle)
+	autoPushText := onOffLabel(row.AutoPush)
 	autoPushStyle := fixAutoPushOffStyle
-	if row.AutoPush {
+	if !row.AutoPushAvailable {
+		autoPushText = "n/a"
+		autoPushStyle = fixNoActionStyle
+	} else if row.AutoPush {
 		autoPushStyle = fixAutoPushOnStyle
 	}
 	if selected {
 		autoPushStyle = autoPushStyle.Copy().Bold(true)
 	}
-	autoPushCell := renderFixColumnCell(onOffLabel(row.AutoPush), layout.Auto, autoPushStyle)
+	autoPushCell := renderFixColumnCell(autoPushText, layout.Auto, autoPushStyle)
 	reasonsCell := renderFixColumnCell(row.Reasons, layout.Reasons, fixReasonsStyle)
 	actionStyle := fixActionStyleFor(row.ActionKey)
 	if selected {
@@ -348,6 +353,9 @@ var (
 
 	fixActionCreateProjectStyle = lipgloss.NewStyle().
 					Foreground(lipgloss.Color("113"))
+
+	fixActionForkStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("99"))
 
 	fixActionAutoPushStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("70"))
@@ -833,8 +841,12 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	autoPushLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Auto-push:")
 	actionLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Action:")
 	branchLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Branch:")
+	autoPushValue := onOffLabel(repoMetaAutoPush(repo.Meta))
 	autoPushValueStyle := fixAutoPushOffStyle
-	if repoMetaAutoPush(repo.Meta) {
+	if !repoMetaAllowsAutoPush(repo.Meta) {
+		autoPushValue = "n/a"
+		autoPushValueStyle = fixNoActionStyle
+	} else if repoMetaAutoPush(repo.Meta) {
 		autoPushValueStyle = fixAutoPushOnStyle
 	}
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top,
@@ -844,7 +856,7 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 		"   ",
 		autoPushLabel,
 		" ",
-		autoPushValueStyle.Render(onOffLabel(repoMetaAutoPush(repo.Meta))),
+		autoPushValueStyle.Render(autoPushValue),
 		"   ",
 		actionLabel,
 		" ",
@@ -1060,18 +1072,19 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 		selected := m.currentActionForRepo(path, fixActionsForSelection(entry.actions))
 		repoIndex := len(m.visible)
 		items = append(items, fixListItem{
-			Kind:      fixListItemRepo,
-			Catalog:   repo.Record.Catalog,
-			NamePlain: repo.Record.Name,
-			Path:      path,
-			Name:      formatRepoDisplayName(repo),
-			Branch:    repo.Record.Branch,
-			State:     state,
-			AutoPush:  repoMetaAutoPush(repo.Meta),
-			Reasons:   reasons,
-			Action:    fixActionLabel(selected),
-			ActionKey: selected,
-			Tier:      entry.tier,
+			Kind:              fixListItemRepo,
+			Catalog:           repo.Record.Catalog,
+			NamePlain:         repo.Record.Name,
+			Path:              path,
+			Name:              formatRepoDisplayName(repo),
+			Branch:            repo.Record.Branch,
+			State:             state,
+			AutoPush:          repoMetaAutoPush(repo.Meta),
+			AutoPushAvailable: repoMetaAllowsAutoPush(repo.Meta),
+			Reasons:           reasons,
+			Action:            fixActionLabel(selected),
+			ActionKey:         selected,
+			Tier:              entry.tier,
 		})
 		m.rowRepoIndex = append(m.rowRepoIndex, repoIndex)
 		m.repoIndexToRow = append(m.repoIndexToRow, rowIndex)
@@ -1361,6 +1374,10 @@ func (m *fixTUIModel) toggleCurrentRepoAutoPush() {
 		m.errText = fmt.Sprintf("%s has no repo_key; cannot toggle auto-push", repo.Record.Name)
 		return
 	}
+	if !repoMetaAllowsAutoPush(repo.Meta) {
+		m.errText = fmt.Sprintf("auto-push is n/a for %s (read-only remote)", repo.Record.Name)
+		return
+	}
 	next := !repoMetaAutoPush(repo.Meta)
 
 	if m.app != nil {
@@ -1528,6 +1545,8 @@ func fixActionStyleFor(action string) lipgloss.Style {
 		return fixActionUpstreamStyle
 	case FixActionCreateProject:
 		return fixActionCreateProjectStyle
+	case FixActionForkAndRetarget:
+		return fixActionForkStyle
 	case FixActionEnableAutoPush:
 		return fixActionAutoPushStyle
 	case FixActionAbortOperation:
@@ -1555,6 +1574,8 @@ func fixActionLabel(action string) string {
 		return "Set upstream & push"
 	case FixActionCreateProject:
 		return "Create project & push"
+	case FixActionForkAndRetarget:
+		return "Fork & retarget remote"
 	case FixActionEnableAutoPush:
 		return "Allow auto-push in sync"
 	default:
@@ -1580,6 +1601,8 @@ func fixActionDescription(action string) string {
 		return "Set this branch's upstream tracking target and push."
 	case FixActionCreateProject:
 		return "Create remote project, set origin, register metadata, and push current branch."
+	case FixActionForkAndRetarget:
+		return "Fork the upstream repository, add your fork as a remote, retarget this branch upstream, and update repo metadata."
 	case FixActionEnableAutoPush:
 		return "Allow future bb sync runs to auto-push this repo by enabling its auto-push policy."
 	default:
@@ -1656,6 +1679,13 @@ func repoMetaAutoPush(meta *domain.RepoMetadataFile) bool {
 	return meta.AutoPush
 }
 
+func repoMetaAllowsAutoPush(meta *domain.RepoMetadataFile) bool {
+	if meta == nil {
+		return true
+	}
+	return pushAccessAllowsAutoPush(meta.PushAccess)
+}
+
 func classifyFixRepo(repo fixRepoState, actions []string) fixRepoTier {
 	if repo.Record.Syncable {
 		return fixRepoTierSyncable
@@ -1689,6 +1719,8 @@ func unsyncableReasonsFullyCoverable(reasons []domain.UnsyncableReason, actions 
 			return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush] || has[FixActionCreateProject]
 		case domain.ReasonPushFailed:
 			return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush] || has[FixActionCreateProject]
+		case domain.ReasonPushAccessBlocked:
+			return has[FixActionForkAndRetarget]
 		case domain.ReasonPullFailed:
 			return has[FixActionPullFFOnly]
 		default:

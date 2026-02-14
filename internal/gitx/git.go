@@ -128,6 +128,10 @@ func (r Runner) pickRemote(path string, preferredRemote string) (string, error) 
 	return r.PreferredRemote(path)
 }
 
+func (r Runner) EffectiveRemote(path string, preferredRemote string) (string, error) {
+	return r.pickRemote(path, preferredRemote)
+}
+
 func remoteFromUpstream(upstream string) string {
 	remote, _, ok := strings.Cut(strings.TrimSpace(upstream), "/")
 	if !ok {
@@ -148,6 +152,16 @@ func (r Runner) AddOrigin(path, url string) error {
 
 func (r Runner) SetOrigin(path, url string) error {
 	_, err := r.RunGit(path, "remote", "set-url", "origin", url)
+	return err
+}
+
+func (r Runner) AddRemote(path, name, url string) error {
+	_, err := r.RunGit(path, "remote", "add", name, url)
+	return err
+}
+
+func (r Runner) SetRemoteURL(path, name, url string) error {
+	_, err := r.RunGit(path, "remote", "set-url", name, url)
 	return err
 }
 
@@ -284,6 +298,58 @@ func (r Runner) PullFFOnly(path string) error {
 func (r Runner) Push(path string) error {
 	_, err := r.RunGit(path, "push")
 	return err
+}
+
+func (r Runner) ProbePushAccess(path string, preferredRemote string) (domain.PushAccess, string, error) {
+	remote, err := r.pickRemote(path, preferredRemote)
+	if err != nil {
+		return domain.PushAccessUnknown, "", err
+	}
+	if remote == "" {
+		return domain.PushAccessUnknown, "", nil
+	}
+
+	branch, err := r.CurrentBranch(path)
+	if err != nil {
+		return domain.PushAccessUnknown, remote, err
+	}
+	branch = strings.TrimSpace(branch)
+	if branch == "" || branch == "HEAD" {
+		return domain.PushAccessUnknown, remote, nil
+	}
+
+	_, err = r.RunGit(path, "push", "--dry-run", "--porcelain", remote, "HEAD:refs/heads/"+branch)
+	if err == nil {
+		return domain.PushAccessReadWrite, remote, nil
+	}
+
+	if looksLikePushAccessDenied(err.Error()) {
+		return domain.PushAccessReadOnly, remote, nil
+	}
+	return domain.PushAccessUnknown, remote, err
+}
+
+func looksLikePushAccessDenied(msg string) bool {
+	if strings.TrimSpace(msg) == "" {
+		return false
+	}
+	lower := strings.ToLower(msg)
+	indicators := []string{
+		"permission denied",
+		"access denied",
+		"not permitted",
+		"write access to repository not granted",
+		"insufficient permission",
+		"forbidden",
+		"authentication failed",
+		"could not read from remote repository",
+	}
+	for _, indicator := range indicators {
+		if strings.Contains(lower, indicator) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r Runner) PushUpstream(path, branch string) error {

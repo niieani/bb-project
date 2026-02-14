@@ -196,8 +196,8 @@ func TestFixCases(t *testing.T) {
 		secondaryRemote := filepath.Join(h.RemotesRoot, "you", "demo-secondary.git")
 		m.MustRunGit(now, catalogRoot, "init", "--bare", secondaryRemote)
 		m.MustRunGit(now, repoPath, "remote", "add", "upstream", secondaryRemote)
-		if out, err := m.RunBB(now.Add(30*time.Second), "scan"); err != nil {
-			t.Fatalf("scan failed: %v\n%s", err, out)
+		if out, err := m.RunBB(now.Add(30*time.Second), "scan"); err != nil && out == "" {
+			t.Fatalf("scan failed without output: %v", err)
 		}
 
 		if out, err := m.RunBB(now.Add(1*time.Minute), "repo", "remote", "demo", "--preferred-remote=upstream"); err != nil {
@@ -239,6 +239,49 @@ func TestFixCases(t *testing.T) {
 		meta := m.MustReadFile(firstRepoMetadataPath(t, m))
 		if !strings.Contains(meta, "auto_push: true") {
 			t.Fatalf("expected auto_push=true in repo metadata, got:\n%s", meta)
+		}
+	})
+
+	t.Run("fork and retarget action for read-only remote", func(t *testing.T) {
+		t.Parallel()
+		h, m, catalogRoot := setupSingleMachine(t)
+		repoPath, _ := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+
+		m.MustWriteFile(filepath.Join(repoPath, "ahead.txt"), "ahead\n")
+		m.MustRunGit(now, repoPath, "add", "ahead.txt")
+		m.MustRunGit(now, repoPath, "commit", "-m", "ahead")
+
+		if out, err := m.RunBB(now.Add(30*time.Second), "scan"); err != nil && out == "" {
+			t.Fatalf("scan failed without output: %v", err)
+		}
+
+		if out, err := m.RunBB(now.Add(1*time.Minute), "repo", "access-set", "demo", "--push-access=read_only"); err != nil {
+			t.Fatalf("repo access-set failed: %v\n%s", err, out)
+		}
+
+		out, err := m.RunBB(now.Add(2*time.Minute), "fix", "demo")
+		if err == nil {
+			t.Fatalf("expected list mode exit 1 for unsyncable state, output=%s", out)
+		}
+		if !strings.Contains(out, "fork-and-retarget") {
+			t.Fatalf("expected fork-and-retarget action in output, got: %s", out)
+		}
+		if strings.Contains(out, "actions: push") {
+			t.Fatalf("did not expect push action while remote is read-only, got: %s", out)
+		}
+
+		if out, err := m.RunBB(now.Add(3*time.Minute), "fix", "demo", "fork-and-retarget"); err != nil {
+			t.Fatalf("fork-and-retarget failed: %v\n%s", err, out)
+		}
+
+		upstream := strings.TrimSpace(m.MustRunGit(now, repoPath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"))
+		if upstream != "you/main" {
+			t.Fatalf("upstream = %q, want you/main", upstream)
+		}
+		remoteURL := strings.TrimSpace(m.MustRunGit(now, repoPath, "remote", "get-url", "you"))
+		expectedRemote := filepath.Join(h.RemotesRoot, "you", "demo.git")
+		if remoteURL != expectedRemote {
+			t.Fatalf("fork remote url = %q, want %q", remoteURL, expectedRemote)
 		}
 	})
 

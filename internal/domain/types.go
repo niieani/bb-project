@@ -12,6 +12,14 @@ const (
 	VisibilityUnknown Visibility = "unknown"
 )
 
+type PushAccess string
+
+const (
+	PushAccessUnknown   PushAccess = "unknown"
+	PushAccessReadWrite PushAccess = "read_write"
+	PushAccessReadOnly  PushAccess = "read_only"
+)
+
 type Operation string
 
 const (
@@ -32,6 +40,7 @@ const (
 	ReasonMissingUpstream        UnsyncableReason = "missing_upstream"
 	ReasonDiverged               UnsyncableReason = "diverged"
 	ReasonPushPolicyBlocked      UnsyncableReason = "push_policy_blocked"
+	ReasonPushAccessBlocked      UnsyncableReason = "push_access_blocked"
 	ReasonPushFailed             UnsyncableReason = "push_failed"
 	ReasonPullFailed             UnsyncableReason = "pull_failed"
 	ReasonCheckoutFailed         UnsyncableReason = "checkout_failed"
@@ -82,15 +91,19 @@ type NotifyConfig struct {
 }
 
 type RepoMetadataFile struct {
-	Version             int        `yaml:"version"`
-	RepoKey             string     `yaml:"repo_key"`
-	Name                string     `yaml:"name"`
-	OriginURL           string     `yaml:"origin_url"`
-	Visibility          Visibility `yaml:"visibility"`
-	PreferredCatalog    string     `yaml:"preferred_catalog"`
-	PreferredRemote     string     `yaml:"preferred_remote"`
-	AutoPush            bool       `yaml:"auto_push"`
-	BranchFollowEnabled bool       `yaml:"branch_follow_enabled"`
+	Version                  int        `yaml:"version"`
+	RepoKey                  string     `yaml:"repo_key"`
+	Name                     string     `yaml:"name"`
+	OriginURL                string     `yaml:"origin_url"`
+	Visibility               Visibility `yaml:"visibility"`
+	PreferredCatalog         string     `yaml:"preferred_catalog"`
+	PreferredRemote          string     `yaml:"preferred_remote"`
+	AutoPush                 bool       `yaml:"auto_push"`
+	PushAccess               PushAccess `yaml:"push_access,omitempty"`
+	PushAccessCheckedRemote  string     `yaml:"push_access_checked_remote,omitempty"`
+	PushAccessCheckedAt      time.Time  `yaml:"push_access_checked_at,omitempty"`
+	PushAccessManualOverride bool       `yaml:"push_access_manual_override,omitempty"`
+	BranchFollowEnabled      bool       `yaml:"branch_follow_enabled"`
 }
 
 type MachineFile struct {
@@ -134,6 +147,7 @@ type MachineRepoRecordWithMachine struct {
 
 type ObservedRepoState struct {
 	OriginURL            string
+	PushAccess           PushAccess
 	Branch               string
 	HeadSHA              string
 	Upstream             string

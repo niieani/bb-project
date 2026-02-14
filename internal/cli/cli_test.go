@@ -28,6 +28,9 @@ type fakeApp struct {
 	repoPolicyAutoPush  bool
 	repoRemoteSelector  string
 	repoPreferredRemote string
+	repoAccessSelector  string
+	repoAccessValue     string
+	repoRefreshSelector string
 
 	catalogAddName string
 	catalogAddRoot string
@@ -51,6 +54,10 @@ type fakeApp struct {
 	repoPolicyErr   error
 	repoRemoteCode  int
 	repoRemoteErr   error
+	repoAccessCode  int
+	repoAccessErr   error
+	repoRefreshCode int
+	repoRefreshErr  error
 	catalogAddCode  int
 	catalogAddErr   error
 	catalogRMCode   int
@@ -112,6 +119,17 @@ func (f *fakeApp) RunRepoPreferredRemote(repoSelector string, preferredRemote st
 	f.repoRemoteSelector = repoSelector
 	f.repoPreferredRemote = preferredRemote
 	return f.repoRemoteCode, f.repoRemoteErr
+}
+
+func (f *fakeApp) RunRepoPushAccessSet(repoSelector string, pushAccess string) (int, error) {
+	f.repoAccessSelector = repoSelector
+	f.repoAccessValue = pushAccess
+	return f.repoAccessCode, f.repoAccessErr
+}
+
+func (f *fakeApp) RunRepoPushAccessRefresh(repoSelector string) (int, error) {
+	f.repoRefreshSelector = repoSelector
+	return f.repoRefreshCode, f.repoRefreshErr
 }
 
 func (f *fakeApp) RunCatalogAdd(name, root string) (int, error) {
@@ -462,6 +480,47 @@ func TestRunRepoPolicyValidationAndForwarding(t *testing.T) {
 		}
 		if fake.repoPreferredRemote != "upstream" {
 			t.Fatalf("preferred remote = %q, want upstream", fake.repoPreferredRemote)
+		}
+	})
+
+	t.Run("access-set requires flag", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, calls, _ := runCLI(t, fake, []string{"repo", "access-set", "demo"})
+		if code != 2 {
+			t.Fatalf("exit code = %d, want 2", code)
+		}
+		if calls != 0 {
+			t.Fatalf("app factory calls = %d, want 0", calls)
+		}
+		mustContain(t, stderr, "required")
+		mustContain(t, stderr, "push-access")
+	})
+
+	t.Run("access-set forwards values", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"repo", "access-set", "demo", "--push-access=read_only"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.repoAccessSelector != "demo" || fake.repoAccessValue != "read_only" {
+			t.Fatalf("repo access forwarding mismatch: selector=%q value=%q", fake.repoAccessSelector, fake.repoAccessValue)
+		}
+	})
+
+	t.Run("access-refresh forwards values", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"repo", "access-refresh", "demo"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.repoRefreshSelector != "demo" {
+			t.Fatalf("repo refresh selector = %q, want demo", fake.repoRefreshSelector)
 		}
 	})
 }

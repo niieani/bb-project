@@ -81,7 +81,7 @@ const (
 
 func isRiskyFixAction(action string) bool {
 	switch action {
-	case FixActionAbortOperation, FixActionPush, FixActionSetUpstreamPush, FixActionStageCommitPush, FixActionCreateProject:
+	case FixActionAbortOperation, FixActionPush, FixActionSetUpstreamPush, FixActionStageCommitPush, FixActionCreateProject, FixActionForkAndRetarget:
 		return true
 	default:
 		return false

@@ -468,6 +468,85 @@ func (a *App) createRemoteRepo(owner, repo string, visibility domain.Visibility,
 	return fmt.Sprintf("git@github.com:%s/%s.git", owner, repo), nil
 }
 
+func sourceRepoForFork(originURL string) (sourceOwner string, repoName string, err error) {
+	identity, err := domain.NormalizeOriginIdentity(originURL)
+	if err != nil {
+		return "", "", fmt.Errorf("normalize origin: %w", err)
+	}
+
+	host, path, ok := strings.Cut(identity, "/")
+	if !ok || strings.TrimSpace(path) == "" {
+		return "", "", fmt.Errorf("invalid origin identity %q", identity)
+	}
+	host = strings.TrimSpace(host)
+	if strings.HasSuffix(host, ".github.com") {
+		host = "github.com"
+	}
+	if host != "github.com" {
+		return "", "", fmt.Errorf("unsupported origin host %q for fork", host)
+	}
+
+	segments := strings.Split(path, "/")
+	if len(segments) != 2 {
+		return "", "", fmt.Errorf("invalid github origin path %q", path)
+	}
+	if strings.TrimSpace(segments[0]) == "" || strings.TrimSpace(segments[1]) == "" {
+		return "", "", fmt.Errorf("invalid github origin path %q", path)
+	}
+	return strings.TrimSpace(segments[0]), strings.TrimSpace(segments[1]), nil
+}
+
+func (a *App) ensureForkRemoteRepo(originURL string, forkOwner string, protocol string, repoPath string) (string, error) {
+	forkOwner = strings.TrimSpace(forkOwner)
+	if forkOwner == "" {
+		return "", errors.New("github.owner is required for fork")
+	}
+
+	if fakeRoot := strings.TrimSpace(os.Getenv("BB_TEST_REMOTE_ROOT")); fakeRoot != "" {
+		base := filepath.Base(strings.TrimSpace(originURL))
+		base = strings.TrimSpace(strings.TrimSuffix(base, ".git"))
+		if base == "" || base == "." || base == string(filepath.Separator) {
+			return "", fmt.Errorf("cannot derive repository name from origin %q", originURL)
+		}
+		remotePath := filepath.Join(fakeRoot, forkOwner, base+".git")
+		if err := os.MkdirAll(filepath.Dir(remotePath), 0o755); err != nil {
+			return "", err
+		}
+		if _, err := os.Stat(remotePath); errors.Is(err, os.ErrNotExist) {
+			cmd := exec.Command("git", "init", "--bare", remotePath)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				return "", fmt.Errorf("create fork remote: %w: %s", err, string(out))
+			}
+		} else if err != nil {
+			return "", err
+		}
+		return remotePath, nil
+	}
+
+	sourceOwner, repoName, err := sourceRepoForFork(originURL)
+	if err != nil {
+		return "", err
+	}
+	source := fmt.Sprintf("%s/%s", sourceOwner, repoName)
+	args := []string{"repo", "fork", source, "--remote=false", "--clone=false"}
+	a.logf("fork: running gh %s", strings.Join(args, " "))
+	cmd := exec.Command("gh", args...)
+	cmd.Dir = repoPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		lower := strings.ToLower(string(out))
+		if !strings.Contains(lower, "already exists") {
+			return "", fmt.Errorf("gh repo fork failed: %w: %s", err, string(out))
+		}
+	}
+
+	if protocol == "https" {
+		return fmt.Sprintf("https://github.com/%s/%s.git", forkOwner, repoName), nil
+	}
+	return fmt.Sprintf("git@github.com:%s/%s.git", forkOwner, repoName), nil
+}
+
 func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, name, origin string, visibility domain.Visibility, preferredCatalog string) (domain.RepoMetadataFile, bool, error) {
 	meta, err := state.LoadRepoMetadata(a.Paths, repoKey)
 	created := false
@@ -484,6 +563,7 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, name, origin st
 			OriginURL:           origin,
 			Visibility:          visibility,
 			PreferredCatalog:    preferredCatalog,
+			PushAccess:          domain.PushAccessUnknown,
 			BranchFollowEnabled: true,
 		}
 		switch visibility {
@@ -513,6 +593,9 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, name, origin st
 		if meta.PreferredCatalog == "" {
 			meta.PreferredCatalog = preferredCatalog
 		}
+		if meta.PushAccess == "" {
+			meta.PushAccess = domain.PushAccessUnknown
+		}
 		if !meta.BranchFollowEnabled {
 			// keep explicit false; default is true only when missing on creation
 		}
@@ -530,7 +613,91 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, name, origin st
 
 func normalizedRepoMetadata(meta domain.RepoMetadataFile) domain.RepoMetadataFile {
 	meta.Version = domain.Version
+	meta.PushAccess = domain.NormalizePushAccess(meta.PushAccess)
 	return meta
+}
+
+func (a *App) loadRepoMetadataWithPushAccess(repoPath string, repoKey string) (domain.RepoMetadataFile, bool, error) {
+	if strings.TrimSpace(repoKey) == "" {
+		return domain.RepoMetadataFile{}, false, nil
+	}
+
+	a.repoMetadataMu.Lock()
+	defer a.repoMetadataMu.Unlock()
+
+	meta, err := state.LoadRepoMetadata(a.Paths, repoKey)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return domain.RepoMetadataFile{}, false, nil
+		}
+		return domain.RepoMetadataFile{}, false, err
+	}
+
+	updated, changed, err := a.probeAndUpdateRepoPushAccess(repoPath, normalizedRepoMetadata(meta), false)
+	if err != nil {
+		return domain.RepoMetadataFile{}, false, err
+	}
+	if changed {
+		if err := state.SaveRepoMetadata(a.Paths, updated); err != nil {
+			return domain.RepoMetadataFile{}, false, err
+		}
+	}
+	return updated, true, nil
+}
+
+func (a *App) probeAndUpdateRepoPushAccess(repoPath string, meta domain.RepoMetadataFile, force bool) (domain.RepoMetadataFile, bool, error) {
+	original := meta
+	meta = normalizedRepoMetadata(meta)
+
+	if meta.PushAccessManualOverride && !force {
+		return meta, meta != original, nil
+	}
+
+	remote, err := a.Git.EffectiveRemote(repoPath, meta.PreferredRemote)
+	if err != nil {
+		return meta, meta != original, nil
+	}
+
+	needsProbe := force ||
+		meta.PushAccessCheckedAt.IsZero() ||
+		strings.TrimSpace(meta.PushAccessCheckedRemote) != strings.TrimSpace(remote)
+	if !needsProbe {
+		return meta, meta != original, nil
+	}
+
+	if strings.TrimSpace(remote) == "" {
+		meta.PushAccess = domain.PushAccessUnknown
+		meta.PushAccessCheckedRemote = ""
+		meta.PushAccessCheckedAt = a.Now()
+		if force {
+			meta.PushAccessManualOverride = false
+		}
+		return meta, meta != original, nil
+	}
+
+	pushAccess, probedRemote, probeErr := a.Git.ProbePushAccess(repoPath, meta.PreferredRemote)
+	if probeErr != nil {
+		a.logf("scan: push-access probe failed for %s: %v", repoPath, probeErr)
+		pushAccess = domain.PushAccessUnknown
+		if strings.TrimSpace(probedRemote) == "" {
+			probedRemote = remote
+		}
+	}
+	meta.PushAccess = domain.NormalizePushAccess(pushAccess)
+	meta.PushAccessCheckedRemote = strings.TrimSpace(probedRemote)
+	if meta.PushAccessCheckedRemote == "" {
+		meta.PushAccessCheckedRemote = strings.TrimSpace(remote)
+	}
+	meta.PushAccessCheckedAt = a.Now()
+	if force {
+		meta.PushAccessManualOverride = false
+	}
+
+	return meta, meta != original, nil
+}
+
+func pushAccessAllowsAutoPush(access domain.PushAccess) bool {
+	return domain.NormalizePushAccess(access) != domain.PushAccessReadOnly
 }
 
 type discoveredRepo struct {
@@ -761,18 +928,26 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	autoPush := false
 	visibility := domain.VisibilityUnknown
 	preferredRemote := ""
+	pushAccess := domain.PushAccessUnknown
 	if strings.TrimSpace(repo.RepoKey) != "" {
-		if meta, err := state.LoadRepoMetadata(a.Paths, repo.RepoKey); err == nil {
+		if meta, hasMeta, err := a.loadRepoMetadataWithPushAccess(repo.Path, repo.RepoKey); err != nil {
+			return domain.MachineRepoRecord{}, err
+		} else if hasMeta {
 			autoPush = meta.AutoPush
 			visibility = meta.Visibility
 			preferredRemote = meta.PreferredRemote
+			pushAccess = domain.NormalizePushAccess(meta.PushAccess)
 		}
+	}
+	if !pushAccessAllowsAutoPush(pushAccess) {
+		autoPush = false
 	}
 	defaultBranch, _ := a.Git.DefaultBranch(repo.Path, preferredRemote)
 	autoPush = effectiveAutoPushForObservedBranch(autoPush, repo.Catalog, visibility, branch, defaultBranch)
 
 	syncable, reasons := domain.EvaluateSyncability(domain.ObservedRepoState{
 		OriginURL:            origin,
+		PushAccess:           pushAccess,
 		Branch:               branch,
 		HeadSHA:              head,
 		Upstream:             upstream,
@@ -1170,6 +1345,9 @@ func (a *App) RunRepoPolicy(repoSelector string, autoPush bool) (int, error) {
 	if idx == -1 {
 		return 2, fmt.Errorf("repo %q not found", repoSelector)
 	}
+	if autoPush && !pushAccessAllowsAutoPush(repos[idx].PushAccess) {
+		return 2, fmt.Errorf("repo %q is read-only on remote; auto-push is n/a", repos[idx].RepoKey)
+	}
 	repos[idx].AutoPush = autoPush
 	if err := state.SaveRepoMetadata(a.Paths, repos[idx]); err != nil {
 		return 2, err
@@ -1205,11 +1383,127 @@ func (a *App) RunRepoPreferredRemote(repoSelector string, preferredRemote string
 		return 2, errors.New("preferred remote must not be empty")
 	}
 	repos[idx].PreferredRemote = preferredRemote
+	repos[idx].PushAccessCheckedRemote = ""
+	repos[idx].PushAccessCheckedAt = time.Time{}
+	repos[idx].PushAccessManualOverride = false
+	repos[idx].PushAccess = domain.PushAccessUnknown
 	if err := state.SaveRepoMetadata(a.Paths, repos[idx]); err != nil {
 		return 2, err
 	}
 	a.logf("repo remote: set preferred_remote=%q for %s", preferredRemote, repos[idx].RepoKey)
 	return 0, nil
+}
+
+func (a *App) RunRepoPushAccessSet(repoSelector string, pushAccessRaw string) (int, error) {
+	a.logf("repo access set: acquiring global lock")
+	lock, err := state.AcquireLock(a.Paths)
+	if err != nil {
+		return 2, err
+	}
+	defer func() {
+		_ = lock.Release()
+		a.logf("repo access set: released global lock")
+	}()
+
+	pushAccess, err := domain.ParsePushAccess(pushAccessRaw)
+	if err != nil {
+		return 2, err
+	}
+
+	repos, err := state.LoadAllRepoMetadata(a.Paths)
+	if err != nil {
+		return 2, err
+	}
+	idx, err := selectRepoMetadataIndex(repos, repoSelector)
+	if err != nil {
+		return 2, err
+	}
+	if idx == -1 {
+		return 2, fmt.Errorf("repo %q not found", repoSelector)
+	}
+
+	repo := repos[idx]
+	repo.PushAccess = domain.NormalizePushAccess(pushAccess)
+	repo.PushAccessCheckedAt = a.Now()
+	repo.PushAccessManualOverride = true
+	if repo.PushAccess == domain.PushAccessReadOnly {
+		repo.AutoPush = false
+	}
+	if err := state.SaveRepoMetadata(a.Paths, repo); err != nil {
+		return 2, err
+	}
+	a.logf("repo access set: set push_access=%q for %s", repo.PushAccess, repo.RepoKey)
+	return 0, nil
+}
+
+func (a *App) RunRepoPushAccessRefresh(repoSelector string) (int, error) {
+	a.logf("repo access refresh: acquiring global lock")
+	lock, err := state.AcquireLock(a.Paths)
+	if err != nil {
+		return 2, err
+	}
+	defer func() {
+		_ = lock.Release()
+		a.logf("repo access refresh: released global lock")
+	}()
+
+	repos, err := state.LoadAllRepoMetadata(a.Paths)
+	if err != nil {
+		return 2, err
+	}
+	idx, err := selectRepoMetadataIndex(repos, repoSelector)
+	if err != nil {
+		return 2, err
+	}
+	if idx == -1 {
+		return 2, fmt.Errorf("repo %q not found", repoSelector)
+	}
+
+	_, machine, err := a.loadContext()
+	if err != nil {
+		return 2, err
+	}
+
+	repo := repos[idx]
+	repoPath, err := findRepoPathForMetadata(machine.Repos, repo.RepoKey)
+	if err != nil {
+		return 2, err
+	}
+
+	repo.PushAccessManualOverride = false
+	updated, changed, err := a.probeAndUpdateRepoPushAccess(repoPath, repo, true)
+	if err != nil {
+		return 2, err
+	}
+	if updated.PushAccess == domain.PushAccessReadOnly {
+		updated.AutoPush = false
+	}
+	if changed {
+		if err := state.SaveRepoMetadata(a.Paths, updated); err != nil {
+			return 2, err
+		}
+	}
+	fmt.Fprintf(a.Stdout, "%s push_access=%s remote=%s\n", updated.RepoKey, updated.PushAccess, strings.TrimSpace(updated.PushAccessCheckedRemote))
+	a.logf("repo access refresh: refreshed push_access=%q for %s", updated.PushAccess, updated.RepoKey)
+	return 0, nil
+}
+
+func findRepoPathForMetadata(records []domain.MachineRepoRecord, repoKey string) (string, error) {
+	matches := make([]string, 0, 2)
+	for _, rec := range records {
+		if strings.TrimSpace(rec.RepoKey) != strings.TrimSpace(repoKey) {
+			continue
+		}
+		if strings.TrimSpace(rec.Path) == "" {
+			continue
+		}
+		matches = append(matches, rec.Path)
+	}
+	if len(matches) == 0 {
+		return "", fmt.Errorf("repo %q has no local path in machine state; run `bb scan` and retry", repoKey)
+	}
+	sort.Strings(matches)
+	return matches[0], nil
 }
 
 func selectRepoMetadataIndex(repos []domain.RepoMetadataFile, selector string) (int, error) {

@@ -1,7 +1,7 @@
 package domain
 
 func EvaluateSyncability(state ObservedRepoState, autoPush bool, cliPush bool) (bool, []UnsyncableReason) {
-	reasons := make([]UnsyncableReason, 0, 7)
+	reasons := make([]UnsyncableReason, 0, 8)
 
 	if state.OriginURL == "" {
 		reasons = append(reasons, ReasonMissingOrigin)
@@ -21,8 +21,12 @@ func EvaluateSyncability(state ObservedRepoState, autoPush bool, cliPush bool) (
 	if state.Diverged {
 		reasons = append(reasons, ReasonDiverged)
 	}
-	if state.Ahead > 0 && !(autoPush || cliPush) {
-		reasons = append(reasons, ReasonPushPolicyBlocked)
+	if state.Ahead > 0 {
+		if state.PushAccess == PushAccessReadOnly {
+			reasons = append(reasons, ReasonPushAccessBlocked)
+		} else if !(autoPush || cliPush) {
+			reasons = append(reasons, ReasonPushPolicyBlocked)
+		}
 	}
 
 	if len(reasons) == 0 {

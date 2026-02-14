@@ -250,6 +250,34 @@ func TestSyncBasicCases(t *testing.T) {
 		}
 	})
 
+	t.Run("TC-SYNC-013B", func(t *testing.T) {
+		t.Parallel()
+		_, _, mB, _, repoB, now := bootstrapRepoAcrossTwoMachines(t)
+
+		mB.MustWriteFile(filepath.Join(repoB, "ahead.txt"), "ahead\n")
+		mB.MustRunGit(now, repoB, "add", "ahead.txt")
+		mB.MustRunGit(now, repoB, "commit", "-m", "ahead")
+
+		if out, err := mB.RunBB(now.Add(2*time.Minute), "repo", "access-set", "api", "--push-access=read_only"); err != nil {
+			t.Fatalf("repo access-set failed: %v\n%s", err, out)
+		}
+
+		if out, err := mB.RunBB(now.Add(3*time.Minute), "sync", "--push"); err == nil {
+			t.Fatalf("expected sync unsyncable for read-only remote, output=%s", out)
+		}
+		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
+		if !containsReason(rec.UnsyncableReasons, domain.ReasonPushAccessBlocked) {
+			t.Fatalf("expected push_access_blocked reason, got %v", rec.UnsyncableReasons)
+		}
+		if rec.Ahead == 0 {
+			t.Fatalf("expected ahead commits to remain when push access is read-only, got ahead=%d", rec.Ahead)
+		}
+
+		if out, err := mB.RunBB(now.Add(4*time.Minute), "repo", "policy", "api", "--auto-push=true"); err == nil {
+			t.Fatalf("expected repo policy auto-push enable to fail for read-only remote, output=%s", out)
+		}
+	})
+
 	t.Run("TC-SYNC-014", func(t *testing.T) {
 		t.Parallel()
 		h, mA, mB, rootA, rootB := setupTwoMachines(t)

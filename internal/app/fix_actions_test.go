@@ -88,6 +88,34 @@ func TestEligibleFixActions(t *testing.T) {
 			actions: []string{FixActionEnableAutoPush},
 		},
 		{
+			name: "read-only push access blocks enable auto push action",
+			rec:  base,
+			meta: &domain.RepoMetadataFile{
+				RepoKey:    "software/api",
+				AutoPush:   false,
+				PushAccess: domain.PushAccessReadOnly,
+			},
+			ctx:     fixEligibilityContext{},
+			actions: []string{FixActionForkAndRetarget},
+		},
+		{
+			name: "read-only origin blocks push actions for dirty and ahead repos",
+			rec: func() domain.MachineRepoRecord {
+				r := base
+				r.Ahead = 2
+				r.HasDirtyTracked = true
+				r.Upstream = "origin/main"
+				return r
+			}(),
+			meta: &domain.RepoMetadataFile{
+				RepoKey:    "software/api",
+				AutoPush:   false,
+				PushAccess: domain.PushAccessReadOnly,
+			},
+			ctx:     fixEligibilityContext{},
+			actions: []string{FixActionForkAndRetarget},
+		},
+		{
 			name: "secret-like uncommitted files block stage commit push",
 			rec: func() domain.MachineRepoRecord {
 				r := base

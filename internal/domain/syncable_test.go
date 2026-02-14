@@ -10,6 +10,7 @@ func TestEvaluateSyncability(t *testing.T) {
 
 	base := ObservedRepoState{
 		OriginURL:            "git@github.com:you/project.git",
+		PushAccess:           PushAccessReadWrite,
 		Branch:               "main",
 		HeadSHA:              "1111111111111111111111111111111111111111",
 		Upstream:             "origin/main",
@@ -36,6 +37,7 @@ func TestEvaluateSyncability(t *testing.T) {
 		{name: "diverged", state: func() ObservedRepoState { s := base; s.Diverged = true; return s }(), autoPush: true, wantReasons: []UnsyncableReason{ReasonDiverged}},
 		{name: "ahead blocked by policy", state: func() ObservedRepoState { s := base; s.Ahead = 1; return s }(), autoPush: false, wantReasons: []UnsyncableReason{ReasonPushPolicyBlocked}},
 		{name: "ahead allowed by cli flag", state: func() ObservedRepoState { s := base; s.Ahead = 1; return s }(), autoPush: false, cliPush: true, wantSyncable: true},
+		{name: "ahead blocked by read-only remote", state: func() ObservedRepoState { s := base; s.Ahead = 1; s.PushAccess = PushAccessReadOnly; return s }(), autoPush: true, cliPush: true, wantReasons: []UnsyncableReason{ReasonPushAccessBlocked}},
 	}
 
 	for _, tt := range tests {
