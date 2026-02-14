@@ -144,6 +144,7 @@ Use a reusable field block for all form rows:
 - In selected-row details, render labels and values with distinct styles (for example accent label + higher-contrast value + muted path/context).
 - List height must be budgeted from full chrome (header, panel borders, details, footer help) so top panel borders are never clipped off-screen.
 - In confirmation wizards, place progress badges (for example `1/3`) on the same top row as the title and align them to the top-right edge.
+- For risky fix confirmation actions, order buttons left-to-right as `Cancel`, `Skip`, `Apply`, and default focus to `Cancel` to prevent accidental double-`Enter` applies.
 - Changed-files sections in fix wizards should render as explicit lists (one file per row), with colored `+`/`-` counters and a cap + indicator when rows are trimmed.
 - Prefer trimming with explicit `showing first N of M` messaging over overflowing content; never let long file lists collapse surrounding form controls.
 - Create-project visibility pickers should be two-option horizontal controls (`private`, `public`) with explicit default labeling (for example `private (default)`), and left/right should change value when that control is focused.

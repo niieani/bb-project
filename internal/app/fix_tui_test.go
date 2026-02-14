@@ -762,19 +762,20 @@ func TestFixTUIWizardViewShowsActionButtons(t *testing.T) {
 func TestFixTUIWizardDefaultsActionFocusToCancel(t *testing.T) {
 	t.Parallel()
 
-	repos := []fixRepoState{
-		{
-			Record: domain.MachineRepoRecord{
-				Name:      "api",
-				Path:      "/repos/api",
-				OriginURL: "git@github.com:you/api.git",
-				Upstream:  "origin/main",
-				Ahead:     1,
+	newRepos := func() []fixRepoState {
+		return []fixRepoState{
+			{
+				Record: domain.MachineRepoRecord{
+					Name:      "api",
+					Path:      "/repos/api",
+					OriginURL: "git@github.com:you/api.git",
+					Upstream:  "origin/main",
+					Ahead:     1,
+				},
+				Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
-		},
+		}
 	}
-	m := newFixTUIModelForTest(repos)
 
 	actions := []string{
 		FixActionPush,
@@ -787,6 +788,7 @@ func TestFixTUIWizardDefaultsActionFocusToCancel(t *testing.T) {
 		action := action
 		t.Run(action, func(t *testing.T) {
 			t.Parallel()
+			m := newFixTUIModelForTest(newRepos())
 			m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: action}})
 			if got := m.wizard.ActionFocus; got != fixWizardActionCancel {
 				t.Fatalf("default action focus = %d, want cancel(%d) for action %q", got, fixWizardActionCancel, action)
