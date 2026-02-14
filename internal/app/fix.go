@@ -28,9 +28,10 @@ const (
 var errFixActionNotEligible = errors.New("fix action not eligible")
 
 type fixRepoState struct {
-	Record domain.MachineRepoRecord
-	Meta   *domain.RepoMetadataFile
-	Risk   fixRiskSnapshot
+	Record           domain.MachineRepoRecord
+	Meta             *domain.RepoMetadataFile
+	Risk             fixRiskSnapshot
+	IsDefaultCatalog bool
 }
 
 type fixApplyOptions struct {
@@ -288,9 +289,10 @@ func (a *App) loadFixRepos(includeCatalogs []string, refresh bool) ([]fixRepoSta
 			a.logf("fix: risk scan failed for %s: %v", rec.Path, riskErr)
 		}
 		out = append(out, fixRepoState{
-			Record: rec,
-			Meta:   metaByRepoID[rec.RepoID],
-			Risk:   risk,
+			Record:           rec,
+			Meta:             metaByRepoID[rec.RepoID],
+			Risk:             risk,
+			IsDefaultCatalog: rec.Catalog == machine.DefaultCatalog,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -376,9 +378,10 @@ func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, 
 			a.logf("fix: risk scan failed for %s: %v", rec.Path, riskErr)
 		}
 		out = append(out, fixRepoState{
-			Record: rec,
-			Meta:   metaByRepoID[rec.RepoID],
-			Risk:   risk,
+			Record:           rec,
+			Meta:             metaByRepoID[rec.RepoID],
+			Risk:             risk,
+			IsDefaultCatalog: rec.Catalog == machine.DefaultCatalog,
 		})
 	}
 	return out, nil

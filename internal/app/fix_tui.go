@@ -109,6 +109,8 @@ type fixTUIModel struct {
 	visible         []fixRepoState
 	ignored         map[string]bool
 	selectedAction  map[string]int
+	rowRepoIndex    []int
+	repoIndexToRow  []int
 
 	keys fixTUIKeyMap
 	help help.Model
@@ -128,6 +130,9 @@ type fixTUIModel struct {
 }
 
 type fixListItem struct {
+	Kind      fixListItemKind
+	Catalog   string
+	NamePlain string
 	Path      string
 	Name      string
 	Branch    string
@@ -138,8 +143,16 @@ type fixListItem struct {
 	Tier      fixRepoTier
 }
 
+type fixListItemKind int
+
+const (
+	fixListItemRepo fixListItemKind = iota
+	fixListItemCatalogHeader
+	fixListItemCatalogBreak
+)
+
 func (i fixListItem) FilterValue() string {
-	return i.Name + " " + i.Path + " " + i.Branch + " " + i.Reasons + " " + i.Action
+	return i.NamePlain + " " + i.Path + " " + i.Branch + " " + i.Reasons + " " + i.Action + " " + i.Catalog
 }
 
 type fixColumnLayout struct {
@@ -175,6 +188,15 @@ func (d fixRepoDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd {
 func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	row, ok := item.(fixListItem)
 	if !ok {
+		return
+	}
+
+	switch row.Kind {
+	case fixListItemCatalogBreak:
+		fmt.Fprint(w, fixCatalogBreakStyle.Render(strings.Repeat("─", max(12, m.Width()-2))))
+		return
+	case fixListItemCatalogHeader:
+		fmt.Fprint(w, fixCatalogHeaderStyle.Render(row.Name))
 		return
 	}
 
@@ -270,6 +292,13 @@ var (
 
 	fixSelectedRowStyle = lipgloss.NewStyle().
 				Background(accentBgColor)
+
+	fixCatalogHeaderStyle = lipgloss.NewStyle().
+				Foreground(accentColor).
+				Bold(true)
+
+	fixCatalogBreakStyle = lipgloss.NewStyle().
+				Foreground(borderColor)
 
 	fixHeaderCellStyle = lipgloss.NewStyle().
 				Foreground(textColor).
@@ -391,6 +420,14 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.help.ShowAll = !m.help.ShowAll
 			return m, nil
 		}
+		if key.Matches(msg, m.keys.Up) {
+			m.moveRepoCursor(-1)
+			return m, nil
+		}
+		if key.Matches(msg, m.keys.Down) {
+			m.moveRepoCursor(1)
+			return m, nil
+		}
 		switch {
 		case key.Matches(msg, m.keys.Left):
 			m.cycleCurrentAction(-1)
@@ -490,7 +527,7 @@ func (m *fixTUIModel) viewMainContent() string {
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Select per-repo fixes. Default selection is '-' (no action)."))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("List order: fixable unsyncable, unsyncable manual, then syncable."))
+	b.WriteString(hintStyle.Render("Grouped by catalog (default catalog first), then fixable unsyncable, unsyncable manual, and syncable."))
 	b.WriteString("\n\n")
 	b.WriteString(m.viewFixSummary())
 	b.WriteString("\n\n")
@@ -712,7 +749,9 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 	}
 
 	m.visible = m.visible[:0]
-	items := make([]list.Item, 0, len(m.repos))
+	m.rowRepoIndex = m.rowRepoIndex[:0]
+	m.repoIndexToRow = m.repoIndexToRow[:0]
+	items := make([]list.Item, 0, len(m.repos)*2)
 	entries := make([]fixVisibleEntry, 0, len(m.repos))
 
 	for _, repo := range m.repos {
@@ -737,6 +776,12 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 	}
 
 	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].repo.IsDefaultCatalog != entries[j].repo.IsDefaultCatalog {
+			return entries[i].repo.IsDefaultCatalog
+		}
+		if entries[i].repo.Record.Catalog != entries[j].repo.Record.Catalog {
+			return strings.ToLower(entries[i].repo.Record.Catalog) < strings.ToLower(entries[j].repo.Record.Catalog)
+		}
 		if entries[i].tier != entries[j].tier {
 			return entries[i].tier < entries[j].tier
 		}
@@ -748,9 +793,38 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 		return leftName < rightName
 	})
 
+	currentCatalog := ""
+	rowIndex := 0
+	appendCatalogBreak := func() {
+		items = append(items, fixListItem{Kind: fixListItemCatalogBreak})
+		m.rowRepoIndex = append(m.rowRepoIndex, -1)
+		rowIndex++
+	}
+	appendCatalogHeader := func(catalog string, isDefault bool) {
+		label := fmt.Sprintf("Catalog: %s", catalog)
+		if isDefault {
+			label += " (default)"
+		}
+		items = append(items, fixListItem{
+			Kind:      fixListItemCatalogHeader,
+			Catalog:   catalog,
+			Name:      label,
+			NamePlain: label,
+		})
+		m.rowRepoIndex = append(m.rowRepoIndex, -1)
+		rowIndex++
+	}
+
 	for _, entry := range entries {
 		repo := entry.repo
 		path := repo.Record.Path
+		if repo.Record.Catalog != currentCatalog {
+			if currentCatalog != "" {
+				appendCatalogBreak()
+			}
+			currentCatalog = repo.Record.Catalog
+			appendCatalogHeader(currentCatalog, repo.IsDefaultCatalog)
+		}
 		reasons := "none"
 		if len(repo.Record.UnsyncableReasons) > 0 {
 			parts := make([]string, 0, len(repo.Record.UnsyncableReasons))
@@ -769,9 +843,13 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 		}
 
 		selected := m.currentActionForRepo(path, entry.actions)
+		repoIndex := len(m.visible)
 		items = append(items, fixListItem{
+			Kind:      fixListItemRepo,
+			Catalog:   repo.Record.Catalog,
+			NamePlain: repo.Record.Name,
 			Path:      path,
-			Name:      repo.Record.Name,
+			Name:      formatRepoDisplayName(repo),
 			Branch:    repo.Record.Branch,
 			State:     state,
 			Reasons:   reasons,
@@ -779,6 +857,9 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			ActionKey: selected,
 			Tier:      entry.tier,
 		})
+		m.rowRepoIndex = append(m.rowRepoIndex, repoIndex)
+		m.repoIndexToRow = append(m.repoIndexToRow, rowIndex)
+		rowIndex++
 		m.visible = append(m.visible, repo)
 	}
 
@@ -811,18 +892,47 @@ func (m *fixTUIModel) setCursor(target int) {
 	if target > len(m.visible)-1 {
 		target = len(m.visible) - 1
 	}
-	m.repoList.Select(target)
+	if target >= len(m.repoIndexToRow) {
+		target = len(m.repoIndexToRow) - 1
+	}
+	row := m.repoIndexToRow[target]
+	m.repoList.Select(row)
 }
 
 func (m *fixTUIModel) currentRepo() (fixRepoState, bool) {
 	if len(m.visible) == 0 {
 		return fixRepoState{}, false
 	}
-	idx := m.repoList.Index()
+	row := m.repoList.Index()
+	if row < 0 || row >= len(m.rowRepoIndex) {
+		return fixRepoState{}, false
+	}
+	idx := m.rowRepoIndex[row]
 	if idx < 0 || idx >= len(m.visible) {
 		return fixRepoState{}, false
 	}
 	return m.visible[idx], true
+}
+
+func (m *fixTUIModel) moveRepoCursor(delta int) {
+	if len(m.visible) == 0 || len(m.rowRepoIndex) == 0 || delta == 0 {
+		return
+	}
+	row := m.repoList.Index()
+	if row < 0 || row >= len(m.rowRepoIndex) {
+		row = 0
+	}
+	next := row
+	for {
+		next += delta
+		if next < 0 || next >= len(m.rowRepoIndex) {
+			return
+		}
+		if m.rowRepoIndex[next] >= 0 {
+			m.repoList.Select(next)
+			return
+		}
+	}
 }
 
 func (m *fixTUIModel) cycleCurrentAction(delta int) {
@@ -1190,6 +1300,61 @@ func fixActionDescription(action string) string {
 	default:
 		return "Action has no help text yet."
 	}
+}
+
+func formatRepoDisplayName(repo fixRepoState) string {
+	name := repo.Record.Name
+	if name == "" {
+		name = filepathBaseFallback(repo.Record.Path)
+	}
+	if url := githubRepoURLForRecord(repo.Record); url != "" {
+		return osc8Link(name, url)
+	}
+	return name
+}
+
+func githubRepoURLForRecord(rec domain.MachineRepoRecord) string {
+	repoID := strings.TrimSpace(rec.RepoID)
+	if repoID == "" {
+		return ""
+	}
+	host, path, ok := strings.Cut(repoID, "/")
+	if !ok || strings.TrimSpace(path) == "" {
+		return ""
+	}
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	if host != "github.com" && !strings.HasPrefix(host, "github.") {
+		return ""
+	}
+	return "https://" + host + "/" + path
+}
+
+func osc8Link(label, target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return label
+	}
+	const esc = "\x1b"
+	return esc + "]8;;" + target + esc + "\\" + label + esc + "]8;;" + esc + "\\"
+}
+
+func filepathBaseFallback(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "repo"
+	}
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 {
+		return path
+	}
+	last := strings.TrimSpace(parts[len(parts)-1])
+	if last == "" {
+		return path
+	}
+	return last
 }
 
 func classifyFixRepo(repo fixRepoState, actions []string) fixRepoTier {
