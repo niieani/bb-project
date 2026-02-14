@@ -157,6 +157,9 @@ func TestFixCases(t *testing.T) {
 		if !strings.Contains(out, "set-upstream-push") {
 			t.Fatalf("expected set-upstream-push action in output, got: %s", out)
 		}
+		if strings.Contains(out, "create-project") {
+			t.Fatalf("did not expect create-project when origin exists, got: %s", out)
+		}
 
 		if out, err := m.RunBB(now.Add(2*time.Minute), "fix", "demo", "set-upstream-push"); err != nil {
 			t.Fatalf("set-upstream-push failed: %v\n%s", err, out)
@@ -239,7 +242,7 @@ func TestFixCases(t *testing.T) {
 		}
 	})
 
-	t.Run("create project from missing upstream", func(t *testing.T) {
+	t.Run("create project from missing origin", func(t *testing.T) {
 		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)
 		repoPath := filepath.Join(catalogRoot, "demo")

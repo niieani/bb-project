@@ -55,7 +55,18 @@ func TestEligibleFixActions(t *testing.T) {
 			name:    "missing upstream allows set upstream push",
 			rec:     func() domain.MachineRepoRecord { r := base; r.Upstream = ""; r.Ahead = 2; return r }(),
 			ctx:     fixEligibilityContext{},
-			actions: []string{FixActionCreateProject, FixActionSetUpstreamPush},
+			actions: []string{FixActionSetUpstreamPush},
+		},
+		{
+			name: "missing origin allows create project",
+			rec: func() domain.MachineRepoRecord {
+				r := base
+				r.OriginURL = ""
+				r.Upstream = ""
+				return r
+			}(),
+			ctx:     fixEligibilityContext{},
+			actions: []string{FixActionCreateProject},
 		},
 		{
 			name:    "auto push disabled allows enable action",
@@ -122,6 +133,9 @@ func TestEligibleFixActions(t *testing.T) {
 				if !containsAction(got, want) {
 					t.Fatalf("expected action %q in %v", want, got)
 				}
+			}
+			if len(got) != len(tt.actions) {
+				t.Fatalf("actions = %v, want %v", got, tt.actions)
 			}
 			if len(tt.actions) == 0 && containsAction(got, FixActionStageCommitPush) {
 				t.Fatalf("did not expect %q in %v", FixActionStageCommitPush, got)

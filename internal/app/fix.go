@@ -171,7 +171,7 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	}
 
 	actions := make([]string, 0, 5)
-	if rec.Upstream == "" {
+	if rec.OriginURL == "" {
 		actions = append(actions, FixActionCreateProject)
 	}
 	if rec.OriginURL != "" && rec.Upstream != "" && rec.Ahead > 0 && !rec.Diverged {
