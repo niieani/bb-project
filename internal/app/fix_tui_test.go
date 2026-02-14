@@ -101,6 +101,105 @@ func TestFixTUISelectionFallbackAfterEligibilityChange(t *testing.T) {
 	}
 }
 
+func TestFixTUIGroupedByCatalogDefaultFirstWithBreaks(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "ref-repo",
+				Path:      "/references/ref-repo",
+				Catalog:   "references",
+				RepoID:    "github.com/you/ref-repo",
+				OriginURL: "git@github.com:you/ref-repo.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			IsDefaultCatalog: false,
+		},
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "soft-repo",
+				Path:      "/software/soft-repo",
+				Catalog:   "software",
+				RepoID:    "github.com/you/soft-repo",
+				OriginURL: "git@github.com:you/soft-repo.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			IsDefaultCatalog: true,
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	items := m.repoList.Items()
+	if len(items) < 5 {
+		t.Fatalf("expected grouped list rows with headers and break, got %d item(s)", len(items))
+	}
+
+	firstHeader, ok := items[0].(fixListItem)
+	if !ok || firstHeader.Kind != fixListItemCatalogHeader {
+		t.Fatalf("first item should be catalog header, got %#v", items[0])
+	}
+	if !strings.Contains(firstHeader.Name, "software") || !strings.Contains(firstHeader.Name, "(default)") {
+		t.Fatalf("first header = %q, want software default header", firstHeader.Name)
+	}
+
+	foundBreak := false
+	foundSecondHeader := false
+	for _, item := range items {
+		row, ok := item.(fixListItem)
+		if !ok {
+			continue
+		}
+		if row.Kind == fixListItemCatalogBreak {
+			foundBreak = true
+		}
+		if row.Kind == fixListItemCatalogHeader && strings.Contains(row.Name, "references") {
+			foundSecondHeader = true
+		}
+	}
+	if !foundBreak {
+		t.Fatal("expected catalog break row between catalog groups")
+	}
+	if !foundSecondHeader {
+		t.Fatal("expected references catalog header in grouped rows")
+	}
+}
+
+func TestFixTUIRepoNameUsesOSC8ForGitHub(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				Catalog:   "software",
+				RepoID:    "github.com/you/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			IsDefaultCatalog: true,
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	items := m.repoList.Items()
+	for _, item := range items {
+		row, ok := item.(fixListItem)
+		if !ok || row.Kind != fixListItemRepo {
+			continue
+		}
+		if !strings.Contains(row.Name, "\x1b]8;;https://github.com/you/api\x1b\\") {
+			t.Fatalf("repo name does not contain OSC8 github link: %q", row.Name)
+		}
+		return
+	}
+	t.Fatal("expected at least one repo row")
+}
+
 func newFixTUIModelForTest(repos []fixRepoState) *fixTUIModel {
 	m := &fixTUIModel{
 		repos:          append([]fixRepoState(nil), repos...),
