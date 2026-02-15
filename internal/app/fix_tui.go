@@ -900,6 +900,7 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fixWizardApplyChannelClosedMsg:
 		if m.viewMode == fixViewWizard && m.wizard.Applying {
 			m.wizard.Applying = false
+			m.wizard.ApplyPhase = ""
 			m.wizard.ApplyEvents = nil
 			if m.errText == "" {
 				m.errText = "internal: apply stream closed unexpectedly"
@@ -992,6 +993,9 @@ func (m *fixTUIModel) View() string {
 	}
 
 	contentPanel := panelStyle
+	if m.viewMode == fixViewWizard && m.wizard.Applying {
+		contentPanel = contentPanel.BorderForeground(accentColor)
+	}
 	if w := m.viewContentWidth(); w > 0 {
 		contentPanel = contentPanel.Width(w)
 	}

@@ -884,6 +884,70 @@ func TestFixTUIWizardApplyingPlanShowsRuntimeStepMarkers(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardApplyingStatusLineShowsGlobalPhaseAndLockedState(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+	m.wizard.Applying = true
+	m.wizard.ApplyPhase = fixWizardApplyPhasePreparing
+
+	view := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(view, "Preparing operation... controls are locked until execution completes.") {
+		t.Fatalf("expected locked apply status line with preparation phase, got %q", view)
+	}
+}
+
+func TestFixTUIWizardApplyProgressUpdatesGlobalPhase(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+	m.wizard.Applying = true
+
+	m.handleWizardApplyProgress(fixWizardApplyProgressMsg{
+		Event: fixApplyStepEvent{
+			Entry:  fixActionPlanEntry{ID: "push-main", Summary: "git push"},
+			Status: fixApplyStepRunning,
+		},
+	})
+	if got := m.wizard.ApplyPhase; got != fixWizardApplyPhaseExecuting {
+		t.Fatalf("apply phase after non-revalidation running step = %q, want %q", got, fixWizardApplyPhaseExecuting)
+	}
+
+	m.handleWizardApplyProgress(fixWizardApplyProgressMsg{
+		Event: fixApplyStepEvent{
+			Entry:  fixActionPlanEntry{ID: fixActionPlanRevalidateStateID, Summary: "Revalidate repository status and syncability state."},
+			Status: fixApplyStepRunning,
+		},
+	})
+	if got := m.wizard.ApplyPhase; got != fixWizardApplyPhaseRechecking {
+		t.Fatalf("apply phase after revalidation running step = %q, want %q", got, fixWizardApplyPhaseRechecking)
+	}
+}
+
 func TestFixTUIWizardApplyFailureStopsQueueOnCurrentItem(t *testing.T) {
 	t.Parallel()
 
@@ -913,11 +977,15 @@ func TestFixTUIWizardApplyFailureStopsQueueOnCurrentItem(t *testing.T) {
 		{RepoPath: "/repos/web", Action: FixActionPush},
 	})
 	m.wizard.Applying = true
+	m.wizard.ApplyPhase = fixWizardApplyPhaseExecuting
 
 	m.handleWizardApplyCompleted(fixWizardApplyCompletedMsg{Err: fmt.Errorf("push failed")})
 
 	if m.wizard.Applying {
 		t.Fatal("expected applying=false after completion error")
+	}
+	if got := m.wizard.ApplyPhase; got != "" {
+		t.Fatalf("apply phase after completion error = %q, want empty", got)
 	}
 	if m.viewMode != fixViewWizard {
 		t.Fatalf("view mode = %v, want wizard mode after failed apply", m.viewMode)

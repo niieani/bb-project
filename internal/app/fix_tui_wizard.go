@@ -64,6 +64,7 @@ type fixWizardState struct {
 
 	Applying        bool
 	ApplySpinner    spinner.Model
+	ApplyPhase      string
 	ApplyEvents     <-chan tea.Msg
 	ApplyPlan       []fixActionPlanEntry
 	ApplyStepStatus map[string]fixWizardApplyStepStatus
@@ -101,6 +102,12 @@ const (
 	fixWizardApplyStepDone
 	fixWizardApplyStepFailed
 	fixWizardApplyStepSkipped
+)
+
+const (
+	fixWizardApplyPhasePreparing  = "Preparing operation"
+	fixWizardApplyPhaseExecuting  = "Applying repository changes"
+	fixWizardApplyPhaseRechecking = "Rechecking repository status"
 )
 
 type fixWizardApplyProgressMsg struct {
@@ -216,6 +223,7 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	m.wizard.ActionFocus = fixWizardActionCancel
 	m.wizard.Applying = false
 	m.wizard.ApplySpinner = applySpinner
+	m.wizard.ApplyPhase = ""
 	m.wizard.ApplyEvents = nil
 	m.wizard.ApplyPlan = nil
 	m.wizard.ApplyStepStatus = nil
@@ -312,6 +320,7 @@ func (m *fixTUIModel) applyWizardCurrent() tea.Cmd {
 	}
 	m.wizard.ApplyDetail = m.wizardApplySuccessDetail(opts)
 	m.wizard.Applying = true
+	m.wizard.ApplyPhase = fixWizardApplyPhasePreparing
 	m.status = fmt.Sprintf("applying %s for %s", fixActionLabel(m.wizard.Action), m.wizard.RepoName)
 
 	includeCatalogs := append([]string(nil), m.includeCatalogs...)
@@ -395,6 +404,7 @@ func (m *fixTUIModel) handleWizardApplyProgress(msg fixWizardApplyProgressMsg) t
 	switch msg.Event.Status {
 	case fixApplyStepRunning:
 		m.setWizardStepStatus(msg.Event.Entry, fixWizardApplyStepRunning)
+		m.wizard.ApplyPhase = m.wizardApplyPhaseForEntry(msg.Event.Entry)
 	case fixApplyStepDone:
 		m.setWizardStepStatus(msg.Event.Entry, fixWizardApplyStepDone)
 	case fixApplyStepFailed:
@@ -413,6 +423,7 @@ func (m *fixTUIModel) handleWizardApplyProgress(msg fixWizardApplyProgressMsg) t
 
 func (m *fixTUIModel) handleWizardApplyCompleted(msg fixWizardApplyCompletedMsg) tea.Cmd {
 	m.wizard.Applying = false
+	m.wizard.ApplyPhase = ""
 	m.wizard.ApplyEvents = nil
 	if msg.Err != nil {
 		if m.errText == "" {
@@ -816,10 +827,7 @@ func (m *fixTUIModel) viewWizardContent() string {
 	controls := m.viewWizardStaticControls()
 	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus), m.wizardBodyLineWidth())
 	if m.wizard.Applying {
-		actions = hintStyle.Render(m.clampSingleLine(
-			"Applying selected fix... controls are disabled until execution completes.",
-			m.wizardBodyLineWidth(),
-		))
+		actions = hintStyle.Render(m.clampSingleLine(m.wizardApplyingStatusLine(), m.wizardBodyLineWidth()))
 	}
 	topIndicator := m.wizardScrollIndicatorTop()
 	bottomIndicator := m.wizardScrollIndicatorBottom()
@@ -837,6 +845,25 @@ func (m *fixTUIModel) viewWizardContent() string {
 	b.WriteString("\n\n")
 	b.WriteString(actions)
 	return b.String()
+}
+
+func (m *fixTUIModel) wizardApplyingStatusLine() string {
+	phase := strings.TrimSpace(m.wizard.ApplyPhase)
+	if phase == "" {
+		phase = fixWizardApplyPhaseExecuting
+	}
+	return fmt.Sprintf(
+		"%s %s... controls are locked until execution completes.",
+		m.wizard.ApplySpinner.View(),
+		phase,
+	)
+}
+
+func (m *fixTUIModel) wizardApplyPhaseForEntry(entry fixActionPlanEntry) string {
+	if strings.TrimSpace(entry.ID) == fixActionPlanRevalidateStateID {
+		return fixWizardApplyPhaseRechecking
+	}
+	return fixWizardApplyPhaseExecuting
 }
 
 func (m *fixTUIModel) wizardHasContextOverflow() bool {
