@@ -117,4 +117,25 @@ func TestValidateFixApplyOptionsCreateProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected merge sync strategy to be valid, got %v", err)
 	}
+
+	err = validateFixApplyOptions(FixActionForkAndRetarget, fixApplyOptions{
+		ForkBranchRenameTo: "feature/fork-target",
+	})
+	if err != nil {
+		t.Fatalf("expected branch rename target to be valid for fork-and-retarget, got %v", err)
+	}
+
+	err = validateFixApplyOptions(FixActionPush, fixApplyOptions{
+		ForkBranchRenameTo: "feature/fork-target",
+	})
+	if err == nil {
+		t.Fatal("expected validation error when branch rename target is set for non-fork action")
+	}
+
+	err = validateFixApplyOptions(FixActionForkAndRetarget, fixApplyOptions{
+		ForkBranchRenameTo: "feature fork target",
+	})
+	if err == nil {
+		t.Fatal("expected validation error for invalid branch rename target")
+	}
 }

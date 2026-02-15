@@ -2560,6 +2560,96 @@ func TestFixTUIWizardCreateProjectVisibilityUsesLeftRightWhenFocused(t *testing.
 	}
 }
 
+func TestFixTUIWizardForkAndRetargetDefaultBranchShowsOptionalBranchRename(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "bun",
+				Path:      "/repos/bun",
+				OriginURL: "git@github.com:oven-sh/bun.git",
+				Branch:    "main",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{
+				RepoKey:         "software/bun",
+				Name:            "bun",
+				OriginURL:       "https://github.com/oven-sh/bun.git",
+				PreferredRemote: "origin",
+				PushAccess:      domain.PushAccessReadOnly,
+				AutoPush:        domain.AutoPushModeDisabled,
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/bun", Action: FixActionForkAndRetarget}})
+
+	if !m.wizard.EnableForkBranchRename {
+		t.Fatal("expected fork branch rename input to be enabled on default branch")
+	}
+	if got := m.wizard.ForkBranchName.Value(); got != "" {
+		t.Fatalf("fork branch rename initial value = %q, want empty", got)
+	}
+	if got := m.wizard.FocusArea; got != fixWizardFocusForkBranch {
+		t.Fatalf("initial focus area = %v, want fork-branch input", got)
+	}
+
+	m.wizard.GitHubOwner = "acme"
+	m.wizard.ForkBranchName.SetValue("feature/fork-bun")
+	plan := m.wizardApplyPlanEntries()
+	if !planContains(plan, true, "git branch -m feature/fork-bun") {
+		t.Fatalf("expected branch rename step in wizard plan, got %#v", plan)
+	}
+	if !planContains(plan, true, "git push -u") {
+		t.Fatalf("expected non-force push step in wizard plan after branch rename, got %#v", plan)
+	}
+	if planContains(plan, true, "--force") {
+		t.Fatalf("did not expect force push in wizard plan when rename target is set, got %#v", plan)
+	}
+
+	view := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(view, "New branch name (optional)") {
+		t.Fatalf("expected optional branch rename control in wizard view, got %q", view)
+	}
+}
+
+func TestFixTUIWizardForkAndRetargetNonDefaultBranchHidesBranchRename(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "bun",
+				Path:      "/repos/bun",
+				OriginURL: "git@github.com:oven-sh/bun.git",
+				Branch:    "feature/local-change",
+				Upstream:  "origin/feature/local-change",
+			},
+			Meta: &domain.RepoMetadataFile{
+				RepoKey:         "software/bun",
+				Name:            "bun",
+				OriginURL:       "https://github.com/oven-sh/bun.git",
+				PreferredRemote: "origin",
+				PushAccess:      domain.PushAccessReadOnly,
+				AutoPush:        domain.AutoPushModeDisabled,
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/bun", Action: FixActionForkAndRetarget}})
+
+	if m.wizard.EnableForkBranchRename {
+		t.Fatal("did not expect fork branch rename input on non-default branch")
+	}
+	view := ansi.Strip(m.viewWizardContent())
+	if strings.Contains(view, "New branch name (optional)") {
+		t.Fatalf("did not expect optional branch rename control in wizard view, got %q", view)
+	}
+}
+
 func TestFixTUIWizardDownMovesFocusBeforeScrollingNonInputControls(t *testing.T) {
 	t.Parallel()
 

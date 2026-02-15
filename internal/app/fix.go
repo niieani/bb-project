@@ -46,6 +46,7 @@ type fixApplyOptions struct {
 	SyncStrategy            FixSyncStrategy
 	CreateProjectName       string
 	CreateProjectVisibility domain.Visibility
+	ForkBranchRenameTo      string
 	GenerateGitignore       bool
 	GitignorePatterns       []string
 }
@@ -908,7 +909,7 @@ func (a *App) executeFixAction(
 			planByID,
 		)
 	case FixActionForkAndRetarget:
-		return a.forkAndRetargetFromFix(cfg, target, observer, planByID)
+		return a.forkAndRetargetFromFix(cfg, target, opts, observer, planByID)
 	case FixActionStageCommitPush:
 		if strings.TrimSpace(target.Record.OriginURL) != "" &&
 			strings.TrimSpace(target.Record.Upstream) != "" &&
@@ -1122,6 +1123,7 @@ func (a *App) buildFixActionPlanContext(cfg domain.ConfigFile, target fixRepoSta
 		CommitMessage:           strings.TrimSpace(opts.CommitMessage),
 		CreateProjectName:       strings.TrimSpace(opts.CreateProjectName),
 		CreateProjectVisibility: opts.CreateProjectVisibility,
+		ForkBranchRenameTo:      strings.TrimSpace(opts.ForkBranchRenameTo),
 		GenerateGitignore:       opts.GenerateGitignore,
 		GitignorePatterns:       append([]string(nil), opts.GitignorePatterns...),
 		MissingRootGitignore:    target.Risk.MissingRootGitignore,
@@ -1177,6 +1179,7 @@ func runFixApplyStep(observer fixApplyStepObserver, entry fixActionPlanEntry, fn
 func (a *App) forkAndRetargetFromFix(
 	cfg domain.ConfigFile,
 	target fixRepoState,
+	opts fixApplyOptions,
 	observer fixApplyStepObserver,
 	planByID map[string]fixActionPlanEntry,
 ) error {
@@ -1273,12 +1276,40 @@ func (a *App) forkAndRetargetFromFix(
 	if strings.TrimSpace(branch) == "" {
 		return errors.New("cannot determine branch for fork-and-retarget")
 	}
+
+	renamedBranch := false
+	renameTo := strings.TrimSpace(opts.ForkBranchRenameTo)
+	if renameTo != "" && renameTo != branch {
+		if err := runStep("fork-rename-branch", fixActionPlanEntry{
+			ID:      "fork-rename-branch",
+			Command: true,
+			Summary: fmt.Sprintf("git branch -m %s", renameTo),
+		}, func() error {
+			return a.Git.RenameCurrentBranch(repoPath, renameTo)
+		}); err != nil {
+			return err
+		}
+		branch = renameTo
+		renamedBranch = true
+	}
+
+	pushSummary := fmt.Sprintf("git push -u --force %s %s", owner, plannedBranch(branch))
+	push := func() error {
+		return a.Git.PushUpstreamForceWithPreferredRemote(repoPath, branch, forkRemoteName)
+	}
+	if renamedBranch {
+		pushSummary = fmt.Sprintf("git push -u %s %s", owner, plannedBranch(branch))
+		push = func() error {
+			return a.Git.PushUpstreamWithPreferredRemote(repoPath, branch, forkRemoteName)
+		}
+	}
+
 	if err := runStep("fork-push-upstream", fixActionPlanEntry{
 		ID:      "fork-push-upstream",
 		Command: true,
-		Summary: fmt.Sprintf("git push -u --force %s %s", owner, plannedBranch(branch)),
+		Summary: pushSummary,
 	}, func() error {
-		return a.Git.PushUpstreamForceWithPreferredRemote(repoPath, branch, forkRemoteName)
+		return push()
 	}); err != nil {
 		return err
 	}

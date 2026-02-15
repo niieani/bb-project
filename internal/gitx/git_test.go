@@ -104,3 +104,32 @@ func splitEnvEntry(entry string) (string, string, bool) {
 	}
 	return "", "", false
 }
+
+func TestRenameCurrentBranch(t *testing.T) {
+	t.Parallel()
+
+	repoPath := t.TempDir()
+	r := Runner{}
+	if err := r.InitRepo(repoPath); err != nil {
+		t.Fatalf("init repo failed: %v", err)
+	}
+	if err := os.WriteFile(repoPath+"/README.md", []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write file failed: %v", err)
+	}
+	if err := r.AddAll(repoPath); err != nil {
+		t.Fatalf("git add failed: %v", err)
+	}
+	if err := r.Commit(repoPath, "init"); err != nil {
+		t.Fatalf("git commit failed: %v", err)
+	}
+	if err := r.RenameCurrentBranch(repoPath, "feature/rename-check"); err != nil {
+		t.Fatalf("rename current branch failed: %v", err)
+	}
+	branch, err := r.CurrentBranch(repoPath)
+	if err != nil {
+		t.Fatalf("current branch failed: %v", err)
+	}
+	if branch != "feature/rename-check" {
+		t.Fatalf("current branch = %q, want %q", branch, "feature/rename-check")
+	}
+}

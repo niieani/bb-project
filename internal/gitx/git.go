@@ -540,6 +540,15 @@ func (r Runner) AddAll(path string) error {
 	return err
 }
 
+func (r Runner) RenameCurrentBranch(path, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("branch name is required")
+	}
+	_, err := r.RunGit(path, "branch", "-m", name)
+	return err
+}
+
 func (r Runner) Commit(path, message string) error {
 	_, err := r.RunGit(path, "commit", "-m", message)
 	return err

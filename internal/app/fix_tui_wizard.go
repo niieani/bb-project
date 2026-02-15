@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -56,13 +57,17 @@ type fixWizardState struct {
 	EnableProjectName bool
 	ProjectName       textinput.Model
 
+	EnableForkBranchRename bool
+	ForkBranchName         textinput.Model
+
 	ShowGitignoreToggle bool
 	GenerateGitignore   bool
 
-	Visibility  domain.Visibility
-	DefaultVis  domain.Visibility
-	FocusArea   fixWizardFocusArea
-	ActionFocus int
+	Visibility    domain.Visibility
+	DefaultVis    domain.Visibility
+	DefaultBranch string
+	FocusArea     fixWizardFocusArea
+	ActionFocus   int
 
 	BodyViewport viewport.Model
 
@@ -109,6 +114,7 @@ const (
 	fixWizardFocusActions fixWizardFocusArea = iota
 	fixWizardFocusCommit
 	fixWizardFocusProjectName
+	fixWizardFocusForkBranch
 	fixWizardFocusGitignore
 	fixWizardFocusVisibility
 )
@@ -172,6 +178,7 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	headSHA := ""
 	originURL := ""
 	preferredRemote := ""
+	defaultBranch := ""
 	operation := domain.OperationNone
 	for _, repo := range m.repos {
 		if repo.Record.Path == decision.RepoPath {
@@ -207,6 +214,15 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	projectNameInput.Placeholder = projectNamePlaceholder
 	projectNameInput.SetValue("")
 	projectNameInput.Blur()
+
+	forkBranchPlaceholder := "feature/topic"
+	if suffix := sanitizeGitHubRepositoryNameInput(repoName); suffix != "" {
+		forkBranchPlaceholder = "feature/" + suffix
+	}
+	forkBranchInput := textinput.New()
+	forkBranchInput.Placeholder = forkBranchPlaceholder
+	forkBranchInput.SetValue("")
+	forkBranchInput.Blur()
 
 	showGitignoreToggle := m.shouldShowGitignoreToggle(decision.Action, repoRisk)
 	applySpinner := spinner.New(spinner.WithSpinner(spinner.Dot))
@@ -245,14 +261,25 @@ func (m *fixTUIModel) loadWizardCurrent() {
 			}
 		}
 	}
+	if m.app != nil && decision.RepoPath != "" {
+		if resolvedDefaultBranch, err := m.app.Git.DefaultBranch(decision.RepoPath, preferredRemote); err == nil {
+			defaultBranch = strings.TrimSpace(resolvedDefaultBranch)
+		}
+	}
 	m.wizard.DefaultVis = defaultVis
 	m.wizard.Visibility = m.wizard.DefaultVis
+	m.wizard.DefaultBranch = defaultBranch
 	m.wizard.FocusArea = fixWizardFocusActions
 	if m.wizard.EnableCommitMessage {
 		m.wizard.FocusArea = fixWizardFocusCommit
 	}
 	if m.wizard.EnableProjectName {
 		m.wizard.FocusArea = fixWizardFocusProjectName
+	}
+	m.wizard.EnableForkBranchRename = decision.Action == FixActionForkAndRetarget && isDefaultBranch(m.wizard.Branch, defaultBranch)
+	m.wizard.ForkBranchName = forkBranchInput
+	if m.wizard.EnableForkBranchRename {
+		m.wizard.FocusArea = fixWizardFocusForkBranch
 	}
 	m.syncWizardFieldFocus()
 	m.wizard.ActionFocus = fixWizardActionCancel
@@ -334,6 +361,9 @@ func (m *fixTUIModel) applyWizardCurrent() tea.Cmd {
 	if m.wizard.Action == FixActionCreateProject &&
 		(m.wizard.Visibility == domain.VisibilityPrivate || m.wizard.Visibility == domain.VisibilityPublic) {
 		opts.CreateProjectVisibility = m.wizard.Visibility
+	}
+	if m.wizard.EnableForkBranchRename {
+		opts.ForkBranchRenameTo = strings.TrimSpace(m.wizard.ForkBranchName.Value())
 	}
 
 	if err := m.validateWizardInputs(opts); err != nil {
@@ -533,6 +563,12 @@ func (m *fixTUIModel) validateWizardInputs(opts fixApplyOptions) error {
 			return fmt.Errorf("invalid repository name on GitHub: %w", err)
 		}
 	}
+	if m.wizard.EnableForkBranchRename {
+		renameTo := strings.TrimSpace(opts.ForkBranchRenameTo)
+		if renameTo != "" && renameTo == strings.TrimSpace(m.wizard.Branch) {
+			return errors.New("new branch name must differ from current branch")
+		}
+	}
 	return nil
 }
 
@@ -540,22 +576,28 @@ func (m *fixTUIModel) syncWizardFieldFocus() {
 	m.wizard.CommitFocused = false
 	m.wizard.CommitMessage.Blur()
 	m.wizard.ProjectName.Blur()
+	m.wizard.ForkBranchName.Blur()
 	switch m.wizard.FocusArea {
 	case fixWizardFocusCommit:
 		m.wizard.CommitFocused = true
 		m.wizard.CommitMessage.Focus()
 	case fixWizardFocusProjectName:
 		m.wizard.ProjectName.Focus()
+	case fixWizardFocusForkBranch:
+		m.wizard.ForkBranchName.Focus()
 	}
 }
 
 func (m *fixTUIModel) wizardFocusOrder() []fixWizardFocusArea {
-	order := make([]fixWizardFocusArea, 0, 5)
+	order := make([]fixWizardFocusArea, 0, 6)
 	if m.wizard.EnableCommitMessage {
 		order = append(order, fixWizardFocusCommit)
 	}
 	if m.wizard.EnableProjectName {
 		order = append(order, fixWizardFocusProjectName)
+	}
+	if m.wizard.EnableForkBranchRename {
+		order = append(order, fixWizardFocusForkBranch)
 	}
 	if m.wizard.ShowGitignoreToggle {
 		order = append(order, fixWizardFocusGitignore)
@@ -729,6 +771,34 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.wizard.ProjectName, cmd = m.wizard.ProjectName.Update(msg)
 		m.wizard.ProjectName.SetValue(sanitizeGitHubRepositoryNameInput(m.wizard.ProjectName.Value()))
+		m.errText = ""
+		return m, cmd
+	}
+	if m.wizard.FocusArea == fixWizardFocusForkBranch {
+		if key.Matches(msg, m.keys.Cancel) {
+			m.viewMode = fixViewList
+			m.status = "cancelled remaining risky confirmations"
+			return m, nil
+		}
+		switch msg.String() {
+		case "enter":
+			m.wizardMoveFocus(1, false)
+			return m, nil
+		case "down":
+			if m.wizardMoveFocus(1, false) {
+				return m, nil
+			}
+			m.scrollWizardDown(1)
+			return m, nil
+		case "up":
+			if m.wizardMoveFocus(-1, false) {
+				return m, nil
+			}
+			m.scrollWizardUp(1)
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.wizard.ForkBranchName, cmd = m.wizard.ForkBranchName.Update(msg)
 		m.errText = ""
 		return m, cmd
 	}
@@ -1036,7 +1106,7 @@ func (m *fixTUIModel) wizardScrollIndicatorBottom() string {
 }
 
 func (m *fixTUIModel) viewWizardStaticControls() string {
-	controls := make([]string, 0, 4)
+	controls := make([]string, 0, 5)
 	if m.wizard.EnableCommitMessage {
 		controls = append(controls, renderFieldBlock(
 			m.wizard.FocusArea == fixWizardFocusCommit,
@@ -1052,6 +1122,15 @@ func (m *fixTUIModel) viewWizardStaticControls() string {
 			"Repository name on GitHub",
 			"Leave empty to use the current folder/repo name.",
 			renderInputContainer(m.wizard.ProjectName.View(), m.wizard.FocusArea == fixWizardFocusProjectName),
+			"",
+		))
+	}
+	if m.wizard.EnableForkBranchRename {
+		controls = append(controls, renderFieldBlock(
+			m.wizard.FocusArea == fixWizardFocusForkBranch,
+			"New branch name (optional)",
+			"Leave empty to keep the current branch and force push your fork.",
+			renderInputContainer(m.wizard.ForkBranchName.View(), m.wizard.FocusArea == fixWizardFocusForkBranch),
 			"",
 		))
 	}
@@ -1212,6 +1291,9 @@ func (m *fixTUIModel) wizardActionPlanContext() fixActionPlanContext {
 			raw = "auto"
 		}
 		ctx.CommitMessage = raw
+	}
+	if m.wizard.EnableForkBranchRename {
+		ctx.ForkBranchRenameTo = strings.TrimSpace(m.wizard.ForkBranchName.Value())
 	}
 	if m.wizard.ShowGitignoreToggle && m.wizard.GenerateGitignore {
 		ctx.GenerateGitignore = true

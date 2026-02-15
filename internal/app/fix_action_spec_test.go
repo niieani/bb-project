@@ -203,6 +203,46 @@ func TestFixActionPlanForkAndRetargetRendersConcreteForkCommands(t *testing.T) {
 	}
 }
 
+func TestFixActionPlanForkAndRetargetWithBranchRenameAvoidsForcePush(t *testing.T) {
+	t.Parallel()
+
+	plan := fixActionPlanFor(FixActionForkAndRetarget, fixActionPlanContext{
+		Branch:             "main",
+		GitHubOwner:        "acme",
+		RemoteProtocol:     "ssh",
+		OriginURL:          "git@github.com:oven-sh/bun.git",
+		ForkBranchRenameTo: "feature/acme-bun",
+	})
+
+	renameIdx := planEntryIndex(plan, "fork-rename-branch")
+	pushIdx := planEntryIndex(plan, "fork-push-upstream")
+	if renameIdx < 0 || pushIdx < 0 {
+		t.Fatalf("missing expected rename/push entries, got %#v", plan)
+	}
+	if renameIdx > pushIdx {
+		t.Fatalf("expected branch rename before push, got %#v", plan)
+	}
+
+	renameEntry := plan[renameIdx]
+	if !renameEntry.Command {
+		t.Fatalf("fork-rename-branch should be a command step, got %#v", renameEntry)
+	}
+	if !strings.Contains(renameEntry.Summary, "git branch -m feature/acme-bun") {
+		t.Fatalf("expected branch rename summary, got %#v", renameEntry)
+	}
+
+	pushEntry := plan[pushIdx]
+	if !pushEntry.Command {
+		t.Fatalf("fork-push-upstream should be a command step, got %#v", pushEntry)
+	}
+	if !strings.Contains(pushEntry.Summary, "git push -u acme feature/acme-bun") {
+		t.Fatalf("expected non-force push summary for renamed branch, got %#v", pushEntry)
+	}
+	if strings.Contains(pushEntry.Summary, "--force") {
+		t.Fatalf("did not expect force push when branch rename is provided, got %#v", pushEntry)
+	}
+}
+
 func TestFixActionExecutionPlanAppendsRevalidationStep(t *testing.T) {
 	t.Parallel()
 

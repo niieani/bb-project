@@ -66,6 +66,41 @@ func isGitHubRepositoryNameRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-'
 }
 
+func validateGitBranchRenameTarget(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("branch name is required")
+	}
+	if name == "HEAD" {
+		return errors.New(`branch name cannot be "HEAD"`)
+	}
+	if strings.HasPrefix(name, "-") {
+		return errors.New("branch name cannot start with '-'")
+	}
+	if strings.ContainsAny(name, " \t\n\r") {
+		return errors.New("branch name cannot contain whitespace")
+	}
+	if strings.Contains(name, "..") {
+		return errors.New("branch name cannot contain '..'")
+	}
+	if strings.Contains(name, "@{") {
+		return errors.New(`branch name cannot contain "@{"`)
+	}
+	if strings.ContainsAny(name, "~^:?*[]\\") {
+		return errors.New(`branch name contains invalid characters (~ ^ : ? * [ ] \)`)
+	}
+	if strings.HasPrefix(name, "/") || strings.HasSuffix(name, "/") || strings.Contains(name, "//") {
+		return errors.New("branch name cannot contain empty path segments")
+	}
+	if strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".") {
+		return errors.New("branch name cannot start or end with '.'")
+	}
+	if strings.HasSuffix(name, ".lock") {
+		return errors.New(`branch name cannot end with ".lock"`)
+	}
+	return nil
+}
+
 func validateFixApplyOptions(action string, opts fixApplyOptions) error {
 	if _, err := ParseFixSyncStrategy(string(opts.SyncStrategy)); err != nil {
 		return fmt.Errorf("invalid sync strategy: %w", err)
@@ -77,6 +112,14 @@ func validateFixApplyOptions(action string, opts fixApplyOptions) error {
 		sanitized := sanitizeGitHubRepositoryNameInput(opts.CreateProjectName)
 		if err := validateGitHubRepositoryName(sanitized); err != nil {
 			return fmt.Errorf("invalid repository name: %w", err)
+		}
+	}
+	if strings.TrimSpace(opts.ForkBranchRenameTo) != "" {
+		if action != FixActionForkAndRetarget {
+			return fmt.Errorf("invalid fork branch rename target: action %q does not support branch rename", action)
+		}
+		if err := validateGitBranchRenameTarget(opts.ForkBranchRenameTo); err != nil {
+			return fmt.Errorf("invalid fork branch rename target: %w", err)
 		}
 	}
 	return nil

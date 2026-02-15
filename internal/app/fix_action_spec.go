@@ -29,6 +29,7 @@ type fixActionPlanContext struct {
 	CommitMessage           string
 	CreateProjectName       string
 	CreateProjectVisibility domain.Visibility
+	ForkBranchRenameTo      string
 	GenerateGitignore       bool
 	GitignorePatterns       []string
 	MissingRootGitignore    bool
@@ -378,7 +379,7 @@ func planFixActionForkAndRetarget(ctx fixActionPlanContext) []fixActionPlanEntry
 	if ctx.ForkRemoteExists {
 		setRemoteCmd = fmt.Sprintf("git remote set-url %s %s", owner, forkURL)
 	}
-	return []fixActionPlanEntry{
+	entries := []fixActionPlanEntry{
 		{
 			ID:      "fork-gh-fork",
 			Command: true,
@@ -394,17 +395,30 @@ func planFixActionForkAndRetarget(ctx fixActionPlanContext) []fixActionPlanEntry
 			Command: false,
 			Summary: "Update repo metadata immediately after retargeting remote (preferred remote and push-access probe state reset).",
 		},
-		{
-			ID:      "fork-push-upstream",
-			Command: true,
-			Summary: fmt.Sprintf("git push -u --force %s %s", owner, plannedBranch(ctx.Branch)),
-		},
-		{
-			ID:      "fork-refresh-metadata",
-			Command: false,
-			Summary: "Refresh repo metadata push-access probe state after retarget push.",
-		},
 	}
+	pushBranch := strings.TrimSpace(ctx.Branch)
+	pushSummary := fmt.Sprintf("git push -u --force %s %s", owner, plannedBranch(pushBranch))
+	renameTo := strings.TrimSpace(ctx.ForkBranchRenameTo)
+	if renameTo != "" && renameTo != pushBranch {
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "fork-rename-branch",
+			Command: true,
+			Summary: fmt.Sprintf("git branch -m %s", renameTo),
+		})
+		pushBranch = renameTo
+		pushSummary = fmt.Sprintf("git push -u %s %s", owner, plannedBranch(pushBranch))
+	}
+	entries = append(entries, fixActionPlanEntry{
+		ID:      "fork-push-upstream",
+		Command: true,
+		Summary: pushSummary,
+	})
+	entries = append(entries, fixActionPlanEntry{
+		ID:      "fork-refresh-metadata",
+		Command: false,
+		Summary: "Refresh repo metadata push-access probe state after retarget push.",
+	})
+	return entries
 }
 
 func planFixActionEnableAutoPush(_ fixActionPlanContext) []fixActionPlanEntry {
