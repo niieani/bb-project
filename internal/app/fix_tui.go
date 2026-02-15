@@ -441,9 +441,15 @@ type fixTUIModel struct {
 	status  string
 	errText string
 
-	revalidating      bool
-	revalidateSpinner spinner.Model
-	revalidatePath    string
+	revalidating          bool
+	revalidateSpinner     spinner.Model
+	revalidatePath        string
+	immediateApplying     bool
+	immediateApplySpinner spinner.Model
+	immediatePhase        string
+	immediateStep         string
+	immediateEvents       <-chan tea.Msg
+	pendingCmd            tea.Cmd
 
 	viewMode fixViewMode
 	wizard   fixWizardState
@@ -759,6 +765,34 @@ type fixTUIRevalidatedMsg struct {
 	preferredPath string
 }
 
+type fixImmediateActionTask struct {
+	RepoPath string
+	RepoName string
+	Action   string
+}
+
+type fixTUIImmediateApplyTaskStartedMsg struct {
+	Task fixImmediateActionTask
+}
+
+type fixTUIImmediateApplyProgressMsg struct {
+	Task  fixImmediateActionTask
+	Event fixApplyStepEvent
+}
+
+type fixTUIImmediateApplyCompletedMsg struct {
+	Results       []fixSummaryResult
+	Applied       int
+	Failed        int
+	Skipped       int
+	Queue         []fixWizardDecision
+	Repos         []fixRepoState
+	RefreshErr    error
+	PreferredPath string
+}
+
+type fixTUIImmediateApplyChannelClosedMsg struct{}
+
 func newFixProgressSpinner() spinner.Model {
 	spin := spinner.New(spinner.WithSpinner(spinner.Dot))
 	spin.Style = lipgloss.NewStyle().Foreground(accentColor)
@@ -909,6 +943,7 @@ func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUI
 		help:                     help.New(),
 		repoList:                 repoList,
 		revalidateSpinner:        newFixProgressSpinner(),
+		immediateApplySpinner:    newFixProgressSpinner(),
 	}
 	m.help.ShowAll = false
 	initialRefreshMode := scanRefreshIfStale
@@ -967,6 +1002,11 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.wizard.ApplySpinner, cmd = m.wizard.ApplySpinner.Update(msg)
 			return m, cmd
 		}
+		if m.immediateApplying {
+			var cmd tea.Cmd
+			m.immediateApplySpinner, cmd = m.immediateApplySpinner.Update(msg)
+			return m, cmd
+		}
 		if m.revalidating {
 			var cmd tea.Cmd
 			m.revalidateSpinner, cmd = m.revalidateSpinner.Update(msg)
@@ -1000,6 +1040,29 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case fixTUIImmediateApplyTaskStartedMsg:
+		m.immediatePhase = fixWizardApplyPhasePreparing
+		m.immediateStep = fmt.Sprintf("%s (%s)", msg.Task.RepoName, fixActionLabel(msg.Task.Action))
+		m.status = m.immediateApplyStatusLine()
+		if m.immediateEvents != nil {
+			return m, waitImmediateApplyMsg(m.immediateEvents)
+		}
+		return m, nil
+	case fixTUIImmediateApplyProgressMsg:
+		return m, m.handleImmediateApplyProgress(msg)
+	case fixTUIImmediateApplyCompletedMsg:
+		return m, m.handleImmediateApplyCompleted(msg)
+	case fixTUIImmediateApplyChannelClosedMsg:
+		if m.immediateApplying {
+			m.immediateApplying = false
+			m.immediatePhase = ""
+			m.immediateStep = ""
+			m.immediateEvents = nil
+			if m.errText == "" {
+				m.errText = "internal: apply stream closed unexpectedly"
+			}
+		}
+		return m, nil
 	case tea.KeyMsg:
 		if m.viewMode == fixViewWizard {
 			return m.updateWizard(msg)
@@ -1014,7 +1077,7 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.help.ShowAll = !m.help.ShowAll
 			return m, nil
 		}
-		if m.revalidating {
+		if m.revalidating || m.immediateApplying {
 			return m, nil
 		}
 		if key.Matches(msg, m.keys.Up) {
@@ -1034,13 +1097,13 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, m.keys.Apply):
 			m.applyCurrentSelection()
-			return m, nil
+			return m, m.takePendingCmd()
 		case key.Matches(msg, m.keys.Setting):
 			m.toggleCurrentRepoAutoPush()
 			return m, nil
 		case key.Matches(msg, m.keys.ApplyAll):
 			m.applyAllSelections()
-			return m, nil
+			return m, m.takePendingCmd()
 		case key.Matches(msg, m.keys.Refresh):
 			return m, m.beginRevalidate()
 		case key.Matches(msg, m.keys.Ignore):
@@ -1131,7 +1194,7 @@ func (m *fixTUIModel) View() string {
 
 func (m *fixTUIModel) mainContentPanelStyle() lipgloss.Style {
 	contentPanel := panelStyle
-	if (m.viewMode == fixViewWizard && m.wizard.Applying) || m.revalidating {
+	if (m.viewMode == fixViewWizard && m.wizard.Applying) || m.revalidating || m.immediateApplying {
 		contentPanel = contentPanel.BorderForeground(accentColor)
 	}
 	if w := m.viewContentWidth(); w > 0 {
@@ -1143,7 +1206,9 @@ func (m *fixTUIModel) mainContentPanelStyle() lipgloss.Style {
 func (m *fixTUIModel) viewMainContent() string {
 	var b strings.Builder
 	title := "Repository Fixes"
-	if m.revalidating {
+	if m.immediateApplying {
+		title += " " + m.immediateApplySpinner.View()
+	} else if m.revalidating {
 		title += " " + m.revalidateSpinner.View()
 	}
 	b.WriteString(labelStyle.Render(title))
@@ -1151,6 +1216,10 @@ func (m *fixTUIModel) viewMainContent() string {
 	b.WriteString(hintStyle.Render("Select per-repo fixes. Default selection is '-' (no action)."))
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Grouped by catalog (default catalog first), then fixable, unsyncable, syncable, and ignored."))
+	if m.immediateApplying {
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render(m.immediateApplyStatusLine()))
+	}
 	b.WriteString("\n\n")
 	b.WriteString(m.viewFixSummary())
 	b.WriteString("\n\n")
@@ -1419,6 +1488,170 @@ func (m *fixTUIModel) beginRevalidate() tea.Cmd {
 		m.revalidatePath = current.Record.Path
 	}
 	return tea.Batch(m.revalidateSpinner.Tick, m.revalidateReposCmd(m.revalidatePath))
+}
+
+func (m *fixTUIModel) beginImmediateApply(tasks []fixImmediateActionTask, queue []fixWizardDecision, skipped int) {
+	if m.immediateApplying {
+		return
+	}
+	m.immediateApplying = true
+	m.immediatePhase = fixWizardApplyPhasePreparing
+	m.immediateStep = ""
+	m.errText = ""
+	m.status = m.immediateApplyStatusLine()
+
+	progress := make(chan tea.Msg, max(8, len(tasks)*4+4))
+	m.immediateEvents = progress
+	includeCatalogs := append([]string(nil), m.includeCatalogs...)
+	loadRepos := m.loadReposFn
+	app := m.app
+	preferredPath := ""
+	if current, ok := m.currentRepo(); ok {
+		preferredPath = current.Record.Path
+	}
+
+	go func() {
+		results := make([]fixSummaryResult, 0, len(tasks))
+		applied := 0
+		failed := 0
+
+		for _, task := range tasks {
+			progress <- fixTUIImmediateApplyTaskStartedMsg{Task: task}
+			if app == nil {
+				results = append(results, fixSummaryResult{
+					RepoName: task.RepoName,
+					RepoPath: task.RepoPath,
+					Action:   fixActionLabel(task.Action),
+					Status:   "failed",
+					Detail:   "internal: app is not configured",
+				})
+				failed++
+				continue
+			}
+
+			_, err := app.applyFixActionWithObserver(includeCatalogs, task.RepoPath, task.Action, fixApplyOptions{
+				Interactive:  true,
+				SyncStrategy: FixSyncStrategyRebase,
+			}, func(event fixApplyStepEvent) {
+				progress <- fixTUIImmediateApplyProgressMsg{Task: task, Event: event}
+			})
+			if err != nil {
+				results = append(results, fixSummaryResult{
+					RepoName: task.RepoName,
+					RepoPath: task.RepoPath,
+					Action:   fixActionLabel(task.Action),
+					Status:   "failed",
+					Detail:   err.Error(),
+				})
+				failed++
+				continue
+			}
+
+			results = append(results, fixSummaryResult{
+				RepoName: task.RepoName,
+				RepoPath: task.RepoPath,
+				Action:   fixActionLabel(task.Action),
+				Status:   "applied",
+			})
+			applied++
+		}
+
+		var repos []fixRepoState
+		var refreshErr error
+		if loadRepos != nil && (applied > 0 || failed > 0) {
+			repos, refreshErr = loadRepos(includeCatalogs, scanRefreshAlways)
+		}
+
+		progress <- fixTUIImmediateApplyCompletedMsg{
+			Results:       results,
+			Applied:       applied,
+			Failed:        failed,
+			Skipped:       skipped,
+			Queue:         append([]fixWizardDecision(nil), queue...),
+			Repos:         repos,
+			RefreshErr:    refreshErr,
+			PreferredPath: preferredPath,
+		}
+		close(progress)
+	}()
+
+	m.pendingCmd = tea.Batch(m.immediateApplySpinner.Tick, waitImmediateApplyMsg(progress))
+}
+
+func waitImmediateApplyMsg(progress <-chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-progress
+		if !ok {
+			return fixTUIImmediateApplyChannelClosedMsg{}
+		}
+		return msg
+	}
+}
+
+func (m *fixTUIModel) immediateApplyStatusLine() string {
+	phase := strings.TrimSpace(m.immediatePhase)
+	if phase == "" {
+		phase = fixWizardApplyPhasePreparing
+	}
+	line := fmt.Sprintf("%s... controls are locked until execution completes.", phase)
+	if step := strings.TrimSpace(m.immediateStep); step != "" {
+		line += " Current step: " + step
+	}
+	return line
+}
+
+func (m *fixTUIModel) handleImmediateApplyProgress(msg fixTUIImmediateApplyProgressMsg) tea.Cmd {
+	entrySummary := strings.TrimSpace(msg.Event.Entry.Summary)
+	if entrySummary != "" {
+		m.immediateStep = entrySummary
+	}
+	if msg.Event.Status == fixApplyStepRunning {
+		m.immediatePhase = m.wizardApplyPhaseForEntry(msg.Event.Entry)
+	}
+	m.status = m.immediateApplyStatusLine()
+	if m.immediateEvents != nil {
+		return waitImmediateApplyMsg(m.immediateEvents)
+	}
+	return nil
+}
+
+func (m *fixTUIModel) handleImmediateApplyCompleted(msg fixTUIImmediateApplyCompletedMsg) tea.Cmd {
+	m.immediateApplying = false
+	m.immediatePhase = ""
+	m.immediateStep = ""
+	m.immediateEvents = nil
+
+	m.summaryResults = append(m.summaryResults, msg.Results...)
+
+	if msg.RefreshErr != nil {
+		m.errText = msg.RefreshErr.Error()
+		m.status = "failed to refresh repository state after apply"
+		return nil
+	}
+	if len(msg.Repos) > 0 {
+		m.repos = msg.Repos
+		m.rebuildList(msg.PreferredPath)
+	}
+
+	if msg.Failed > 0 {
+		m.errText = "one or more fixes failed"
+	} else {
+		m.errText = ""
+	}
+
+	if len(msg.Queue) > 0 {
+		m.startWizardQueue(msg.Queue)
+		return nil
+	}
+
+	m.status = fmt.Sprintf("applied %d, skipped %d, failed %d", msg.Applied, msg.Skipped, msg.Failed)
+	return nil
+}
+
+func (m *fixTUIModel) takePendingCmd() tea.Cmd {
+	cmd := m.pendingCmd
+	m.pendingCmd = nil
+	return cmd
 }
 
 func (m *fixTUIModel) revalidateReposCmd(preferredPath string) tea.Cmd {
@@ -1713,13 +1946,11 @@ func (m *fixTUIModel) applyCurrentSelection() {
 	m.summaryResults = nil
 
 	queue := make([]fixWizardDecision, 0, 2)
+	immediateTasks := make([]fixImmediateActionTask, 0, 2)
 	selections := []string{action}
 	if action == fixAllActions {
 		selections = fixActionsForAllExecution(selectionActions)
 	}
-
-	applied := 0
-	failed := 0
 	for _, selection := range selections {
 		if isRiskyFixAction(selection) {
 			queue = append(queue, fixWizardDecision{
@@ -1728,42 +1959,23 @@ func (m *fixTUIModel) applyCurrentSelection() {
 			})
 			continue
 		}
-		if err := m.applyImmediateAction(repo, selection); err != nil {
-			m.summaryResults = append(m.summaryResults, fixSummaryResult{
-				RepoName: repo.Record.Name,
-				RepoPath: repo.Record.Path,
-				Action:   fixActionLabel(selection),
-				Status:   "failed",
-				Detail:   err.Error(),
-			})
-			failed++
-			continue
-		}
-		m.summaryResults = append(m.summaryResults, fixSummaryResult{
-			RepoName: repo.Record.Name,
+		immediateTasks = append(immediateTasks, fixImmediateActionTask{
 			RepoPath: repo.Record.Path,
-			Action:   fixActionLabel(selection),
-			Status:   "applied",
+			RepoName: repo.Record.Name,
+			Action:   selection,
 		})
-		applied++
 	}
 
+	if len(immediateTasks) > 0 {
+		m.beginImmediateApply(immediateTasks, queue, 0)
+		return
+	}
 	if len(queue) > 0 {
 		m.startWizardQueue(queue)
 		return
 	}
-	if m.app != nil && applied > 0 {
-		if err := m.refreshRepos(scanRefreshAlways); err != nil {
-			m.errText = err.Error()
-			return
-		}
-	}
-	if failed > 0 {
-		m.errText = "one or more fixes failed"
-	} else {
-		m.errText = ""
-	}
-	m.status = fmt.Sprintf("applied %d, skipped %d, failed %d", applied, 0, failed)
+	m.errText = ""
+	m.status = "no applicable actions selected"
 }
 
 func (m *fixTUIModel) applyAllSelections() {
@@ -1776,8 +1988,8 @@ func (m *fixTUIModel) applyAllSelections() {
 	m.summaryResults = nil
 	applied := 0
 	skipped := 0
-	failures := make([]string, 0, 3)
 	queue := make([]fixWizardDecision, 0, 8)
+	immediateTasks := make([]fixImmediateActionTask, 0, len(m.visible))
 
 	for _, repo := range m.visible {
 		if m.ignored[repo.Record.Path] {
@@ -1816,58 +2028,26 @@ func (m *fixTUIModel) applyAllSelections() {
 				})
 				continue
 			}
-			if err := m.applyImmediateAction(repo, selected); err != nil {
-				failures = append(failures, fmt.Sprintf("%s (%s)", repo.Record.Name, fixActionLabel(selected)))
-				m.summaryResults = append(m.summaryResults, fixSummaryResult{
-					RepoName: repo.Record.Name,
-					RepoPath: repo.Record.Path,
-					Action:   fixActionLabel(selected),
-					Status:   "failed",
-					Detail:   err.Error(),
-				})
-				continue
-			}
-			m.summaryResults = append(m.summaryResults, fixSummaryResult{
-				RepoName: repo.Record.Name,
+			immediateTasks = append(immediateTasks, fixImmediateActionTask{
 				RepoPath: repo.Record.Path,
-				Action:   fixActionLabel(selected),
-				Status:   "applied",
+				RepoName: repo.Record.Name,
+				Action:   selected,
 			})
 			applied++
 		}
 	}
 
-	if m.app != nil {
-		if err := m.refreshRepos(scanRefreshAlways); err != nil {
-			m.errText = err.Error()
-			return
-		}
-	} else if applied > 0 || len(failures) > 0 {
-		m.errText = "internal: app is not configured for apply-all"
+	if len(immediateTasks) > 0 {
+		m.beginImmediateApply(immediateTasks, queue, skipped)
 		return
 	}
 
-	if len(failures) > 0 {
-		m.errText = fmt.Sprintf("failed: %s", strings.Join(failures, ", "))
-	} else {
-		m.errText = ""
-	}
 	if len(queue) > 0 {
 		m.startWizardQueue(queue)
 		return
 	}
-	m.status = fmt.Sprintf("applied %d, skipped %d, failed %d", applied, skipped, len(failures))
-}
-
-func (m *fixTUIModel) applyImmediateAction(repo fixRepoState, action string) error {
-	if m.app == nil {
-		return errors.New("internal: app is not configured")
-	}
-	_, err := m.app.applyFixAction(m.includeCatalogs, repo.Record.Path, action, fixApplyOptions{
-		Interactive:  true,
-		SyncStrategy: FixSyncStrategyRebase,
-	})
-	return err
+	m.errText = ""
+	m.status = fmt.Sprintf("applied %d, skipped %d, failed %d", applied, skipped, 0)
 }
 
 func nextAutoPushMode(mode domain.AutoPushMode) domain.AutoPushMode {

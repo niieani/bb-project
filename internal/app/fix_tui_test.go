@@ -243,13 +243,14 @@ func TestFixTUIRepoNameUsesOSC8ForAliasedGitHubHost(t *testing.T) {
 
 func newFixTUIModelForTest(repos []fixRepoState) *fixTUIModel {
 	m := &fixTUIModel{
-		repos:             append([]fixRepoState(nil), repos...),
-		ignored:           map[string]bool{},
-		selectedAction:    map[string]int{},
-		repoList:          newFixRepoListModel(),
-		keys:              defaultFixTUIKeyMap(),
-		help:              help.New(),
-		revalidateSpinner: newFixProgressSpinner(),
+		repos:                 append([]fixRepoState(nil), repos...),
+		ignored:               map[string]bool{},
+		selectedAction:        map[string]int{},
+		repoList:              newFixRepoListModel(),
+		keys:                  defaultFixTUIKeyMap(),
+		help:                  help.New(),
+		revalidateSpinner:     newFixProgressSpinner(),
+		immediateApplySpinner: newFixProgressSpinner(),
 	}
 	m.rebuildList("")
 	return m
@@ -724,6 +725,87 @@ func TestFixTUIRevalidateCommandUsesFullRefreshAndCompletionClearsBusyState(t *t
 	}
 	if !m.visible[0].Record.Syncable {
 		t.Fatal("expected revalidated repo data to replace list state")
+	}
+}
+
+func TestFixTUIImmediateApplyEntersBusyStateWithSpinnerAndLockedStatus(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Behind:    1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	m.cycleCurrentAction(1) // pull-ff-only
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected immediate apply command to be scheduled")
+	}
+	if !m.immediateApplying {
+		t.Fatal("expected immediate apply to set in-progress state")
+	}
+	if !strings.Contains(m.viewMainContent(), "Repository Fixes "+m.immediateApplySpinner.View()) {
+		t.Fatalf("expected spinner next to repository title while immediate apply is running, got %q", m.viewMainContent())
+	}
+	if !strings.Contains(ansi.Strip(m.viewMainContent()), "controls are locked until execution completes") {
+		t.Fatalf("expected locked-controls status line during immediate apply, got %q", ansi.Strip(m.viewMainContent()))
+	}
+	if got := m.mainContentPanelStyle().GetBorderTopForeground(); !reflect.DeepEqual(got, accentColor) {
+		t.Fatalf("busy border color = %#v, want accent %#v", got, accentColor)
+	}
+}
+
+func TestFixTUIImmediateApplyLocksNavigationKeys(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Behind:    1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "web",
+				Path:      "/repos/web",
+				OriginURL: "git@github.com:you/web.git",
+				Upstream:  "origin/main",
+				Behind:    1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/web.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	m.cycleCurrentAction(1) // pull-ff-only
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected immediate apply command to be scheduled")
+	}
+	if !m.immediateApplying {
+		t.Fatal("expected immediate apply to set in-progress state")
+	}
+
+	before := m.repoList.Index()
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if got := m.repoList.Index(); got != before {
+		t.Fatalf("cursor moved while immediate apply was running: before=%d after=%d", before, got)
 	}
 }
 

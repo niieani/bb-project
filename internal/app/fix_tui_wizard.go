@@ -891,9 +891,9 @@ func (m *fixTUIModel) runSelectedSummaryFollowUps(candidates []fixSummaryFollowU
 	m.summaryResults = nil
 	m.resetSummaryFollowUpState()
 
-	applied := 0
-	failed := 0
 	queue := make([]fixWizardDecision, 0, len(selected))
+	immediateTasks := make([]fixImmediateActionTask, 0, len(selected))
+	failed := 0
 	for _, candidate := range selected {
 		repo, ok := m.summaryRepoState(candidate.RepoPath)
 		if !ok {
@@ -908,20 +908,20 @@ func (m *fixTUIModel) runSelectedSummaryFollowUps(candidates []fixSummaryFollowU
 			})
 			continue
 		}
-		if err := m.applyImmediateAction(repo, candidate.Action); err != nil {
-			m.appendSummaryResultForRepo(repo.Record.Name, repo.Record.Path, candidate.Action, "failed", err.Error())
-			failed++
-			continue
-		}
-		m.appendSummaryResultForRepo(repo.Record.Name, repo.Record.Path, candidate.Action, "applied", "")
-		applied++
+		immediateTasks = append(immediateTasks, fixImmediateActionTask{
+			RepoPath: repo.Record.Path,
+			RepoName: repo.Record.Name,
+			Action:   candidate.Action,
+		})
 	}
 
-	if m.app != nil && applied > 0 {
-		if err := m.refreshRepos(scanRefreshAlways); err != nil {
-			m.errText = err.Error()
-			return nil
-		}
+	if len(immediateTasks) > 0 {
+		m.beginImmediateApply(immediateTasks, queue, 0)
+		return m.takePendingCmd()
+	}
+	if len(queue) > 0 {
+		m.startWizardQueue(queue)
+		return nil
 	}
 
 	if failed > 0 {
@@ -929,12 +929,7 @@ func (m *fixTUIModel) runSelectedSummaryFollowUps(candidates []fixSummaryFollowU
 	} else {
 		m.errText = ""
 	}
-	if len(queue) > 0 {
-		m.startWizardQueue(queue)
-		return nil
-	}
-
-	m.status = fmt.Sprintf("follow-up run: applied %d, failed %d", applied, failed)
+	m.status = fmt.Sprintf("follow-up run: applied %d, failed %d", 0, failed)
 	return nil
 }
 
