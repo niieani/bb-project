@@ -1081,6 +1081,9 @@ func (a *App) forkAndRetargetFromFix(
 		return errors.New("fork remote name is required")
 	}
 	forkSource := plannedForkSource(originURL)
+	if forkSource == "" {
+		forkSource = strings.TrimSpace(originURL)
+	}
 
 	var forkURL string
 	if err := runStep("fork-gh-fork", fixActionPlanEntry{

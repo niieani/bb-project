@@ -143,8 +143,10 @@ func TestFixActionPlanForkAndRetargetWritesMetadataBeforeForcePush(t *testing.T)
 	t.Parallel()
 
 	plan := fixActionPlanFor(FixActionForkAndRetarget, fixActionPlanContext{
-		Branch:      "main",
-		GitHubOwner: "acme",
+		Branch:         "main",
+		GitHubOwner:    "acme",
+		OriginURL:      "git@github.com:oven-sh/bun.git",
+		RemoteProtocol: "ssh",
 	})
 
 	setRemoteIdx := planEntryIndex(plan, "fork-set-remote")
@@ -238,6 +240,103 @@ func TestFixActionPlanSyncWithUpstreamUsesSelectedStrategy(t *testing.T) {
 	if !planContains(mergePlan, true, "git merge --no-edit origin/main") {
 		t.Fatalf("expected merge command in sync-with-upstream plan, got %#v", mergePlan)
 	}
+}
+
+func TestFixActionPlanSyncAndPullFetchPrunePreviewFollowsConfig(t *testing.T) {
+	t.Parallel()
+
+	syncEnabled := fixActionPlanFor(FixActionSyncWithUpstream, fixActionPlanContext{
+		Upstream:     "origin/main",
+		SyncStrategy: FixSyncStrategyRebase,
+		FetchPrune:   true,
+	})
+	if !planContains(syncEnabled, true, "git fetch --prune") {
+		t.Fatalf("expected fetch --prune command when enabled, got %#v", syncEnabled)
+	}
+
+	syncDisabled := fixActionPlanFor(FixActionSyncWithUpstream, fixActionPlanContext{
+		Upstream:     "origin/main",
+		SyncStrategy: FixSyncStrategyRebase,
+		FetchPrune:   false,
+	})
+	if planContains(syncDisabled, true, "git fetch --prune") {
+		t.Fatalf("did not expect fetch --prune command when disabled, got %#v", syncDisabled)
+	}
+
+	pullEnabled := fixActionPlanFor(FixActionPullFFOnly, fixActionPlanContext{FetchPrune: true})
+	if !planContains(pullEnabled, true, "git fetch --prune") {
+		t.Fatalf("expected pull fetch --prune command when enabled, got %#v", pullEnabled)
+	}
+
+	pullDisabled := fixActionPlanFor(FixActionPullFFOnly, fixActionPlanContext{FetchPrune: false})
+	if planContains(pullDisabled, true, "git fetch --prune") {
+		t.Fatalf("did not expect pull fetch --prune command when disabled, got %#v", pullDisabled)
+	}
+}
+
+func TestFixActionPlanCommandSummariesAreConcreteCommands(t *testing.T) {
+	t.Parallel()
+
+	check := func(action string, plan []fixActionPlanEntry) {
+		t.Helper()
+		for _, entry := range plan {
+			if !entry.Command {
+				continue
+			}
+			summary := strings.TrimSpace(entry.Summary)
+			if summary == "" {
+				t.Fatalf("%s/%s has empty command summary", action, entry.ID)
+			}
+			if strings.Contains(summary, "<") || strings.Contains(summary, ">") {
+				t.Fatalf("%s/%s contains placeholder delimiters: %q", action, entry.ID, summary)
+			}
+			if strings.Contains(summary, "(if ") || strings.Contains(summary, "(when ") {
+				t.Fatalf("%s/%s contains conditional prose: %q", action, entry.ID, summary)
+			}
+		}
+	}
+
+	check(FixActionAbortOperation, fixActionPlanFor(FixActionAbortOperation, fixActionPlanContext{
+		Operation: domain.OperationMerge,
+	}))
+	check(FixActionPush, fixActionPlanFor(FixActionPush, fixActionPlanContext{}))
+	check(FixActionSyncWithUpstream, fixActionPlanFor(FixActionSyncWithUpstream, fixActionPlanContext{
+		Upstream:     "origin/main",
+		SyncStrategy: FixSyncStrategyRebase,
+		FetchPrune:   true,
+	}))
+	check(FixActionStageCommitPush, fixActionPlanFor(FixActionStageCommitPush, fixActionPlanContext{
+		Branch:        "main",
+		Upstream:      "",
+		OriginURL:     "git@github.com:you/api.git",
+		CommitMessage: "auto",
+	}))
+	check(FixActionPullFFOnly, fixActionPlanFor(FixActionPullFFOnly, fixActionPlanContext{
+		FetchPrune: true,
+	}))
+	check(FixActionSetUpstreamPush, fixActionPlanFor(FixActionSetUpstreamPush, fixActionPlanContext{
+		Branch:   "main",
+		Upstream: "",
+	}))
+	check(FixActionCreateProject, fixActionPlanFor(FixActionCreateProject, fixActionPlanContext{
+		Branch:                  "main",
+		Upstream:                "",
+		HeadSHA:                 "abc123",
+		OriginURL:               "",
+		GitHubOwner:             "acme",
+		RemoteProtocol:          "https",
+		RepoName:                "api",
+		PreferredRemote:         "origin",
+		CreateProjectName:       "api",
+		CreateProjectVisibility: domain.VisibilityPublic,
+	}))
+	check(FixActionForkAndRetarget, fixActionPlanFor(FixActionForkAndRetarget, fixActionPlanContext{
+		Branch:           "main",
+		GitHubOwner:      "acme",
+		RemoteProtocol:   "ssh",
+		OriginURL:        "git@github.com:oven-sh/bun.git",
+		ForkRemoteExists: false,
+	}))
 }
 
 func planContains(plan []fixActionPlanEntry, command bool, fragment string) bool {

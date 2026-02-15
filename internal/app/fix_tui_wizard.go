@@ -33,21 +33,21 @@ type fixWizardState struct {
 	Queue []fixWizardDecision
 	Index int
 
-	RepoPath        string
-	RepoName        string
-	Branch          string
-	Upstream        string
-	HeadSHA         string
-	OriginURL       string
-	PreferredRemote string
-	Operation       domain.Operation
-	GitHubOwner     string
-	RemoteProtocol  string
-	FetchPrune      bool
+	RepoPath         string
+	RepoName         string
+	Branch           string
+	Upstream         string
+	HeadSHA          string
+	OriginURL        string
+	PreferredRemote  string
+	Operation        domain.Operation
+	GitHubOwner      string
+	RemoteProtocol   string
+	FetchPrune       bool
 	ForkRemoteExists bool
-	Action          string
-	SyncStrategy    FixSyncStrategy
-	Risk            fixRiskSnapshot
+	Action           string
+	SyncStrategy     FixSyncStrategy
+	Risk             fixRiskSnapshot
 
 	EnableCommitMessage bool
 	CommitMessage       textinput.Model
