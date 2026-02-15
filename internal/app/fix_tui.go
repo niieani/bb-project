@@ -77,7 +77,7 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 		),
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),
-			key.WithHelp("r", "refresh repos"),
+			key.WithHelp("r", "revalidate state"),
 		),
 		Ignore: key.NewBinding(
 			key.WithKeys("i"),
@@ -152,11 +152,13 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 	repo, hasRepo := m.currentRepo()
 	options := []string(nil)
 	if hasRepo {
-		actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
-			Interactive: true,
-			Risk:        repo.Risk,
-		})
-		options = selectableFixActions(fixActionsForSelection(actions))
+		if !m.ignored[repo.Record.Path] {
+			actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+				Interactive: true,
+				Risk:        repo.Risk,
+			})
+			options = selectableFixActions(fixActionsForSelection(actions))
+		}
 	}
 
 	canApplySelected := false
@@ -167,9 +169,10 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 	canApplyAll := m.hasAnySelectedFixes()
 	canMoveRepo := len(m.visible) > 1
 	canChangeFix := len(options) > 0
-	canToggleAutoPush := hasRepo && repoMetaAllowsAutoPush(repo.Meta)
-	canIgnoreRepo := hasRepo
-	canClearIgnored := len(m.ignored) > 0
+	canToggleAutoPush := hasRepo && !m.ignored[repo.Record.Path] && repoMetaAllowsAutoPush(repo.Meta)
+	canIgnoreRepo := hasRepo && !m.ignored[repo.Record.Path]
+	canUnignoreRepo := hasRepo && m.ignored[repo.Record.Path]
+	canClearIgnored := len(m.ignored) > 0 && !canUnignoreRepo
 
 	if canApplySelected {
 		b := newHelpBinding([]string{"enter"}, "enter", "apply selected")
@@ -201,12 +204,17 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 		short = append(short, b)
 		secondary = append(secondary, b)
 	}
+	if canUnignoreRepo {
+		b := newHelpBinding([]string{"u"}, "u", "unignore repo")
+		short = append(short, b)
+		secondary = append(secondary, b)
+	}
 	if canClearIgnored {
 		b := newHelpBinding([]string{"u"}, "u", "clear ignored")
 		short = append(short, b)
 		secondary = append(secondary, b)
 	}
-	refresh := newHelpBinding([]string{"r"}, "r", "refresh")
+	refresh := newHelpBinding([]string{"r"}, "r", "revalidate state")
 	short = append(short, refresh)
 	secondary = append(secondary, refresh)
 
@@ -307,6 +315,9 @@ func (m *fixTUIModel) summaryHelpMap() fixTUIHelpMap {
 
 func (m *fixTUIModel) hasAnySelectedFixes() bool {
 	for _, repo := range m.visible {
+		if m.ignored[repo.Record.Path] {
+			continue
+		}
 		idx := m.selectedAction[repo.Record.Path]
 		if idx < 0 {
 			continue
@@ -397,6 +408,7 @@ func renderSingleLineShortHelp(helpModel help.Model, bindings []key.Binding, wid
 type fixTUIModel struct {
 	app             *App
 	includeCatalogs []string
+	loadReposFn     func(includeCatalogs []string, refreshMode scanRefreshMode) ([]fixRepoState, error)
 	repos           []fixRepoState
 	visible         []fixRepoState
 	ignored         map[string]bool
@@ -414,6 +426,10 @@ type fixTUIModel struct {
 
 	status  string
 	errText string
+
+	revalidating      bool
+	revalidateSpinner spinner.Model
+	revalidatePath    string
 
 	viewMode fixViewMode
 	wizard   fixWizardState
@@ -435,6 +451,7 @@ type fixListItem struct {
 	Action            string
 	ActionKey         string
 	Tier              fixRepoTier
+	Ignored           bool
 }
 
 type fixListItemKind int
@@ -505,8 +522,9 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	selected := index == m.Index()
 
-	repoCell := renderFixColumnCell(row.Name, layout.Repo, fixRepoNameStyle.Copy().Bold(selected))
-	branchCell := renderFixColumnCell(row.Branch, layout.Branch, fixBranchStyle)
+	repoStyle := fixRepoNameStyle.Copy().Bold(selected)
+	branchStyle := fixBranchStyle
+	reasonsStyle := fixReasonsStyle
 	stateStyle := fixStateSyncableStyle
 	switch row.Tier {
 	case fixRepoTierAutofixable:
@@ -514,9 +532,17 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	case fixRepoTierUnsyncableBlocked:
 		stateStyle = fixStateUnsyncableStyle
 	}
+	if row.Ignored {
+		repoStyle = repoStyle.Copy().Foreground(mutedTextColor).Faint(true)
+		branchStyle = branchStyle.Copy().Faint(true)
+		reasonsStyle = reasonsStyle.Copy().Faint(true)
+		stateStyle = fixStateIgnoredStyle
+	}
 	if selected {
 		stateStyle = stateStyle.Copy().Bold(true)
 	}
+	repoCell := renderFixColumnCell(row.Name, layout.Repo, repoStyle)
+	branchCell := renderFixColumnCell(row.Branch, layout.Branch, branchStyle)
 	stateCell := renderFixColumnCell(row.State, layout.State, stateStyle)
 	autoPushText := onOffLabel(row.AutoPush)
 	autoPushStyle := fixAutoPushOffStyle
@@ -526,12 +552,18 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	} else if row.AutoPush {
 		autoPushStyle = fixAutoPushOnStyle
 	}
+	if row.Ignored {
+		autoPushStyle = autoPushStyle.Copy().Foreground(mutedTextColor).Faint(true)
+	}
 	if selected {
 		autoPushStyle = autoPushStyle.Copy().Bold(true)
 	}
 	autoPushCell := renderFixColumnCell(autoPushText, layout.Auto, autoPushStyle)
-	reasonsCell := renderFixColumnCell(row.Reasons, layout.Reasons, fixReasonsStyle)
+	reasonsCell := renderFixColumnCell(row.Reasons, layout.Reasons, reasonsStyle)
 	actionStyle := fixActionStyleFor(row.ActionKey)
+	if row.Ignored {
+		actionStyle = fixNoActionStyle.Copy().Faint(true)
+	}
 	if selected {
 		actionStyle = actionStyle.Copy().Bold(true)
 	}
@@ -591,6 +623,10 @@ var (
 
 	fixStateUnsyncableStyle = lipgloss.NewStyle().
 				Foreground(errorFgColor)
+
+	fixStateIgnoredStyle = lipgloss.NewStyle().
+				Foreground(mutedTextColor).
+				Faint(true)
 
 	fixIndicatorStyle = lipgloss.NewStyle().
 				Foreground(borderColor)
@@ -693,9 +729,20 @@ type fixTUILoadedMsg struct {
 	err   error
 }
 
-func newFixTUIBootModel(app *App, includeCatalogs []string, noRefresh bool) *fixTUIBootModel {
+type fixTUIRevalidatedMsg struct {
+	repos         []fixRepoState
+	err           error
+	preferredPath string
+}
+
+func newFixProgressSpinner() spinner.Model {
 	spin := spinner.New(spinner.WithSpinner(spinner.Dot))
 	spin.Style = lipgloss.NewStyle().Foreground(accentColor)
+	return spin
+}
+
+func newFixTUIBootModel(app *App, includeCatalogs []string, noRefresh bool) *fixTUIBootModel {
+	spin := newFixProgressSpinner()
 
 	return &fixTUIBootModel{
 		app:             app,
@@ -827,13 +874,15 @@ func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUI
 	repoList := newFixRepoListModel()
 
 	m := &fixTUIModel{
-		app:             app,
-		includeCatalogs: append([]string(nil), includeCatalogs...),
-		ignored:         map[string]bool{},
-		selectedAction:  map[string]int{},
-		keys:            defaultFixTUIKeyMap(),
-		help:            help.New(),
-		repoList:        repoList,
+		app:               app,
+		includeCatalogs:   append([]string(nil), includeCatalogs...),
+		loadReposFn:       app.loadFixRepos,
+		ignored:           map[string]bool{},
+		selectedAction:    map[string]int{},
+		keys:              defaultFixTUIKeyMap(),
+		help:              help.New(),
+		repoList:          repoList,
+		revalidateSpinner: newFixProgressSpinner(),
 	}
 	m.help.ShowAll = false
 	initialRefreshMode := scanRefreshIfStale
@@ -892,6 +941,24 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.wizard.ApplySpinner, cmd = m.wizard.ApplySpinner.Update(msg)
 			return m, cmd
 		}
+		if m.revalidating {
+			var cmd tea.Cmd
+			m.revalidateSpinner, cmd = m.revalidateSpinner.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	case fixTUIRevalidatedMsg:
+		m.revalidating = false
+		m.revalidatePath = ""
+		if msg.err != nil {
+			m.errText = msg.err.Error()
+			m.status = "revalidation failed"
+			return m, nil
+		}
+		m.repos = msg.repos
+		m.rebuildList(msg.preferredPath)
+		m.errText = ""
+		m.status = fmt.Sprintf("revalidated %d repos", len(m.visible))
 		return m, nil
 	case fixWizardApplyProgressMsg:
 		return m, m.handleWizardApplyProgress(msg)
@@ -921,6 +988,9 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.help.ShowAll = !m.help.ShowAll
 			return m, nil
 		}
+		if m.revalidating {
+			return m, nil
+		}
 		if key.Matches(msg, m.keys.Up) {
 			m.moveRepoCursor(-1)
 			return m, nil
@@ -946,10 +1016,7 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyAllSelections()
 			return m, nil
 		case key.Matches(msg, m.keys.Refresh):
-			if err := m.refreshRepos(scanRefreshAlways); err != nil {
-				m.errText = err.Error()
-			}
-			return m, nil
+			return m, m.beginRevalidate()
 		case key.Matches(msg, m.keys.Ignore):
 			m.ignoreCurrentRepo()
 			return m, nil
@@ -992,13 +1059,7 @@ func (m *fixTUIModel) View() string {
 		b.WriteString("\n\n")
 	}
 
-	contentPanel := panelStyle
-	if m.viewMode == fixViewWizard && m.wizard.Applying {
-		contentPanel = contentPanel.BorderForeground(accentColor)
-	}
-	if w := m.viewContentWidth(); w > 0 {
-		contentPanel = contentPanel.Width(w)
-	}
+	contentPanel := m.mainContentPanelStyle()
 	content := m.viewMainContent()
 	switch m.viewMode {
 	case fixViewWizard:
@@ -1042,13 +1103,28 @@ func (m *fixTUIModel) View() string {
 	return fixPageStyle.Render(doc)
 }
 
+func (m *fixTUIModel) mainContentPanelStyle() lipgloss.Style {
+	contentPanel := panelStyle
+	if (m.viewMode == fixViewWizard && m.wizard.Applying) || m.revalidating {
+		contentPanel = contentPanel.BorderForeground(accentColor)
+	}
+	if w := m.viewContentWidth(); w > 0 {
+		contentPanel = contentPanel.Width(w)
+	}
+	return contentPanel
+}
+
 func (m *fixTUIModel) viewMainContent() string {
 	var b strings.Builder
-	b.WriteString(labelStyle.Render("Repository Fixes"))
+	title := "Repository Fixes"
+	if m.revalidating {
+		title += " " + m.revalidateSpinner.View()
+	}
+	b.WriteString(labelStyle.Render(title))
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Select per-repo fixes. Default selection is '-' (no action)."))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Grouped by catalog (default catalog first), then fixable, unsyncable, and syncable."))
+	b.WriteString(hintStyle.Render("Grouped by catalog (default catalog first), then fixable, unsyncable, syncable, and ignored."))
 	b.WriteString("\n\n")
 	b.WriteString(m.viewFixSummary())
 	b.WriteString("\n\n")
@@ -1113,6 +1189,10 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 		Risk:        repo.Risk,
 	})
 	action := m.currentActionForRepo(repo.Record.Path, fixActionsForSelection(actions))
+	ignored := m.ignored[repo.Record.Path]
+	if ignored {
+		action = fixNoAction
+	}
 	actionLabelValue := fixActionLabel(action)
 
 	reasonText := "none"
@@ -1127,14 +1207,19 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 
 	state := "syncable"
 	stateStyle := fixStateSyncableStyle
-	tier := classifyFixRepo(repo, actions)
-	switch tier {
-	case fixRepoTierAutofixable:
-		state = "fixable"
-		stateStyle = fixStateAutofixableStyle
-	case fixRepoTierUnsyncableBlocked:
-		state = "unsyncable"
-		stateStyle = fixStateUnsyncableStyle
+	if ignored {
+		state = "ignored"
+		stateStyle = fixStateIgnoredStyle
+	} else {
+		tier := classifyFixRepo(repo, actions)
+		switch tier {
+		case fixRepoTierAutofixable:
+			state = "fixable"
+			stateStyle = fixStateAutofixableStyle
+		case fixRepoTierUnsyncableBlocked:
+			state = "unsyncable"
+			stateStyle = fixStateUnsyncableStyle
+		}
 	}
 
 	var b strings.Builder
@@ -1188,9 +1273,14 @@ func (m *fixTUIModel) viewFixSummary() string {
 	fixable := 0
 	blocked := 0
 	syncable := 0
+	ignored := 0
 	for _, repo := range m.visible {
-		if m.selectedAction[repo.Record.Path] >= 0 {
+		if !m.ignored[repo.Record.Path] && m.selectedAction[repo.Record.Path] >= 0 {
 			pending++
+		}
+		if m.ignored[repo.Record.Path] {
+			ignored++
+			continue
 		}
 		tier := classifyFixRepo(repo, eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
 			Interactive: true,
@@ -1210,7 +1300,8 @@ func (m *fixTUIModel) viewFixSummary() string {
 	autoStyle := renderFixSummaryPill(fmt.Sprintf("%d fixable", fixable), lipgloss.Color("214"))
 	blockedStyle := renderFixSummaryPill(fmt.Sprintf("%d unsyncable", blocked), errorFgColor)
 	syncStyle := renderFixSummaryPill(fmt.Sprintf("%d syncable", syncable), successColor)
-	return lipgloss.JoinHorizontal(lipgloss.Top, totalStyle, " ", pendingStyle, "  ", autoStyle, " ", blockedStyle, " ", syncStyle)
+	ignoredStyle := renderFixSummaryPill(fmt.Sprintf("%d ignored", ignored), mutedTextColor)
+	return lipgloss.JoinHorizontal(lipgloss.Top, totalStyle, " ", pendingStyle, "  ", autoStyle, " ", blockedStyle, " ", syncStyle, " ", ignoredStyle)
 }
 
 func (m *fixTUIModel) viewContentWidth() int {
@@ -1267,7 +1358,14 @@ func (m *fixTUIModel) refreshRepos(refreshMode scanRefreshMode) error {
 		selectedPath = current.Record.Path
 	}
 
-	repos, err := m.app.loadFixRepos(m.includeCatalogs, refreshMode)
+	loadRepos := m.loadReposFn
+	if loadRepos == nil {
+		if m.app == nil {
+			return errors.New("internal: app is not configured")
+		}
+		loadRepos = m.app.loadFixRepos
+	}
+	repos, err := loadRepos(m.includeCatalogs, refreshMode)
 	if err != nil {
 		return err
 	}
@@ -1275,6 +1373,42 @@ func (m *fixTUIModel) refreshRepos(refreshMode scanRefreshMode) error {
 	m.rebuildList(selectedPath)
 	m.errText = ""
 	return nil
+}
+
+func (m *fixTUIModel) beginRevalidate() tea.Cmd {
+	if m.revalidating {
+		return nil
+	}
+	m.revalidating = true
+	m.errText = ""
+	m.status = "revalidating repository states..."
+	m.revalidatePath = ""
+	if current, ok := m.currentRepo(); ok {
+		m.revalidatePath = current.Record.Path
+	}
+	return tea.Batch(m.revalidateSpinner.Tick, m.revalidateReposCmd(m.revalidatePath))
+}
+
+func (m *fixTUIModel) revalidateReposCmd(preferredPath string) tea.Cmd {
+	loadRepos := m.loadReposFn
+	includeCatalogs := append([]string(nil), m.includeCatalogs...)
+	return func() tea.Msg {
+		if loadRepos == nil {
+			if m.app == nil {
+				return fixTUIRevalidatedMsg{
+					err:           errors.New("internal: app is not configured"),
+					preferredPath: preferredPath,
+				}
+			}
+			loadRepos = m.app.loadFixRepos
+		}
+		repos, err := loadRepos(includeCatalogs, scanRefreshAlways)
+		return fixTUIRevalidatedMsg{
+			repos:         repos,
+			err:           err,
+			preferredPath: preferredPath,
+		}
+	}
 }
 
 func (m *fixTUIModel) rebuildList(preferredPath string) {
@@ -1292,9 +1426,6 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 
 	for _, repo := range m.repos {
 		path := repo.Record.Path
-		if m.ignored[path] {
-			continue
-		}
 
 		actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
 			Interactive: true,
@@ -1377,8 +1508,15 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 		case fixRepoTierUnsyncableBlocked:
 			state = "unsyncable"
 		}
+		ignored := m.ignored[path]
+		if ignored {
+			state = "ignored"
+		}
 
 		selected := m.currentActionForRepo(path, fixActionsForSelection(entry.actions))
+		if ignored {
+			selected = fixNoAction
+		}
 		repoIndex := len(m.visible)
 		items = append(items, fixListItem{
 			Kind:              fixListItemRepo,
@@ -1394,6 +1532,7 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			Action:            fixActionLabel(selected),
 			ActionKey:         selected,
 			Tier:              entry.tier,
+			Ignored:           ignored,
 		})
 		m.rowRepoIndex = append(m.rowRepoIndex, repoIndex)
 		m.repoIndexToRow = append(m.repoIndexToRow, rowIndex)
@@ -1478,6 +1617,10 @@ func (m *fixTUIModel) cycleCurrentAction(delta int) {
 	if !ok {
 		return
 	}
+	if m.ignored[repo.Record.Path] {
+		m.status = fmt.Sprintf("%s is ignored for this session; press u to unignore", repo.Record.Name)
+		return
+	}
 	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
 		Interactive: true,
 		Risk:        repo.Risk,
@@ -1504,6 +1647,10 @@ func (m *fixTUIModel) applyCurrentSelection() {
 	repo, ok := m.currentRepo()
 	if !ok {
 		m.status = "no repository selected"
+		return
+	}
+	if m.ignored[repo.Record.Path] {
+		m.status = fmt.Sprintf("%s is ignored for this session; press u to unignore", repo.Record.Name)
 		return
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
@@ -1593,6 +1740,10 @@ func (m *fixTUIModel) applyAllSelections() {
 	queue := make([]fixWizardDecision, 0, 8)
 
 	for _, repo := range m.visible {
+		if m.ignored[repo.Record.Path] {
+			skipped++
+			continue
+		}
 		actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
 			Interactive: true,
 			Risk:        repo.Risk,
@@ -1682,6 +1833,10 @@ func (m *fixTUIModel) toggleCurrentRepoAutoPush() {
 		m.status = "no repository selected"
 		return
 	}
+	if m.ignored[repo.Record.Path] {
+		m.status = fmt.Sprintf("%s is ignored for this session; press u to unignore", repo.Record.Name)
+		return
+	}
 	repoKey := strings.TrimSpace(repo.Record.RepoKey)
 	if repoKey == "" {
 		m.errText = fmt.Sprintf("%s has no repo_key; cannot toggle auto-push", repo.Record.Name)
@@ -1728,15 +1883,22 @@ func (m *fixTUIModel) ignoreCurrentRepo() {
 	if !ok {
 		return
 	}
+	if m.ignored[repo.Record.Path] {
+		m.status = fmt.Sprintf("%s is already ignored for this session", repo.Record.Name)
+		return
+	}
 	m.ignored[repo.Record.Path] = true
 	m.status = fmt.Sprintf("ignored %s for this session", repo.Record.Name)
-	m.rebuildList("")
+	m.rebuildList(repo.Record.Path)
 }
 
 func (m *fixTUIModel) unignoreCurrentRepo() {
 	repo, ok := m.currentRepo()
-	if ok {
+	if ok && m.ignored[repo.Record.Path] {
 		delete(m.ignored, repo.Record.Path)
+		m.status = fmt.Sprintf("unignored %s", repo.Record.Name)
+		m.rebuildList(repo.Record.Path)
+		return
 	}
 	if len(m.ignored) == 0 {
 		m.status = "no ignored repositories"

@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -234,12 +235,13 @@ func TestFixTUIRepoNameUsesOSC8ForAliasedGitHubHost(t *testing.T) {
 
 func newFixTUIModelForTest(repos []fixRepoState) *fixTUIModel {
 	m := &fixTUIModel{
-		repos:          append([]fixRepoState(nil), repos...),
-		ignored:        map[string]bool{},
-		selectedAction: map[string]int{},
-		repoList:       newFixRepoListModel(),
-		keys:           defaultFixTUIKeyMap(),
-		help:           help.New(),
+		repos:             append([]fixRepoState(nil), repos...),
+		ignored:           map[string]bool{},
+		selectedAction:    map[string]int{},
+		repoList:          newFixRepoListModel(),
+		keys:              defaultFixTUIKeyMap(),
+		help:              help.New(),
+		revalidateSpinner: newFixProgressSpinner(),
 	}
 	m.rebuildList("")
 	return m
@@ -470,6 +472,175 @@ func TestFixTUIActionCycleExcludesAutoPushSetting(t *testing.T) {
 	m.cycleCurrentAction(1)
 	if got := actionForVisibleRepo(m, 0); got != fixNoAction {
 		t.Fatalf("selected action after second cycle = %q, want %q", got, fixNoAction)
+	}
+}
+
+func TestFixTUIIgnoreKeepsRepoVisibleAndMarksIgnoredState(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	m.ignoreCurrentRepo()
+
+	if len(m.visible) != 1 {
+		t.Fatalf("visible repo count = %d, want 1 ignored repo still visible", len(m.visible))
+	}
+	if !m.ignored["/repos/api"] {
+		t.Fatal("expected repo path to remain in ignored set")
+	}
+
+	items := m.repoList.Items()
+	found := false
+	for _, item := range items {
+		row, ok := item.(fixListItem)
+		if !ok || row.Kind != fixListItemRepo || row.Path != "/repos/api" {
+			continue
+		}
+		found = true
+		if !row.Ignored {
+			t.Fatal("expected ignored row marker to be true")
+		}
+		if row.State != "ignored" {
+			t.Fatalf("row state = %q, want ignored", row.State)
+		}
+	}
+	if !found {
+		t.Fatal("expected ignored repo row to remain in list")
+	}
+
+	details := ansi.Strip(m.viewSelectedRepoDetails())
+	if !strings.Contains(details, "State: ignored") {
+		t.Fatalf("selected details should show ignored state, got %q", details)
+	}
+}
+
+func TestFixTUIIgnoredRepoIsExcludedFromApplyAllSelection(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	m.cycleCurrentAction(1) // select push
+	m.ignoreCurrentRepo()
+
+	if m.hasAnySelectedFixes() {
+		t.Fatal("expected ignored repo action selection to be excluded from apply-all eligibility")
+	}
+
+	m.applyAllSelections()
+	if !strings.Contains(m.status, "applied 0, skipped 1, failed 0") {
+		t.Fatalf("status = %q, want ignored repo counted as skipped in apply-all", m.status)
+	}
+}
+
+func TestFixTUIRevalidateShortcutEntersBusyState(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.loadReposFn = func(_ []string, _ scanRefreshMode) ([]fixRepoState, error) {
+		return repos, nil
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+
+	if !m.revalidating {
+		t.Fatal("expected revalidate key to set in-progress state")
+	}
+	if !strings.Contains(m.viewMainContent(), "Repository Fixes "+m.revalidateSpinner.View()) {
+		t.Fatalf("expected spinner next to repository title while revalidating, got %q", m.viewMainContent())
+	}
+	if got := m.mainContentPanelStyle().GetBorderTopForeground(); !reflect.DeepEqual(got, accentColor) {
+		t.Fatalf("busy border color = %#v, want accent %#v", got, accentColor)
+	}
+}
+
+func TestFixTUIRevalidateCommandUsesFullRefreshAndCompletionClearsBusyState(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+		},
+	}
+	updated := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Syncable:  true,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	refreshMode := scanRefreshNever
+	m.loadReposFn = func(_ []string, mode scanRefreshMode) ([]fixRepoState, error) {
+		refreshMode = mode
+		return updated, nil
+	}
+
+	msg := m.revalidateReposCmd("/repos/api")()
+	revalidated, ok := msg.(fixTUIRevalidatedMsg)
+	if !ok {
+		t.Fatalf("revalidate command msg type = %T, want fixTUIRevalidatedMsg", msg)
+	}
+	if refreshMode != scanRefreshAlways {
+		t.Fatalf("revalidate refresh mode = %v, want %v", refreshMode, scanRefreshAlways)
+	}
+	m.revalidating = true
+	_, _ = m.Update(revalidated)
+	if m.revalidating {
+		t.Fatal("expected busy state to clear after revalidate completion")
+	}
+	if got := m.mainContentPanelStyle().GetBorderTopForeground(); reflect.DeepEqual(got, accentColor) {
+		t.Fatalf("idle border color should not use accent, got %#v", got)
+	}
+	if !m.visible[0].Record.Syncable {
+		t.Fatal("expected revalidated repo data to replace list state")
 	}
 }
 
