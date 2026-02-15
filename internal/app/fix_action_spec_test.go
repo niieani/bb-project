@@ -137,6 +137,27 @@ func TestFixActionPlanCreateProjectIncludesGhAndMetadataWrite(t *testing.T) {
 	}
 }
 
+func TestFixActionExecutionPlanAppendsRevalidationStep(t *testing.T) {
+	t.Parallel()
+
+	plan := fixActionExecutionPlanFor(FixActionPush, fixActionPlanContext{
+		Branch:    "main",
+		Upstream:  "origin/main",
+		OriginURL: "git@github.com:you/api.git",
+	})
+
+	if len(plan) < 2 {
+		t.Fatalf("execution plan entries = %d, want >= 2", len(plan))
+	}
+	last := plan[len(plan)-1]
+	if last.ID != fixActionPlanRevalidateStateID {
+		t.Fatalf("last execution-plan step id = %q, want %q", last.ID, fixActionPlanRevalidateStateID)
+	}
+	if !strings.Contains(last.Summary, "Revalidate repository status") {
+		t.Fatalf("unexpected last execution-plan summary = %q", last.Summary)
+	}
+}
+
 func planContains(plan []fixActionPlanEntry, command bool, fragment string) bool {
 	for _, entry := range plan {
 		if entry.Command != command {

@@ -412,15 +412,38 @@ func (a *App) applyFixActionWithObserver(
 		}
 	}
 
+	planByID := fixActionPlanEntriesByID(
+		fixActionExecutionPlanFor(action, buildFixActionPlanContext(cfg, target, opts)),
+	)
+	refreshEntry := lookupFixActionPlanEntry(planByID, fixActionPlanRevalidateStateID, fixActionPlanEntry{
+		ID:      fixActionPlanRevalidateStateID,
+		Command: false,
+		Summary: "Revalidate repository status and syncability state.",
+	})
+
 	if err := a.executeFixAction(cfg, target, action, opts, observer); err != nil {
 		return fixRepoState{}, err
 	}
-	if err := a.refreshMachineSnapshotLocked(cfg, &machine, includeCatalogs, scanRefreshAlways); err != nil {
+
+	if err := runFixApplyStep(observer, refreshEntry, func() error {
+		if err := a.refreshFixRepoSnapshotLocked(cfg, &machine, target.Record.Path); err != nil {
+			a.logf("fix: targeted revalidation failed for %s: %v; falling back to full scan", target.Record.Path, err)
+			return a.refreshMachineSnapshotLocked(cfg, &machine, includeCatalogs, scanRefreshAlways)
+		}
+		return nil
+	}); err != nil {
 		return fixRepoState{}, err
 	}
-	refreshedRepos, err := a.loadFixReposUnlocked(machine)
-	if err != nil {
-		return fixRepoState{}, err
+
+	updated, err := a.loadFixRepoByPathUnlocked(machine, target.Record.Path)
+	if err == nil {
+		return updated, nil
+	}
+	a.logf("fix: targeted state load failed for %s: %v; falling back to full state load", target.Record.Path, err)
+
+	refreshedRepos, refreshErr := a.loadFixReposUnlocked(machine)
+	if refreshErr != nil {
+		return fixRepoState{}, refreshErr
 	}
 	return resolveFixTarget(target.Record.Path, refreshedRepos)
 }
@@ -452,6 +475,88 @@ func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, 
 	return out, nil
 }
 
+func (a *App) loadFixRepoByPathUnlocked(machine domain.MachineFile, repoPath string) (fixRepoState, error) {
+	targetPath := filepath.Clean(repoPath)
+	for _, rec := range machine.Repos {
+		if filepath.Clean(rec.Path) != targetPath {
+			continue
+		}
+		var meta *domain.RepoMetadataFile
+		if repoKey := strings.TrimSpace(rec.RepoKey); repoKey != "" {
+			loaded, err := state.LoadRepoMetadata(a.Paths, repoKey)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fixRepoState{}, err
+			}
+			if err == nil {
+				loadedCopy := loaded
+				meta = &loadedCopy
+			}
+		}
+		risk, riskErr := collectFixRiskSnapshot(rec.Path, a.Git)
+		if riskErr != nil && !errors.Is(riskErr, os.ErrNotExist) {
+			a.logf("fix: risk scan failed for %s: %v", rec.Path, riskErr)
+		}
+		return fixRepoState{
+			Record:           rec,
+			Meta:             meta,
+			Risk:             risk,
+			IsDefaultCatalog: rec.Catalog == machine.DefaultCatalog,
+		}, nil
+	}
+	return fixRepoState{}, fmt.Errorf("project %q not found", repoPath)
+}
+
+func (a *App) refreshFixRepoSnapshotLocked(cfg domain.ConfigFile, machine *domain.MachineFile, repoPath string) error {
+	if machine == nil {
+		return errors.New("machine snapshot is required")
+	}
+	targetPath := filepath.Clean(repoPath)
+
+	index := -1
+	var previous domain.MachineRepoRecord
+	for i, rec := range machine.Repos {
+		if filepath.Clean(rec.Path) != targetPath {
+			continue
+		}
+		index = i
+		previous = rec
+		break
+	}
+	if index < 0 {
+		return fmt.Errorf("project %q not found in machine snapshot", repoPath)
+	}
+
+	catalog := domain.Catalog{Name: previous.Catalog}
+	for _, candidate := range machine.Catalogs {
+		if candidate.Name == previous.Catalog {
+			catalog = candidate
+			break
+		}
+	}
+
+	observed, err := a.observeRepoForScan(cfg, discoveredRepo{
+		Catalog: catalog,
+		Path:    previous.Path,
+		Name:    previous.Name,
+		RepoKey: previous.RepoKey,
+	}, false)
+	if err != nil {
+		return err
+	}
+
+	observed = domain.UpdateObservedAt(previous, observed, a.Now())
+	machine.Repos[index] = observed
+	sort.Slice(machine.Repos, func(i, j int) bool {
+		if repoRecordSortKey(machine.Repos[i]) == repoRecordSortKey(machine.Repos[j]) {
+			return machine.Repos[i].Path < machine.Repos[j].Path
+		}
+		return repoRecordSortKey(machine.Repos[i]) < repoRecordSortKey(machine.Repos[j])
+	})
+
+	machine.UpdatedAt = a.Now()
+	return state.SaveMachine(a.Paths, *machine)
+}
+
 func (a *App) executeFixAction(
 	cfg domain.ConfigFile,
 	target fixRepoState,
@@ -469,7 +574,7 @@ func (a *App) executeFixAction(
 		preferredRemote = strings.TrimSpace(target.Meta.PreferredRemote)
 	}
 	planByID := fixActionPlanEntriesByID(
-		fixActionPlanFor(action, buildFixActionPlanContext(cfg, target, opts)),
+		fixActionExecutionPlanFor(action, buildFixActionPlanContext(cfg, target, opts)),
 	)
 	entryFor := func(id string, fallback fixActionPlanEntry) fixActionPlanEntry {
 		return lookupFixActionPlanEntry(planByID, id, fallback)

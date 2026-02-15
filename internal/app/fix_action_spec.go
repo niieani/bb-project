@@ -37,6 +37,8 @@ type fixActionPlanEntry struct {
 	Summary string
 }
 
+const fixActionPlanRevalidateStateID = "revalidate-state"
+
 var fixActionSpecs = map[string]fixActionSpec{
 	FixActionIgnore: {
 		Label:       "Ignore for this session",
@@ -105,6 +107,19 @@ func fixActionPlanFor(action string, ctx fixActionPlanContext) []fixActionPlanEn
 		return nil
 	}
 	return spec.BuildPlan(ctx)
+}
+
+func fixActionExecutionPlanFor(action string, ctx fixActionPlanContext) []fixActionPlanEntry {
+	entries := append([]fixActionPlanEntry(nil), fixActionPlanFor(action, ctx)...)
+	if len(entries) == 0 {
+		return nil
+	}
+	entries = append(entries, fixActionPlanEntry{
+		ID:      fixActionPlanRevalidateStateID,
+		Command: false,
+		Summary: "Revalidate repository status and syncability state.",
+	})
+	return entries
 }
 
 func planFixActionIgnore(_ fixActionPlanContext) []fixActionPlanEntry {

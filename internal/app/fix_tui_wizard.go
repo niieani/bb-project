@@ -108,7 +108,8 @@ type fixWizardApplyProgressMsg struct {
 }
 
 type fixWizardApplyCompletedMsg struct {
-	Err error
+	Updated fixRepoState
+	Err     error
 }
 
 type fixWizardApplyChannelClosedMsg struct{}
@@ -303,7 +304,7 @@ func (m *fixTUIModel) applyWizardCurrent() tea.Cmd {
 		return nil
 	}
 
-	entries := fixActionPlanFor(m.wizard.Action, m.wizardActionPlanContext())
+	entries := fixActionExecutionPlanFor(m.wizard.Action, m.wizardActionPlanContext())
 	m.wizard.ApplyPlan = append([]fixActionPlanEntry(nil), entries...)
 	m.wizard.ApplyStepStatus = make(map[string]fixWizardApplyStepStatus, len(entries))
 	for _, entry := range entries {
@@ -321,10 +322,10 @@ func (m *fixTUIModel) applyWizardCurrent() tea.Cmd {
 	m.wizard.ApplyEvents = progress
 
 	go func() {
-		_, err := app.applyFixActionWithObserver(includeCatalogs, repoPath, action, opts, func(event fixApplyStepEvent) {
+		updated, err := app.applyFixActionWithObserver(includeCatalogs, repoPath, action, opts, func(event fixApplyStepEvent) {
 			progress <- fixWizardApplyProgressMsg{Event: event}
 		})
-		progress <- fixWizardApplyCompletedMsg{Err: err}
+		progress <- fixWizardApplyCompletedMsg{Updated: updated, Err: err}
 		close(progress)
 	}()
 
@@ -387,7 +388,7 @@ func (m *fixTUIModel) wizardApplyPlanEntries() []fixActionPlanEntry {
 	if len(m.wizard.ApplyPlan) > 0 {
 		return append([]fixActionPlanEntry(nil), m.wizard.ApplyPlan...)
 	}
-	return fixActionPlanFor(m.wizard.Action, m.wizardActionPlanContext())
+	return fixActionExecutionPlanFor(m.wizard.Action, m.wizardActionPlanContext())
 }
 
 func (m *fixTUIModel) handleWizardApplyProgress(msg fixWizardApplyProgressMsg) tea.Cmd {
@@ -422,14 +423,31 @@ func (m *fixTUIModel) handleWizardApplyCompleted(msg fixWizardApplyCompletedMsg)
 	}
 
 	m.errText = ""
+	m.updateRepoAfterWizardApply(msg.Updated)
 	m.appendSummaryResult(m.wizard.Action, "applied", m.wizard.ApplyDetail)
-	if m.app != nil {
-		if err := m.refreshRepos(scanRefreshAlways); err != nil {
-			m.errText = err.Error()
-		}
-	}
 	m.advanceWizard()
 	return nil
+}
+
+func (m *fixTUIModel) updateRepoAfterWizardApply(updated fixRepoState) {
+	path := strings.TrimSpace(updated.Record.Path)
+	if path == "" {
+		return
+	}
+
+	replaced := false
+	for i := range m.repos {
+		if m.repos[i].Record.Path != path {
+			continue
+		}
+		m.repos[i] = updated
+		replaced = true
+		break
+	}
+	if !replaced {
+		m.repos = append(m.repos, updated)
+	}
+	m.rebuildList(path)
 }
 
 func (m *fixTUIModel) detectWizardDefaults() (owner string, visibility domain.Visibility, remoteProtocol string) {

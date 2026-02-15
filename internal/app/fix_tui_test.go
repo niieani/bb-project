@@ -788,6 +788,9 @@ func TestFixTUIWizardViewIncludesApplyingPlanBlock(t *testing.T) {
 	if !strings.Contains(view, "git push") {
 		t.Fatalf("expected push command in applying-plan block, got %q", view)
 	}
+	if !strings.Contains(view, "Revalidate repository status and syncability state.") {
+		t.Fatalf("expected post-apply revalidation step in applying-plan block, got %q", view)
+	}
 }
 
 func TestFixTUIWizardApplyingPlanShowsCommandsAndNonCommandActions(t *testing.T) {
@@ -927,6 +930,46 @@ func TestFixTUIWizardApplyFailureStopsQueueOnCurrentItem(t *testing.T) {
 	}
 	if !strings.Contains(m.status, "apply failed for api") {
 		t.Fatalf("status = %q, want failure guidance for current repo", m.status)
+	}
+}
+
+func TestFixTUIWizardApplyCompletionUpdatesCurrentRepoState(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Syncable:  false,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+	m.wizard.Applying = true
+
+	updated := fixRepoState{
+		Record: domain.MachineRepoRecord{
+			Name:      "api",
+			Path:      "/repos/api",
+			OriginURL: "git@github.com:you/api.git",
+			Upstream:  "origin/main",
+			Syncable:  true,
+		},
+		Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+	}
+
+	m.handleWizardApplyCompleted(fixWizardApplyCompletedMsg{Updated: updated})
+
+	if !m.repos[0].Record.Syncable {
+		t.Fatal("expected in-memory repo state to be updated after successful apply completion")
+	}
+	if m.viewMode != fixViewSummary {
+		t.Fatalf("view mode = %v, want summary after single-item queue completion", m.viewMode)
 	}
 }
 
