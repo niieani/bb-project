@@ -514,15 +514,11 @@ func (a *App) applyFixActionWithObserver(
 	if err != nil {
 		return fixRepoState{}, err
 	}
-	if err := a.refreshMachineSnapshotLocked(cfg, &machine, includeCatalogs, scanRefreshIfStale); err != nil {
+	if err := a.refreshFixRepoSnapshotLocked(cfg, &machine, repoPath); err != nil {
 		return fixRepoState{}, err
 	}
 
-	repos, err := a.loadFixReposUnlocked(machine)
-	if err != nil {
-		return fixRepoState{}, err
-	}
-	target, err := resolveFixTarget(repoPath, repos)
+	target, err := a.loadFixRepoByPathUnlocked(machine, repoPath)
 	if err != nil {
 		return fixRepoState{}, err
 	}
@@ -554,26 +550,12 @@ func (a *App) applyFixActionWithObserver(
 	}
 
 	if err := runFixApplyStep(observer, refreshEntry, func() error {
-		if err := a.refreshFixRepoSnapshotLocked(cfg, &machine, target.Record.Path); err != nil {
-			a.logf("fix: targeted revalidation failed for %s: %v; falling back to full scan", target.Record.Path, err)
-			return a.refreshMachineSnapshotLocked(cfg, &machine, includeCatalogs, scanRefreshAlways)
-		}
-		return nil
+		return a.refreshFixRepoSnapshotLocked(cfg, &machine, target.Record.Path)
 	}); err != nil {
 		return fixRepoState{}, err
 	}
 
-	updated, err := a.loadFixRepoByPathUnlocked(machine, target.Record.Path)
-	if err == nil {
-		return updated, nil
-	}
-	a.logf("fix: targeted state load failed for %s: %v; falling back to full state load", target.Record.Path, err)
-
-	refreshedRepos, refreshErr := a.loadFixReposUnlocked(machine)
-	if refreshErr != nil {
-		return fixRepoState{}, refreshErr
-	}
-	return resolveFixTarget(target.Record.Path, refreshedRepos)
+	return a.loadFixRepoByPathUnlocked(machine, target.Record.Path)
 }
 
 func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, error) {
