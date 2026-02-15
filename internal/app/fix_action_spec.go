@@ -275,7 +275,7 @@ func planFixActionCheckpointThenSync(ctx fixActionPlanContext) []fixActionPlanEn
 	stageOnly := make([]fixActionPlanEntry, 0, len(stageEntries))
 	for _, entry := range stageEntries {
 		switch entry.ID {
-		case "stage-skip-push-no-origin", "stage-push-set-upstream", "stage-push":
+		case "stage-skip-push-no-origin", "stage-push-set-upstream", "stage-push", "stage-rename-branch":
 			continue
 		default:
 			stageOnly = append(stageOnly, entry)

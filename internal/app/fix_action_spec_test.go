@@ -373,6 +373,40 @@ func TestFixActionPlanCheckpointThenSyncIncludesCommitSyncAndPush(t *testing.T) 
 	}
 }
 
+func TestFixActionPlanCheckpointThenSyncWithBranchRenameRenamesOnceAtPublishStep(t *testing.T) {
+	t.Parallel()
+
+	plan := fixActionPlanFor(FixActionCheckpointThenSync, fixActionPlanContext{
+		Branch:             "main",
+		Upstream:           "origin/main",
+		OriginURL:          "git@github.com:you/api.git",
+		CommitMessage:      "auto",
+		PreferredRemote:    "origin",
+		ForkBranchRenameTo: "test-branch",
+		SyncStrategy:       FixSyncStrategyRebase,
+		FetchPrune:         true,
+	})
+
+	if idx := planEntryIndex(plan, "stage-rename-branch"); idx >= 0 {
+		t.Fatalf("did not expect stage rename in checkpoint-then-sync plan, got %#v", plan)
+	}
+
+	renameIdx := planEntryIndex(plan, "checkpoint-rename-branch")
+	pushIdx := planEntryIndex(plan, "checkpoint-push")
+	if renameIdx < 0 || pushIdx < 0 {
+		t.Fatalf("missing expected checkpoint rename/push entries, got %#v", plan)
+	}
+	if renameIdx > pushIdx {
+		t.Fatalf("expected checkpoint rename before checkpoint push, got %#v", plan)
+	}
+	if !strings.Contains(plan[renameIdx].Summary, "git branch -m test-branch") {
+		t.Fatalf("unexpected checkpoint rename summary = %q", plan[renameIdx].Summary)
+	}
+	if !strings.Contains(plan[pushIdx].Summary, "git push -u origin test-branch") {
+		t.Fatalf("unexpected checkpoint push summary = %q", plan[pushIdx].Summary)
+	}
+}
+
 func TestFixActionPlanSyncAndPullFetchPrunePreviewFollowsConfig(t *testing.T) {
 	t.Parallel()
 
