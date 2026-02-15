@@ -128,8 +128,15 @@ func TestValidateFixApplyOptionsCreateProject(t *testing.T) {
 	err = validateFixApplyOptions(FixActionPush, fixApplyOptions{
 		ForkBranchRenameTo: "feature/fork-target",
 	})
+	if err != nil {
+		t.Fatalf("expected branch rename target to be valid for push, got %v", err)
+	}
+
+	err = validateFixApplyOptions(FixActionPullFFOnly, fixApplyOptions{
+		ForkBranchRenameTo: "feature/fork-target",
+	})
 	if err == nil {
-		t.Fatal("expected validation error when branch rename target is set for non-fork action")
+		t.Fatal("expected validation error when branch rename target is set for action that does not push")
 	}
 
 	err = validateFixApplyOptions(FixActionForkAndRetarget, fixApplyOptions{

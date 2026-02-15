@@ -115,12 +115,25 @@ func validateFixApplyOptions(action string, opts fixApplyOptions) error {
 		}
 	}
 	if strings.TrimSpace(opts.ForkBranchRenameTo) != "" {
-		if action != FixActionForkAndRetarget {
-			return fmt.Errorf("invalid fork branch rename target: action %q does not support branch rename", action)
+		if !actionSupportsPublishBranch(action) {
+			return fmt.Errorf("invalid publish branch target: action %q does not support publish-to-new-branch", action)
 		}
 		if err := validateGitBranchRenameTarget(opts.ForkBranchRenameTo); err != nil {
-			return fmt.Errorf("invalid fork branch rename target: %w", err)
+			return fmt.Errorf("invalid publish branch target: %w", err)
 		}
 	}
 	return nil
+}
+
+func actionSupportsPublishBranch(action string) bool {
+	switch action {
+	case FixActionForkAndRetarget,
+		FixActionPush,
+		FixActionStageCommitPush,
+		FixActionCheckpointThenSync,
+		FixActionSetUpstreamPush:
+		return true
+	default:
+		return false
+	}
 }

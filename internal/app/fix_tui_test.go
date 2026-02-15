@@ -2610,7 +2610,7 @@ func TestFixTUIWizardForkAndRetargetDefaultBranchShowsOptionalBranchRename(t *te
 	}
 
 	view := ansi.Strip(m.viewWizardContent())
-	if !strings.Contains(view, "New branch name (optional)") {
+	if !strings.Contains(view, "Publish as new branch (optional)") {
 		t.Fatalf("expected optional branch rename control in wizard view, got %q", view)
 	}
 }
@@ -2645,8 +2645,86 @@ func TestFixTUIWizardForkAndRetargetNonDefaultBranchHidesBranchRename(t *testing
 		t.Fatal("did not expect fork branch rename input on non-default branch")
 	}
 	view := ansi.Strip(m.viewWizardContent())
-	if strings.Contains(view, "New branch name (optional)") {
+	if strings.Contains(view, "Publish as new branch (optional)") {
 		t.Fatalf("did not expect optional branch rename control in wizard view, got %q", view)
+	}
+}
+
+func TestFixTUIWizardStageCommitPushDefaultBranchShowsOptionalPublishBranch(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Branch:    "main",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{
+				RepoKey:         "software/api",
+				Name:            "api",
+				OriginURL:       "https://github.com/you/api.git",
+				PreferredRemote: "origin",
+				AutoPush:        domain.AutoPushModeDisabled,
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	if !m.wizard.EnableForkBranchRename {
+		t.Fatal("expected optional publish-branch input to be enabled on default branch")
+	}
+	m.wizard.ForkBranchName.SetValue("feature/safe-publish")
+
+	plan := m.wizardApplyPlanEntries()
+	if !planContains(plan, true, "git branch -m feature/safe-publish") {
+		t.Fatalf("expected branch rename step in wizard plan, got %#v", plan)
+	}
+	if !planContains(plan, true, "git push -u origin feature/safe-publish") {
+		t.Fatalf("expected publish-to-new-branch push step in wizard plan, got %#v", plan)
+	}
+
+	view := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(view, "Publish as new branch (optional)") {
+		t.Fatalf("expected publish-branch control in wizard view, got %q", view)
+	}
+}
+
+func TestFixTUIWizardStageCommitPushNonDefaultBranchHidesOptionalPublishBranch(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Branch:    "feature/existing-work",
+				Upstream:  "origin/feature/existing-work",
+			},
+			Meta: &domain.RepoMetadataFile{
+				RepoKey:         "software/api",
+				Name:            "api",
+				OriginURL:       "https://github.com/you/api.git",
+				PreferredRemote: "origin",
+				AutoPush:        domain.AutoPushModeDisabled,
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	if m.wizard.EnableForkBranchRename {
+		t.Fatal("did not expect optional publish-branch input on non-default branch")
+	}
+	view := ansi.Strip(m.viewWizardContent())
+	if strings.Contains(view, "Publish as new branch (optional)") {
+		t.Fatalf("did not expect publish-branch control in wizard view, got %q", view)
 	}
 }
 

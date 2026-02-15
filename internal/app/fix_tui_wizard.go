@@ -276,7 +276,7 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	if m.wizard.EnableProjectName {
 		m.wizard.FocusArea = fixWizardFocusProjectName
 	}
-	m.wizard.EnableForkBranchRename = decision.Action == FixActionForkAndRetarget && isDefaultBranch(m.wizard.Branch, defaultBranch)
+	m.wizard.EnableForkBranchRename = shouldEnablePublishBranchInput(decision.Action, m.wizard.Branch, defaultBranch, m.wizard.OriginURL)
 	m.wizard.ForkBranchName = forkBranchInput
 	if m.wizard.EnableForkBranchRename {
 		m.wizard.FocusArea = fixWizardFocusForkBranch
@@ -620,6 +620,21 @@ func (m *fixTUIModel) shouldShowGitignoreToggle(action string, risk fixRiskSnaps
 		return len(risk.SuggestedGitignorePatterns) > 0
 	}
 	return len(risk.MissingGitignorePatterns) > 0
+}
+
+func shouldEnablePublishBranchInput(action string, branch string, defaultBranch string, originURL string) bool {
+	if !isDefaultBranch(branch, defaultBranch) {
+		return false
+	}
+	if strings.TrimSpace(originURL) == "" {
+		return false
+	}
+	switch action {
+	case FixActionForkAndRetarget, FixActionPush, FixActionStageCommitPush, FixActionCheckpointThenSync, FixActionSetUpstreamPush:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *fixTUIModel) wizardGitignoreTogglePatterns() []string {
@@ -1128,8 +1143,8 @@ func (m *fixTUIModel) viewWizardStaticControls() string {
 	if m.wizard.EnableForkBranchRename {
 		controls = append(controls, renderFieldBlock(
 			m.wizard.FocusArea == fixWizardFocusForkBranch,
-			"New branch name (optional)",
-			"Leave empty to keep the current branch and force push your fork.",
+			"Publish as new branch (optional)",
+			"Leave empty to keep the current branch push target.",
 			renderInputContainer(m.wizard.ForkBranchName.View(), m.wizard.FocusArea == fixWizardFocusForkBranch),
 			"",
 		))

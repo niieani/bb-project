@@ -166,9 +166,25 @@ func planFixActionAbortOperation(ctx fixActionPlanContext) []fixActionPlanEntry 
 	}
 }
 
-func planFixActionPush(_ fixActionPlanContext) []fixActionPlanEntry {
+func planFixActionPush(ctx fixActionPlanContext) []fixActionPlanEntry {
+	branch := strings.TrimSpace(ctx.Branch)
+	renameTo := strings.TrimSpace(ctx.ForkBranchRenameTo)
+	if renameTo == "" || renameTo == branch {
+		return []fixActionPlanEntry{
+			{ID: "push-main", Command: true, Summary: "git push"},
+		}
+	}
 	return []fixActionPlanEntry{
-		{ID: "push-main", Command: true, Summary: "git push"},
+		{
+			ID:      "push-rename-branch",
+			Command: true,
+			Summary: fmt.Sprintf("git branch -m %s", renameTo),
+		},
+		{
+			ID:      "push-main",
+			Command: true,
+			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(renameTo)),
+		},
 	}
 }
 
@@ -223,11 +239,30 @@ func planFixActionStageCommitPush(ctx fixActionPlanContext) []fixActionPlanEntry
 		})
 		return entries
 	}
+	pushBranch := strings.TrimSpace(ctx.Branch)
+	renameTo := strings.TrimSpace(ctx.ForkBranchRenameTo)
+	renamed := renameTo != "" && renameTo != pushBranch
+	if renamed {
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "stage-rename-branch",
+			Command: true,
+			Summary: fmt.Sprintf("git branch -m %s", renameTo),
+		})
+		pushBranch = renameTo
+	}
 	if strings.TrimSpace(ctx.Upstream) == "" {
 		entries = append(entries, fixActionPlanEntry{
 			ID:      "stage-push-set-upstream",
 			Command: true,
-			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(ctx.Branch)),
+			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(pushBranch)),
+		})
+		return entries
+	}
+	if renamed {
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "stage-push-set-upstream",
+			Command: true,
+			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(pushBranch)),
 		})
 		return entries
 	}
@@ -249,10 +284,24 @@ func planFixActionCheckpointThenSync(ctx fixActionPlanContext) []fixActionPlanEn
 	entries := make([]fixActionPlanEntry, 0, len(stageOnly)+4)
 	entries = append(entries, stageOnly...)
 	entries = append(entries, planFixActionSyncWithUpstream(ctx)...)
+	pushBranch := strings.TrimSpace(ctx.Branch)
+	renameTo := strings.TrimSpace(ctx.ForkBranchRenameTo)
+	if renameTo != "" && renameTo != pushBranch {
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "checkpoint-rename-branch",
+			Command: true,
+			Summary: fmt.Sprintf("git branch -m %s", renameTo),
+		})
+		pushBranch = renameTo
+	}
+	pushSummary := "git push"
+	if pushBranch != "" && pushBranch != strings.TrimSpace(ctx.Branch) {
+		pushSummary = fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(pushBranch))
+	}
 	entries = append(entries, fixActionPlanEntry{
 		ID:      "checkpoint-push",
 		Command: true,
-		Summary: "git push",
+		Summary: pushSummary,
 	})
 	return entries
 }
@@ -273,11 +322,27 @@ func planFixActionPullFFOnly(ctx fixActionPlanContext) []fixActionPlanEntry {
 }
 
 func planFixActionSetUpstreamPush(ctx fixActionPlanContext) []fixActionPlanEntry {
+	branch := strings.TrimSpace(ctx.Branch)
+	renameTo := strings.TrimSpace(ctx.ForkBranchRenameTo)
+	if renameTo == "" || renameTo == branch {
+		return []fixActionPlanEntry{
+			{
+				ID:      "upstream-push",
+				Command: true,
+				Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(ctx.Branch)),
+			},
+		}
+	}
 	return []fixActionPlanEntry{
+		{
+			ID:      "upstream-rename-branch",
+			Command: true,
+			Summary: fmt.Sprintf("git branch -m %s", renameTo),
+		},
 		{
 			ID:      "upstream-push",
 			Command: true,
-			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(ctx.Branch)),
+			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(renameTo)),
 		},
 	}
 }

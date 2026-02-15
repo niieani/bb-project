@@ -862,6 +862,34 @@ func (a *App) executeFixAction(
 	markSkipped := func(id string, fallback fixActionPlanEntry) {
 		emitFixApplyStep(observer, entryFor(id, fallback), fixApplyStepSkipped, nil)
 	}
+	resolveCurrentBranch := func() (string, error) {
+		branch := strings.TrimSpace(target.Record.Branch)
+		if branch == "" {
+			branch, _ = a.Git.CurrentBranch(path)
+		}
+		branch = strings.TrimSpace(branch)
+		if branch == "" {
+			return "", errors.New("cannot determine current branch")
+		}
+		return branch, nil
+	}
+	maybeRenameForPublish := func(stepID string, branch string) (string, bool, error) {
+		renameTo := strings.TrimSpace(opts.ForkBranchRenameTo)
+		if renameTo == "" || renameTo == branch {
+			return branch, false, nil
+		}
+		fallback := fixActionPlanEntry{
+			ID:      stepID,
+			Command: true,
+			Summary: fmt.Sprintf("git branch -m %s", renameTo),
+		}
+		if err := runStep(stepID, fallback, func() error {
+			return a.Git.RenameCurrentBranch(path, renameTo)
+		}); err != nil {
+			return "", false, err
+		}
+		return renameTo, true, nil
+	}
 	switch action {
 	case FixActionAbortOperation:
 		switch target.Record.OperationInProgress {
@@ -890,6 +918,24 @@ func (a *App) executeFixAction(
 				Action: action,
 				Reason: "push is blocked: branch is behind upstream; run sync-with-upstream first",
 			}
+		}
+		if strings.TrimSpace(opts.ForkBranchRenameTo) != "" {
+			branch, err := resolveCurrentBranch()
+			if err != nil {
+				return errors.New("cannot determine branch for publish")
+			}
+			branch, _, err = maybeRenameForPublish("push-rename-branch", branch)
+			if err != nil {
+				return err
+			}
+			pushRemote := plannedRemote(preferredRemote, target.Record.Upstream)
+			return runStep("push-main", fixActionPlanEntry{
+				ID:      "push-main",
+				Command: true,
+				Summary: fmt.Sprintf("git push -u %s %s", pushRemote, plannedBranch(branch)),
+			}, func() error {
+				return a.Git.PushUpstreamWithPreferredRemote(path, branch, pushRemote)
+			})
 		}
 		return runStep("push-main", fixActionPlanEntry{ID: "push-main", Command: true, Summary: "git push"}, func() error {
 			return a.Git.Push(path)
@@ -930,20 +976,22 @@ func (a *App) executeFixAction(
 			})
 			return nil
 		}
-		if target.Record.Upstream == "" {
-			branch := target.Record.Branch
-			if branch == "" {
-				branch, _ = a.Git.CurrentBranch(path)
-			}
-			if strings.TrimSpace(branch) == "" {
-				return errors.New("cannot determine branch for upstream push")
-			}
+		branch, err := resolveCurrentBranch()
+		if err != nil {
+			return errors.New("cannot determine branch for upstream push")
+		}
+		branch, renamed, err := maybeRenameForPublish("stage-rename-branch", branch)
+		if err != nil {
+			return err
+		}
+		if target.Record.Upstream == "" || renamed {
+			pushRemote := plannedRemote(preferredRemote, target.Record.Upstream)
 			return runStep("stage-push-set-upstream", fixActionPlanEntry{
 				ID:      "stage-push-set-upstream",
 				Command: true,
-				Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(preferredRemote, target.Record.Upstream), plannedBranch(branch)),
+				Summary: fmt.Sprintf("git push -u %s %s", pushRemote, plannedBranch(branch)),
 			}, func() error {
-				return a.Git.PushUpstreamWithPreferredRemote(path, branch, preferredRemote)
+				return a.Git.PushUpstreamWithPreferredRemote(path, branch, pushRemote)
 			})
 		}
 		return runStep("stage-push", fixActionPlanEntry{ID: "stage-push", Command: true, Summary: "git push"}, func() error {
@@ -1017,6 +1065,24 @@ func (a *App) executeFixAction(
 		if err := a.runFixSyncWithUpstreamSteps(cfg, path, target, syncStrategy, runStep, markSkipped); err != nil {
 			return err
 		}
+		branch, err := resolveCurrentBranch()
+		if err != nil {
+			return errors.New("cannot determine branch for publish")
+		}
+		branch, renamed, err := maybeRenameForPublish("checkpoint-rename-branch", branch)
+		if err != nil {
+			return err
+		}
+		if renamed {
+			pushRemote := plannedRemote(preferredRemote, target.Record.Upstream)
+			return runStep("checkpoint-push", fixActionPlanEntry{
+				ID:      "checkpoint-push",
+				Command: true,
+				Summary: fmt.Sprintf("git push -u %s %s", pushRemote, plannedBranch(branch)),
+			}, func() error {
+				return a.Git.PushUpstreamWithPreferredRemote(path, branch, pushRemote)
+			})
+		}
 		return runStep("checkpoint-push", fixActionPlanEntry{
 			ID:      "checkpoint-push",
 			Command: true,
@@ -1046,19 +1112,21 @@ func (a *App) executeFixAction(
 			return a.Git.PullFFOnly(path)
 		})
 	case FixActionSetUpstreamPush:
-		branch := target.Record.Branch
-		if branch == "" {
-			branch, _ = a.Git.CurrentBranch(path)
-		}
-		if strings.TrimSpace(branch) == "" {
+		branch, err := resolveCurrentBranch()
+		if err != nil {
 			return errors.New("cannot determine branch for upstream push")
 		}
+		branch, _, err = maybeRenameForPublish("upstream-rename-branch", branch)
+		if err != nil {
+			return err
+		}
+		pushRemote := plannedRemote(preferredRemote, target.Record.Upstream)
 		return runStep("upstream-push", fixActionPlanEntry{
 			ID:      "upstream-push",
 			Command: true,
-			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(preferredRemote, target.Record.Upstream), plannedBranch(branch)),
+			Summary: fmt.Sprintf("git push -u %s %s", pushRemote, plannedBranch(branch)),
 		}, func() error {
-			return a.Git.PushUpstreamWithPreferredRemote(path, branch, preferredRemote)
+			return a.Git.PushUpstreamWithPreferredRemote(path, branch, pushRemote)
 		})
 	case FixActionEnableAutoPush:
 		if strings.TrimSpace(target.Record.RepoKey) == "" {

@@ -243,6 +243,60 @@ func TestFixActionPlanForkAndRetargetWithBranchRenameAvoidsForcePush(t *testing.
 	}
 }
 
+func TestFixActionPlanStageCommitPushWithBranchRenamePublishesRenamedBranch(t *testing.T) {
+	t.Parallel()
+
+	plan := fixActionPlanFor(FixActionStageCommitPush, fixActionPlanContext{
+		Branch:             "main",
+		Upstream:           "origin/main",
+		OriginURL:          "git@github.com:you/api.git",
+		PreferredRemote:    "origin",
+		CommitMessage:      "auto",
+		ForkBranchRenameTo: "feature/safe-publish",
+	})
+
+	renameIdx := planEntryIndex(plan, "stage-rename-branch")
+	pushIdx := planEntryIndex(plan, "stage-push-set-upstream")
+	if renameIdx < 0 || pushIdx < 0 {
+		t.Fatalf("missing expected stage rename/push steps, got %#v", plan)
+	}
+	if renameIdx > pushIdx {
+		t.Fatalf("expected rename to happen before stage push, got %#v", plan)
+	}
+	if !strings.Contains(plan[renameIdx].Summary, "git branch -m feature/safe-publish") {
+		t.Fatalf("unexpected stage rename summary = %q", plan[renameIdx].Summary)
+	}
+	if !strings.Contains(plan[pushIdx].Summary, "git push -u origin feature/safe-publish") {
+		t.Fatalf("unexpected stage publish summary = %q", plan[pushIdx].Summary)
+	}
+}
+
+func TestFixActionPlanPushWithBranchRenamePublishesRenamedBranch(t *testing.T) {
+	t.Parallel()
+
+	plan := fixActionPlanFor(FixActionPush, fixActionPlanContext{
+		Branch:             "main",
+		Upstream:           "origin/main",
+		PreferredRemote:    "origin",
+		ForkBranchRenameTo: "feature/safe-publish",
+	})
+
+	renameIdx := planEntryIndex(plan, "push-rename-branch")
+	pushIdx := planEntryIndex(plan, "push-main")
+	if renameIdx < 0 || pushIdx < 0 {
+		t.Fatalf("missing expected push rename/push steps, got %#v", plan)
+	}
+	if renameIdx > pushIdx {
+		t.Fatalf("expected rename before push, got %#v", plan)
+	}
+	if !strings.Contains(plan[renameIdx].Summary, "git branch -m feature/safe-publish") {
+		t.Fatalf("unexpected push rename summary = %q", plan[renameIdx].Summary)
+	}
+	if !strings.Contains(plan[pushIdx].Summary, "git push -u origin feature/safe-publish") {
+		t.Fatalf("unexpected push publish summary = %q", plan[pushIdx].Summary)
+	}
+}
+
 func TestFixActionExecutionPlanAppendsRevalidationStep(t *testing.T) {
 	t.Parallel()
 
