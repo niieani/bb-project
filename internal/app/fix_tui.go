@@ -24,6 +24,7 @@ type fixTUIKeyMap struct {
 	Down     key.Binding
 	Left     key.Binding
 	Right    key.Binding
+	Toggle   key.Binding
 	Apply    key.Binding
 	Setting  key.Binding
 	Skip     key.Binding
@@ -59,9 +60,13 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 			key.WithKeys("right", "l"),
 			key.WithHelp("→/l", "next fix"),
 		),
+		Toggle: key.NewBinding(
+			key.WithKeys(" ", "space"),
+			key.WithHelp("space", "schedule fix"),
+		),
 		Apply: key.NewBinding(
 			key.WithKeys("enter"),
-			key.WithHelp("enter", "apply selected fix"),
+			key.WithHelp("enter", "run scheduled"),
 		),
 		Setting: key.NewBinding(
 			key.WithKeys("s"),
@@ -73,7 +78,7 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 		),
 		ApplyAll: key.NewBinding(
 			key.WithKeys("ctrl+a"),
-			key.WithHelp("ctrl+a", "apply all selected"),
+			key.WithHelp("ctrl+a", "run all scheduled"),
 		),
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),
@@ -103,12 +108,12 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 }
 
 func (k fixTUIKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Left, k.Apply, k.Setting, k.ApplyAll, k.Quit}
+	return []key.Binding{k.Up, k.Left, k.Toggle, k.Apply, k.ApplyAll, k.Quit}
 }
 
 func (k fixTUIKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Left, k.Right},
+		{k.Up, k.Down, k.Left, k.Right, k.Toggle},
 		{k.Apply, k.Setting, k.Skip, k.ApplyAll, k.Refresh, k.Ignore, k.Unignore},
 		{k.Help, k.Cancel, k.Quit},
 	}
@@ -165,23 +170,23 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 
 	canApplySelected := false
 	if hasRepo {
-		idx := m.selectedAction[repo.Record.Path]
-		canApplySelected = idx >= 0 && idx < len(options)
+		canApplySelected = len(m.scheduledActionsForRepo(repo.Record.Path, options)) > 0
 	}
 	canApplyAll := m.hasAnySelectedFixes()
 	canMoveRepo := len(m.visible) > 1
 	canChangeFix := len(options) > 0
+	canToggleSchedule := hasRepo && !m.ignored[repo.Record.Path] && len(options) > 0
 	canToggleAutoPush := hasRepo && !m.ignored[repo.Record.Path] && repoMetaAllowsAutoPush(repo.Meta)
 	canIgnoreRepo := hasRepo && !m.ignored[repo.Record.Path]
 	canUnignoreRepo := hasRepo && m.ignored[repo.Record.Path]
 
 	if canApplySelected {
-		b := newHelpBinding([]string{"enter"}, "enter", "apply selected")
+		b := newHelpBinding([]string{"enter"}, "enter", "run scheduled")
 		short = append(short, b)
 		primary = append(primary, b)
 	}
 	if canApplyAll {
-		b := newHelpBinding([]string{"ctrl+a"}, "ctrl+a", "apply all selected")
+		b := newHelpBinding([]string{"ctrl+a"}, "ctrl+a", "run all scheduled")
 		short = append(short, b)
 		primary = append(primary, b)
 	}
@@ -191,7 +196,12 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 		primary = append(primary, b)
 	}
 	if canChangeFix {
-		b := newHelpBinding([]string{"left", "right"}, "←/→", "change fix")
+		b := newHelpBinding([]string{"left", "right"}, "←/→", "browse fix")
+		short = append(short, b)
+		primary = append(primary, b)
+	}
+	if canToggleSchedule {
+		b := newHelpBinding([]string{"space"}, "space", "schedule/unschedule")
 		short = append(short, b)
 		primary = append(primary, b)
 	}
@@ -330,10 +340,6 @@ func (m *fixTUIModel) hasAnySelectedFixes() bool {
 		if m.ignored[repo.Record.Path] {
 			continue
 		}
-		idx := m.selectedAction[repo.Record.Path]
-		if idx < 0 {
-			continue
-		}
 		actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
 			Interactive:     true,
 			Risk:            repo.Risk,
@@ -341,7 +347,7 @@ func (m *fixTUIModel) hasAnySelectedFixes() bool {
 			SyncFeasibility: repo.SyncFeasibility,
 		})
 		options := selectableFixActions(fixActionsForSelection(actions))
-		if idx < len(options) {
+		if len(m.scheduledActionsForRepo(repo.Record.Path, options)) > 0 {
 			return true
 		}
 	}
@@ -426,7 +432,8 @@ type fixTUIModel struct {
 	repos           []fixRepoState
 	visible         []fixRepoState
 	ignored         map[string]bool
-	selectedAction  map[string]int
+	actionCursor    map[string]int
+	scheduled       map[string][]string
 	rowRepoIndex    []int
 	repoIndexToRow  []int
 
@@ -470,8 +477,8 @@ type fixListItem struct {
 	AutoPushMode      domain.AutoPushMode
 	AutoPushAvailable bool
 	Reasons           string
-	Action            string
-	ActionKey         string
+	BrowseAction      string
+	ScheduledActions  []string
 	Tier              fixRepoTier
 	Ignored           bool
 }
@@ -485,7 +492,7 @@ const (
 )
 
 func (i fixListItem) FilterValue() string {
-	return i.NamePlain + " " + i.Path + " " + i.Branch + " " + i.Reasons + " " + i.Action + " " + i.Catalog
+	return i.NamePlain + " " + i.Path + " " + i.Branch + " " + i.Reasons + " " + fixScheduledPlainText(i.ScheduledActions) + " " + i.Catalog
 }
 
 type fixColumnLayout struct {
@@ -584,14 +591,7 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 	autoPushCell := renderFixColumnCell(autoPushText, layout.Auto, autoPushStyle)
 	reasonsCell := renderFixColumnCell(row.Reasons, layout.Reasons, reasonsStyle)
-	actionStyle := fixActionStyleFor(row.ActionKey)
-	if row.Ignored {
-		actionStyle = fixNoActionStyle.Copy().Faint(true)
-	}
-	if selected {
-		actionStyle = actionStyle.Copy().Bold(true)
-	}
-	actionCell := renderFixColumnCell(row.Action, layout.Action, actionStyle)
+	actionCell := renderFixScheduledCell(row.ScheduledActions, layout.Action, selected, row.Ignored)
 
 	line := lipgloss.JoinHorizontal(lipgloss.Top,
 		repoCell,
@@ -619,7 +619,6 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 }
 
 const fixNoAction = "-"
-const fixAllActions = "__all__"
 
 const (
 	fixListDefaultWidth = 120
@@ -936,7 +935,8 @@ func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUI
 		includeCatalogs:          append([]string(nil), includeCatalogs...),
 		loadReposFn:              app.loadFixRepos,
 		ignored:                  map[string]bool{},
-		selectedAction:           map[string]int{},
+		actionCursor:             map[string]int{},
+		scheduled:                map[string][]string{},
 		summaryCursor:            0,
 		summarySelectedFollowUps: map[string]bool{},
 		keys:                     defaultFixTUIKeyMap(),
@@ -1095,6 +1095,9 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Right):
 			m.cycleCurrentAction(1)
 			return m, nil
+		case key.Matches(msg, m.keys.Toggle):
+			m.toggleCurrentActionScheduled()
+			return m, nil
 		case key.Matches(msg, m.keys.Apply):
 			m.applyCurrentSelection()
 			return m, m.takePendingCmd()
@@ -1213,7 +1216,9 @@ func (m *fixTUIModel) viewMainContent() string {
 	}
 	b.WriteString(labelStyle.Render(title))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Select per-repo fixes. Default selection is '-' (no action)."))
+	b.WriteString(hintStyle.Render("Browse eligible fixes with ←/→, press space to schedule or unschedule."))
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Render("Enter runs scheduled fixes for the selected repo; ctrl+a runs scheduled fixes across repos."))
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Grouped by catalog (default catalog first), then fixable, unsyncable, syncable, and ignored."))
 	if m.immediateApplying {
@@ -1268,7 +1273,7 @@ func (m *fixTUIModel) viewRepoHeader() string {
 		fixListColumnGap,
 		renderFixColumnCell("Reasons", layout.Reasons, fixHeaderCellStyle),
 		fixListColumnGap,
-		renderFixColumnCell("Selected Fix", layout.Action, fixHeaderCellStyle),
+		renderFixColumnCell("Scheduled", layout.Action, fixHeaderCellStyle),
 	)
 	// Match row rendering width: two-char indicator plus one guard column.
 	return "  " + header
@@ -1285,11 +1290,10 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 		SyncStrategy:    FixSyncStrategyRebase,
 		SyncFeasibility: repo.SyncFeasibility,
 	})
-	action := m.currentActionForRepo(repo.Record.Path, fixActionsForSelection(actions))
+	options := selectableFixActions(fixActionsForSelection(actions))
+	action := m.currentActionForRepo(repo.Record.Path, options)
+	scheduled := m.scheduledActionsForRepo(repo.Record.Path, options)
 	ignored := m.ignored[repo.Record.Path]
-	if ignored {
-		action = fixNoAction
-	}
 	actionLabelValue := fixActionLabel(action)
 
 	reasonText := "none"
@@ -1330,7 +1334,7 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	b.WriteString("\n")
 	stateLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("State:")
 	autoPushLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Auto-push:")
-	actionLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Action:")
+	browseLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Browse:")
 	branchLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Branch:")
 	autoPushValue := autoPushModeDisplayLabel(repoMetaAutoPushMode(repo.Meta))
 	autoPushValueStyle := fixAutoPushOffStyle
@@ -1351,7 +1355,7 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 		" ",
 		autoPushValueStyle.Render(autoPushValue),
 		"   ",
-		actionLabel,
+		browseLabel,
 		" ",
 		fixActionStyleFor(action).Render(actionLabelValue),
 		"   ",
@@ -1361,6 +1365,8 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Reasons: ") + fixReasonsStyle.Render(reasonText))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Scheduled: ") + renderScheduledDetails(scheduled, ignored))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Action help: ") + hintStyle.Render(fixActionDescription(action)))
 	return b.String()
@@ -1374,19 +1380,21 @@ func (m *fixTUIModel) viewFixSummary() string {
 	syncable := 0
 	ignored := 0
 	for _, repo := range m.visible {
-		if !m.ignored[repo.Record.Path] && m.selectedAction[repo.Record.Path] >= 0 {
-			pending++
+		actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+			Interactive:     true,
+			Risk:            repo.Risk,
+			SyncStrategy:    FixSyncStrategyRebase,
+			SyncFeasibility: repo.SyncFeasibility,
+		})
+		options := selectableFixActions(fixActionsForSelection(actions))
+		if !m.ignored[repo.Record.Path] {
+			pending += len(m.scheduledActionsForRepo(repo.Record.Path, options))
 		}
 		if m.ignored[repo.Record.Path] {
 			ignored++
 			continue
 		}
-		tier := classifyFixRepo(repo, eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
-			Interactive:     true,
-			Risk:            repo.Risk,
-			SyncStrategy:    FixSyncStrategyRebase,
-			SyncFeasibility: repo.SyncFeasibility,
-		}))
+		tier := classifyFixRepo(repo, actions)
 		switch tier {
 		case fixRepoTierAutofixable:
 			fixable++
@@ -1397,7 +1405,7 @@ func (m *fixTUIModel) viewFixSummary() string {
 		}
 	}
 	totalStyle := renderStatusPill(fmt.Sprintf("%d repos", total))
-	pendingStyle := renderStatusPill(fmt.Sprintf("%d selected", pending))
+	pendingStyle := renderStatusPill(fmt.Sprintf("%d scheduled", pending))
 	autoStyle := renderFixSummaryPill(fmt.Sprintf("%d fixable", fixable), lipgloss.Color("214"))
 	blockedStyle := renderFixSummaryPill(fmt.Sprintf("%d unsyncable", blocked), errorFgColor)
 	syncStyle := renderFixSummaryPill(fmt.Sprintf("%d syncable", syncable), successColor)
@@ -1699,8 +1707,19 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			SyncFeasibility: repo.SyncFeasibility,
 		})
 		options := selectableFixActions(fixActionsForSelection(actions))
-		if idx, ok := m.selectedAction[path]; !ok || idx < -1 || idx >= len(options) {
-			m.selectedAction[path] = -1
+		if len(options) == 0 {
+			m.actionCursor[path] = -1
+			delete(m.scheduled, path)
+		} else {
+			if idx, ok := m.actionCursor[path]; !ok || idx < 0 || idx >= len(options) {
+				m.actionCursor[path] = 0
+			}
+			normalized := normalizeScheduledFixes(options, m.scheduled[path])
+			if len(normalized) == 0 {
+				delete(m.scheduled, path)
+			} else {
+				m.scheduled[path] = normalized
+			}
 		}
 		entries = append(entries, fixVisibleEntry{
 			repo:    repo,
@@ -1780,10 +1799,9 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			state = "ignored"
 		}
 
-		selected := m.currentActionForRepo(path, fixActionsForSelection(entry.actions))
-		if ignored {
-			selected = fixNoAction
-		}
+		options := selectableFixActions(fixActionsForSelection(entry.actions))
+		browseAction := m.currentActionForRepo(path, options)
+		scheduled := m.scheduledActionsForRepo(path, options)
 		repoIndex := len(m.visible)
 		items = append(items, fixListItem{
 			Kind:              fixListItemRepo,
@@ -1796,8 +1814,8 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			AutoPushMode:      repoMetaAutoPushMode(repo.Meta),
 			AutoPushAvailable: repoMetaAllowsAutoPush(repo.Meta),
 			Reasons:           reasons,
-			Action:            fixActionLabel(selected),
-			ActionKey:         selected,
+			BrowseAction:      browseAction,
+			ScheduledActions:  append([]string(nil), scheduled...),
 			Tier:              entry.tier,
 			Ignored:           ignored,
 		})
@@ -1895,19 +1913,72 @@ func (m *fixTUIModel) cycleCurrentAction(delta int) {
 		SyncFeasibility: repo.SyncFeasibility,
 	})
 	options := selectableFixActions(fixActionsForSelection(actions))
-	key := repo.Record.Path
-	optionCount := len(options) + 1 // include "-" no-op option
-	pos := m.selectedAction[key] + 1
-	pos = (pos + delta) % optionCount
-	if pos < 0 {
-		pos += optionCount
+	if len(options) == 0 {
+		m.status = fmt.Sprintf("no eligible fixes available for %s", repo.Record.Name)
+		return
 	}
-	m.selectedAction[key] = pos - 1
-	selected := m.currentActionForRepo(key, actions)
-	if selected == fixNoAction {
-		m.status = fmt.Sprintf("no action selected for %s", repo.Record.Name)
+	key := repo.Record.Path
+	pos := m.actionCursor[key]
+	if pos < 0 || pos >= len(options) {
+		pos = 0
+	}
+	pos = (pos + delta) % len(options)
+	if pos < 0 {
+		pos += len(options)
+	}
+	m.actionCursor[key] = pos
+	selected := options[pos]
+	m.status = fmt.Sprintf("browsing %s for %s; press space to schedule", fixActionLabel(selected), repo.Record.Name)
+	m.rebuildList(repo.Record.Path)
+}
+
+func (m *fixTUIModel) toggleCurrentActionScheduled() {
+	repo, ok := m.currentRepo()
+	if !ok {
+		m.status = "no repository selected"
+		return
+	}
+	if m.ignored[repo.Record.Path] {
+		m.status = fmt.Sprintf("%s is ignored for this session; press u to unignore", repo.Record.Name)
+		return
+	}
+	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+		Interactive:     true,
+		Risk:            repo.Risk,
+		SyncStrategy:    FixSyncStrategyRebase,
+		SyncFeasibility: repo.SyncFeasibility,
+	})
+	options := selectableFixActions(fixActionsForSelection(actions))
+	if len(options) == 0 {
+		m.status = fmt.Sprintf("no eligible fixes available for %s", repo.Record.Name)
+		return
+	}
+	current := m.currentActionForRepo(repo.Record.Path, options)
+	if current == fixNoAction {
+		m.status = fmt.Sprintf("no eligible fixes available for %s", repo.Record.Name)
+		return
+	}
+	scheduled := append([]string(nil), m.scheduledActionsForRepo(repo.Record.Path, options)...)
+	wasScheduled := containsAction(scheduled, current)
+	if wasScheduled {
+		scheduled = removeAction(scheduled, current)
 	} else {
-		m.status = fmt.Sprintf("%s selected for %s (%s)", fixActionLabel(selected), repo.Record.Name, fixActionDescription(selected))
+		scheduled = append(scheduled, current)
+	}
+	scheduled = normalizeScheduledFixes(options, scheduled)
+	if len(scheduled) == 0 {
+		delete(m.scheduled, repo.Record.Path)
+	} else {
+		m.scheduled[repo.Record.Path] = scheduled
+	}
+	if containsAction(scheduled, current) {
+		m.status = fmt.Sprintf("scheduled %s for %s", fixActionLabel(current), repo.Record.Name)
+	} else if wasScheduled {
+		m.status = fmt.Sprintf("unscheduled %s for %s", fixActionLabel(current), repo.Record.Name)
+	} else if len(scheduled) > 0 {
+		m.status = fmt.Sprintf("%s superseded by %s for %s", fixActionLabel(current), fixActionLabel(scheduled[0]), repo.Record.Name)
+	} else {
+		m.status = fmt.Sprintf("no fixes scheduled for %s", repo.Record.Name)
 	}
 	m.rebuildList(repo.Record.Path)
 }
@@ -1928,29 +1999,17 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		SyncStrategy:    FixSyncStrategyRebase,
 		SyncFeasibility: repo.SyncFeasibility,
 	})
-	selectionActions := fixActionsForSelection(actions)
-	options := selectableFixActions(selectionActions)
-	idx := m.selectedAction[repo.Record.Path]
-	if idx < 0 {
-		m.status = fmt.Sprintf("no action selected for %s", repo.Record.Name)
+	options := selectableFixActions(fixActionsForSelection(actions))
+	selections := m.scheduledActionsForRepo(repo.Record.Path, options)
+	if len(selections) == 0 {
+		m.status = fmt.Sprintf("no fixes scheduled for %s", repo.Record.Name)
 		return
 	}
-	if idx >= len(options) {
-		m.selectedAction[repo.Record.Path] = -1
-		m.status = fmt.Sprintf("selection reset for %s; pick an eligible action", repo.Record.Name)
-		m.rebuildList(repo.Record.Path)
-		return
-	}
-	action := options[idx]
 	m.resetSummaryFollowUpState()
 	m.summaryResults = nil
 
 	queue := make([]fixWizardDecision, 0, 2)
 	immediateTasks := make([]fixImmediateActionTask, 0, 2)
-	selections := []string{action}
-	if action == fixAllActions {
-		selections = fixActionsForAllExecution(selectionActions)
-	}
 	for _, selection := range selections {
 		if isRiskyFixAction(selection) {
 			queue = append(queue, fixWizardDecision{
@@ -2002,23 +2061,11 @@ func (m *fixTUIModel) applyAllSelections() {
 			SyncStrategy:    FixSyncStrategyRebase,
 			SyncFeasibility: repo.SyncFeasibility,
 		})
-		selectionActions := fixActionsForSelection(actions)
-		options := selectableFixActions(selectionActions)
-		idx := m.selectedAction[repo.Record.Path]
-		if idx < 0 {
+		options := selectableFixActions(fixActionsForSelection(actions))
+		selections := m.scheduledActionsForRepo(repo.Record.Path, options)
+		if len(selections) == 0 {
 			skipped++
 			continue
-		}
-		if idx >= len(options) {
-			skipped++
-			m.selectedAction[repo.Record.Path] = -1
-			continue
-		}
-
-		selection := options[idx]
-		selections := []string{selection}
-		if selection == fixAllActions {
-			selections = fixActionsForAllExecution(selectionActions)
 		}
 		for _, selected := range selections {
 			if isRiskyFixAction(selected) {
@@ -2158,20 +2205,64 @@ func (m *fixTUIModel) unignoreCurrentRepo() {
 
 func (m *fixTUIModel) currentActionForRepo(path string, actions []string) string {
 	options := selectableFixActions(actions)
-	idx := m.selectedAction[path]
-	if idx < 0 || idx >= len(options) {
+	if len(options) == 0 {
 		return fixNoAction
+	}
+	idx := m.actionCursor[path]
+	if idx < 0 || idx >= len(options) {
+		idx = 0
 	}
 	return options[idx]
 }
 
 func selectableFixActions(actions []string) []string {
-	if len(actions) <= 1 {
-		return actions
+	return append([]string(nil), actions...)
+}
+
+func (m *fixTUIModel) scheduledActionsForRepo(path string, eligible []string) []string {
+	if len(eligible) == 0 {
+		return nil
 	}
-	out := make([]string, 0, len(actions)+1)
-	out = append(out, actions...)
-	out = append(out, fixAllActions)
+	return normalizeScheduledFixes(eligible, m.scheduled[path])
+}
+
+func normalizeScheduledFixes(eligible []string, scheduled []string) []string {
+	if len(eligible) == 0 || len(scheduled) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(eligible))
+	for _, action := range eligible {
+		allowed[action] = struct{}{}
+	}
+	filtered := make([]string, 0, len(scheduled))
+	seen := make(map[string]struct{}, len(scheduled))
+	for _, action := range scheduled {
+		if _, ok := allowed[action]; !ok {
+			continue
+		}
+		if _, ok := seen[action]; ok {
+			continue
+		}
+		seen[action] = struct{}{}
+		filtered = append(filtered, action)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return fixActionsForAllExecution(fixActionsForSelection(filtered))
+}
+
+func removeAction(actions []string, target string) []string {
+	if len(actions) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(actions))
+	for _, action := range actions {
+		if action == target {
+			continue
+		}
+		out = append(out, action)
+	}
 	return out
 }
 
@@ -2295,6 +2386,63 @@ func renderFixColumnCell(value string, width int, style lipgloss.Style) string {
 	return style.Width(width).MaxWidth(width).Render(ansi.Truncate(value, width, "…"))
 }
 
+func renderFixScheduledCell(actions []string, width int, selected bool, ignored bool) string {
+	if len(actions) == 0 {
+		style := fixNoActionStyle
+		if ignored {
+			style = style.Copy().Faint(true)
+		}
+		if selected {
+			style = style.Copy().Bold(true)
+		}
+		return renderFixColumnCell(fixNoAction, width, style)
+	}
+	parts := make([]string, 0, len(actions))
+	for _, action := range actions {
+		style := fixActionStyleFor(action)
+		if ignored {
+			style = style.Copy().Foreground(mutedTextColor).Faint(true)
+		}
+		if selected {
+			style = style.Copy().Bold(true)
+		}
+		parts = append(parts, style.Render("■"))
+	}
+	cell := strings.Join(parts, " ")
+	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(ansi.Truncate(cell, width, "…"))
+}
+
+func renderScheduledDetails(actions []string, ignored bool) string {
+	if len(actions) == 0 {
+		style := fixNoActionStyle
+		if ignored {
+			style = style.Copy().Faint(true)
+		}
+		return style.Render(fixNoAction)
+	}
+	parts := make([]string, 0, len(actions))
+	for _, action := range actions {
+		style := fixActionStyleFor(action)
+		if ignored {
+			style = style.Copy().Foreground(mutedTextColor).Faint(true)
+		}
+		token := style.Render("■")
+		parts = append(parts, token+" "+style.Render(fixActionLabel(action)))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func fixScheduledPlainText(actions []string) string {
+	if len(actions) == 0 {
+		return fixNoAction
+	}
+	labels := make([]string, 0, len(actions))
+	for _, action := range actions {
+		labels = append(labels, fixActionLabel(action))
+	}
+	return strings.Join(labels, " ")
+}
+
 func renderFixSummaryPill(value string, fg lipgloss.TerminalColor) string {
 	return lipgloss.NewStyle().
 		Foreground(fg).
@@ -2310,8 +2458,6 @@ func fixActionStyleFor(action string) lipgloss.Style {
 	switch action {
 	case fixNoAction:
 		return fixNoActionStyle
-	case fixAllActions:
-		return fixActionAutoPushStyle.Copy().Bold(true)
 	case FixActionPush:
 		return fixActionPushStyle
 	case FixActionStageCommitPush:
@@ -2341,8 +2487,6 @@ func fixActionLabel(action string) string {
 	switch action {
 	case fixNoAction:
 		return fixNoAction
-	case fixAllActions:
-		return "All fixes"
 	}
 	if spec, ok := fixActionSpecFor(action); ok {
 		return spec.Label
@@ -2353,9 +2497,7 @@ func fixActionLabel(action string) string {
 func fixActionDescription(action string) string {
 	switch action {
 	case fixNoAction:
-		return "Do nothing for this repository in the current run."
-	case fixAllActions:
-		return "Run all currently eligible fixes for this repository."
+		return "No eligible fix is currently selected for browsing."
 	}
 	if spec, ok := fixActionSpecFor(action); ok {
 		return spec.Description

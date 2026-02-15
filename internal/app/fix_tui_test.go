@@ -63,7 +63,7 @@ func TestFixTUICycleSelectionPerRow(t *testing.T) {
 	}
 }
 
-func TestFixTUISelectionFallbackAfterEligibilityChange(t *testing.T) {
+func TestFixTUICursorFallbackAfterEligibilityChange(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
@@ -91,7 +91,7 @@ func TestFixTUISelectionFallbackAfterEligibilityChange(t *testing.T) {
 	if len(initialOptions) < 2 {
 		t.Fatalf("expected at least two options before fallback test, got %v", initialOptions)
 	}
-	m.selectedAction["/repos/api"] = 1
+	m.actionCursor["/repos/api"] = 1
 	before := actionForVisibleRepo(m, 0)
 	if before == fixNoAction {
 		t.Fatalf("expected preselected action to be non-default before fallback, got %q", before)
@@ -108,8 +108,8 @@ func TestFixTUISelectionFallbackAfterEligibilityChange(t *testing.T) {
 	m.repos[0].Meta = &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled}
 	m.rebuildList("/repos/api")
 
-	if got := actionForVisibleRepo(m, 0); !strings.Contains(got, fixNoAction) {
-		t.Fatalf("fallback action = %q, want default no-op", got)
+	if got := actionForVisibleRepo(m, 0); got != FixActionPush {
+		t.Fatalf("fallback action = %q, want %q", got, FixActionPush)
 	}
 }
 
@@ -245,7 +245,8 @@ func newFixTUIModelForTest(repos []fixRepoState) *fixTUIModel {
 	m := &fixTUIModel{
 		repos:                 append([]fixRepoState(nil), repos...),
 		ignored:               map[string]bool{},
-		selectedAction:        map[string]int{},
+		actionCursor:          map[string]int{},
+		scheduled:             map[string][]string{},
 		repoList:              newFixRepoListModel(),
 		keys:                  defaultFixTUIKeyMap(),
 		help:                  help.New(),
@@ -262,7 +263,7 @@ func actionForVisibleRepo(m *fixTUIModel, idx int) string {
 		Interactive: true,
 		Risk:        repo.Risk,
 	})
-	return m.currentActionForRepo(repo.Record.Path, fixActionsForSelection(actions))
+	return m.currentActionForRepo(repo.Record.Path, selectableFixActions(fixActionsForSelection(actions)))
 }
 
 func TestFixTUIViewUsesCanonicalChromeWithoutInlineKeyLegend(t *testing.T) {
@@ -403,7 +404,7 @@ func TestFixTUIBootStoresLoadError(t *testing.T) {
 	}
 }
 
-func TestFixTUIDefaultSelectionIsNoAction(t *testing.T) {
+func TestFixTUIDefaultBrowseStartsAtFirstEligibleFix(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
@@ -420,22 +421,23 @@ func TestFixTUIDefaultSelectionIsNoAction(t *testing.T) {
 	}
 	m := newFixTUIModelForTest(repos)
 
-	if got := actionForVisibleRepo(m, 0); !strings.Contains(got, fixNoAction) {
-		t.Fatalf("selected fix = %q, want no-op '-'", got)
+	if got := actionForVisibleRepo(m, 0); got != FixActionPush {
+		t.Fatalf("browsed fix = %q, want %q", got, FixActionPush)
 	}
 }
 
-func TestFixTUIActionCycleIncludesNoAction(t *testing.T) {
+func TestFixTUIActionCycleWrapsWithinEligibleFixes(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
 		{
 			Record: domain.MachineRepoRecord{
-				Name:      "api",
-				Path:      "/repos/api",
-				OriginURL: "git@github.com:you/api.git",
-				Upstream:  "origin/main",
-				Ahead:     1,
+				Name:            "api",
+				Path:            "/repos/api",
+				OriginURL:       "git@github.com:you/api.git",
+				Upstream:        "origin/main",
+				Ahead:           1,
+				HasDirtyTracked: true,
 			},
 			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
@@ -443,14 +445,18 @@ func TestFixTUIActionCycleIncludesNoAction(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
 
+	if got := actionForVisibleRepo(m, 0); got != FixActionStageCommitPush {
+		t.Fatalf("default browsed action = %q, want %q", got, FixActionStageCommitPush)
+	}
+
 	m.cycleCurrentAction(1)
-	if got := actionForVisibleRepo(m, 0); strings.Contains(got, fixNoAction) {
-		t.Fatalf("expected first cycle to move off no-op, got %q", got)
+	if got := actionForVisibleRepo(m, 0); got != FixActionPush {
+		t.Fatalf("action after forward cycle = %q, want %q", got, FixActionPush)
 	}
 
 	m.cycleCurrentAction(-1)
-	if got := actionForVisibleRepo(m, 0); !strings.Contains(got, fixNoAction) {
-		t.Fatalf("expected cycle back to no-op, got %q", got)
+	if got := actionForVisibleRepo(m, 0); got != FixActionStageCommitPush {
+		t.Fatalf("action after reverse cycle = %q, want %q", got, FixActionStageCommitPush)
 	}
 }
 
@@ -479,8 +485,8 @@ func TestFixTUIActionCycleExcludesAutoPushSetting(t *testing.T) {
 	}
 
 	m.cycleCurrentAction(1)
-	if got := actionForVisibleRepo(m, 0); got != fixNoAction {
-		t.Fatalf("selected action after second cycle = %q, want %q", got, fixNoAction)
+	if got := actionForVisibleRepo(m, 0); got != FixActionPush {
+		t.Fatalf("selected action after second cycle = %q, want %q", got, FixActionPush)
 	}
 }
 
@@ -745,7 +751,7 @@ func TestFixTUIImmediateApplyEntersBusyStateWithSpinnerAndLockedStatus(t *testin
 	}
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
-	m.cycleCurrentAction(1) // pull-ff-only
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")}) // schedule pull-ff-only
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
@@ -792,7 +798,7 @@ func TestFixTUIImmediateApplyLocksNavigationKeys(t *testing.T) {
 	}
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
-	m.cycleCurrentAction(1) // pull-ff-only
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")}) // schedule pull-ff-only
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
@@ -826,7 +832,7 @@ func TestFixTUIImmediateApplyAllEntersBusyState(t *testing.T) {
 	}
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
-	m.cycleCurrentAction(1) // pull-ff-only
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")}) // schedule pull-ff-only
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
 	if cmd == nil {
@@ -1111,6 +1117,7 @@ func TestFixTUIRiskySelectionOpensConfirmationWizard(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
 	m.cycleCurrentAction(1) // push
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
 	m.applyCurrentSelection()
 
 	if m.viewMode != fixViewWizard {
@@ -1144,6 +1151,7 @@ func TestFixTUIAbortSelectionOpensConfirmationWizard(t *testing.T) {
 		t.Fatalf("selected action = %q, want %q", got, FixActionAbortOperation)
 	}
 
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
 	m.applyCurrentSelection()
 	if m.viewMode != fixViewWizard {
 		t.Fatalf("view mode = %v, want wizard mode", m.viewMode)
@@ -2132,16 +2140,16 @@ func TestFixTUIListGlobalFooterHelpShowsOnlyAvailableActions(t *testing.T) {
 	m.setCursor(0)
 
 	initial := shortHelpEntries(m.contextualHelpMap().ShortHelp())
-	if helpContains(initial, "enter apply selected") || helpContains(initial, "ctrl+a apply all selected") {
+	if helpContains(initial, "enter run scheduled") || helpContains(initial, "ctrl+a run all scheduled") {
 		t.Fatalf("expected apply shortcuts hidden when nothing is selected, got %v", initial)
 	}
 
-	m.cycleCurrentAction(1) // select push
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")}) // schedule push
 	selected := shortHelpEntries(m.contextualHelpMap().ShortHelp())
-	if len(selected) == 0 || selected[0] != "enter apply selected" {
-		t.Fatalf("expected most important shortcut first (enter apply selected), got %v", selected)
+	if len(selected) == 0 || selected[0] != "enter run scheduled" {
+		t.Fatalf("expected most important shortcut first (enter run scheduled), got %v", selected)
 	}
-	if !helpContains(selected, "ctrl+a apply all selected") || !helpContains(selected, "s cycle auto-push") {
+	if !helpContains(selected, "ctrl+a run all scheduled") || !helpContains(selected, "s cycle auto-push") {
 		t.Fatalf("expected selected-action footer help to include apply-all and auto-push, got %v", selected)
 	}
 	if strings.Contains(strings.Join(selected, " • "), "Left") || strings.Contains(strings.Join(selected, " • "), "Right") {
@@ -3303,13 +3311,12 @@ func TestFixRepoDelegateLeavesWrapGuardColumn(t *testing.T) {
 	repoList.Select(0)
 
 	item := fixListItem{
-		Name:      "phomemo_m02s",
-		Branch:    "main",
-		State:     "unsyncable",
-		Reasons:   "dirty_tracked, dirty_untracked, missing_origin",
-		Action:    fixActionLabel(FixActionEnableAutoPush),
-		ActionKey: FixActionEnableAutoPush,
-		Tier:      fixRepoTierAutofixable,
+		Name:             "phomemo_m02s",
+		Branch:           "main",
+		State:            "unsyncable",
+		Reasons:          "dirty_tracked, dirty_untracked, missing_origin",
+		ScheduledActions: []string{FixActionEnableAutoPush},
+		Tier:             fixRepoTierAutofixable,
 	}
 
 	var b strings.Builder
@@ -3679,7 +3686,7 @@ func TestClassifyFixRepoMarksSyncProbeFailedAsBlocked(t *testing.T) {
 	}
 }
 
-func TestSelectableFixActionsAddsAllFixesOptionForMultiple(t *testing.T) {
+func TestSelectableFixActionsKeepsPriorityOrderWithoutSyntheticAllOption(t *testing.T) {
 	t.Parallel()
 
 	options := selectableFixActions(fixActionsForSelection([]string{
@@ -3687,11 +3694,12 @@ func TestSelectableFixActionsAddsAllFixesOptionForMultiple(t *testing.T) {
 		FixActionSyncWithUpstream,
 		FixActionPush,
 	}))
-	if len(options) != 4 {
-		t.Fatalf("options len = %d, want 4", len(options))
+	if len(options) != 3 {
+		t.Fatalf("options len = %d, want 3", len(options))
 	}
 	syncIndex := -1
 	stageIndex := -1
+	pushIndex := -1
 	for i, option := range options {
 		if option == FixActionSyncWithUpstream {
 			syncIndex = i
@@ -3699,15 +3707,18 @@ func TestSelectableFixActionsAddsAllFixesOptionForMultiple(t *testing.T) {
 		if option == FixActionStageCommitPush {
 			stageIndex = i
 		}
+		if option == FixActionPush {
+			pushIndex = i
+		}
 	}
-	if syncIndex < 0 || stageIndex < 0 {
-		t.Fatalf("expected sync and stage options in %v", options)
+	if syncIndex < 0 || stageIndex < 0 || pushIndex < 0 {
+		t.Fatalf("expected sync, stage, and push options in %v", options)
 	}
 	if syncIndex > stageIndex {
 		t.Fatalf("expected sync-with-upstream to be ordered before stage-commit-push, got %v", options)
 	}
-	if got := options[3]; got != fixAllActions {
-		t.Fatalf("last option = %q, want %q", got, fixAllActions)
+	if stageIndex > pushIndex {
+		t.Fatalf("expected stage-commit-push to be ordered before push, got %v", options)
 	}
 }
 
@@ -3718,8 +3729,8 @@ func TestSelectableFixActionsOrdersStageCommitBeforeCreateProject(t *testing.T) 
 		FixActionCreateProject,
 		FixActionStageCommitPush,
 	}))
-	if len(options) != 3 {
-		t.Fatalf("options len = %d, want 3", len(options))
+	if len(options) != 2 {
+		t.Fatalf("options len = %d, want 2", len(options))
 	}
 	stageIndex := -1
 	createIndex := -1
@@ -3753,7 +3764,7 @@ func TestFixActionsForAllExecutionSkipsRedundantPushAfterStageCommitPush(t *test
 	}
 }
 
-func TestFixTUIAllFixesQueueUsesExecutionOrderAndDeduplicatesRiskyActions(t *testing.T) {
+func TestFixTUISpaceTogglesScheduledFixForCurrentRepo(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
@@ -3769,14 +3780,42 @@ func TestFixTUIAllFixesQueueUsesExecutionOrderAndDeduplicatesRiskyActions(t *tes
 		},
 	}
 	m := newFixTUIModelForTest(repos)
-	repo := m.visible[0]
-	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
-		Interactive: true,
-		Risk:        repo.Risk,
-	})
-	options := selectableFixActions(fixActionsForSelection(actions))
-	m.selectedAction[repo.Record.Path] = len(options) - 1 // All fixes
+	m.setCursor(0)
+	m.cycleCurrentAction(1)
+	if m.hasAnySelectedFixes() {
+		t.Fatal("expected browsing with left/right alone not to schedule fixes")
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	if !m.hasAnySelectedFixes() {
+		t.Fatal("expected space to schedule the currently browsed fix")
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	if m.hasAnySelectedFixes() {
+		t.Fatal("expected pressing space again to unschedule the currently browsed fix")
+	}
+}
 
+func TestFixTUIScheduledQueueUsesExecutionOrderAndDeduplicatesRiskyActions(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:            "api",
+				Path:            "/repos/api",
+				OriginURL:       "git@github.com:you/api.git",
+				Upstream:        "origin/main",
+				HasDirtyTracked: true,
+				Ahead:           1,
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	m.cycleCurrentAction(1) // stage-commit-push
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	m.cycleCurrentAction(1) // push
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
 	m.applyCurrentSelection()
 	if m.viewMode != fixViewWizard {
 		t.Fatalf("view mode = %v, want %v", m.viewMode, fixViewWizard)
@@ -3789,45 +3828,7 @@ func TestFixTUIAllFixesQueueUsesExecutionOrderAndDeduplicatesRiskyActions(t *tes
 	}
 }
 
-func TestFixTUIAllFixesQueueRunsStageCommitBeforeCreateProject(t *testing.T) {
-	t.Parallel()
-
-	repos := []fixRepoState{
-		{
-			Record: domain.MachineRepoRecord{
-				Name:         "api",
-				Path:         "/repos/api",
-				OriginURL:    "",
-				Upstream:     "",
-				HasUntracked: true,
-			},
-		},
-	}
-	m := newFixTUIModelForTest(repos)
-	repo := m.visible[0]
-	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
-		Interactive: true,
-		Risk:        repo.Risk,
-	})
-	options := selectableFixActions(fixActionsForSelection(actions))
-	m.selectedAction[repo.Record.Path] = len(options) - 1 // All fixes
-
-	m.applyCurrentSelection()
-	if m.viewMode != fixViewWizard {
-		t.Fatalf("view mode = %v, want %v", m.viewMode, fixViewWizard)
-	}
-	if len(m.wizard.Queue) != 2 {
-		t.Fatalf("wizard queue len = %d, want 2", len(m.wizard.Queue))
-	}
-	if got := m.wizard.Queue[0].Action; got != FixActionStageCommitPush {
-		t.Fatalf("wizard queue[0] action = %q, want %q", got, FixActionStageCommitPush)
-	}
-	if got := m.wizard.Queue[1].Action; got != FixActionCreateProject {
-		t.Fatalf("wizard queue[1] action = %q, want %q", got, FixActionCreateProject)
-	}
-}
-
-func TestFixTUIApplyAllSelectionsUsesAllFixesExecutionOrderPerRepo(t *testing.T) {
+func TestFixTUIApplyAllSelectionsUsesScheduledExecutionOrderPerRepo(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
@@ -3843,14 +3844,11 @@ func TestFixTUIApplyAllSelectionsUsesAllFixesExecutionOrderPerRepo(t *testing.T)
 		},
 	}
 	m := newFixTUIModelForTest(repos)
-	repo := m.visible[0]
-	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
-		Interactive: true,
-		Risk:        repo.Risk,
-	})
-	options := selectableFixActions(fixActionsForSelection(actions))
-	m.selectedAction[repo.Record.Path] = len(options) - 1 // All fixes
-
+	m.setCursor(0)
+	m.cycleCurrentAction(1) // stage-commit-push
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	m.cycleCurrentAction(1) // push
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
 	m.applyAllSelections()
 	if m.viewMode != fixViewWizard {
 		t.Fatalf("view mode = %v, want %v", m.viewMode, fixViewWizard)
