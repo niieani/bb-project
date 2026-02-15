@@ -23,6 +23,15 @@ type Result struct {
 	Stderr string
 }
 
+type SyncProbeOutcome string
+
+const (
+	SyncProbeOutcomeClean    SyncProbeOutcome = "clean"
+	SyncProbeOutcomeConflict SyncProbeOutcome = "conflict"
+	SyncProbeOutcomeFailed   SyncProbeOutcome = "probe_failed"
+	SyncProbeOutcomeUnknown  SyncProbeOutcome = "unknown"
+)
+
 var gitProcessEnv = []string{
 	"GIT_CONFIG_GLOBAL=/dev/null",
 	"GIT_CONFIG_NOSYSTEM=1",
@@ -45,9 +54,17 @@ func gitCommandEnv(base []string) []string {
 }
 
 func (r Runner) run(dir string, name string, args ...string) (Result, error) {
+	return r.runWithEnv(dir, nil, name, args...)
+}
+
+func (r Runner) runWithEnv(dir string, extraEnv []string, name string, args ...string) (Result, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
-	cmd.Env = gitCommandEnv(os.Environ())
+	base := os.Environ()
+	if len(extraEnv) > 0 {
+		base = append(base, extraEnv...)
+	}
+	cmd.Env = gitCommandEnv(base)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -309,6 +326,11 @@ func (r Runner) PullFFOnly(path string) error {
 	return err
 }
 
+func (r Runner) RunGitNoHooks(dir string, args ...string) (string, error) {
+	out, err := r.runWithEnv(dir, []string{"HUSKY=0"}, "git", append([]string{"-c", "core.hooksPath=/dev/null"}, args...)...)
+	return strings.TrimSpace(out.Stdout), err
+}
+
 func (r Runner) Rebase(path, upstream string) error {
 	upstream = strings.TrimSpace(upstream)
 	if upstream == "" {
@@ -328,24 +350,32 @@ func (r Runner) MergeNoEdit(path, upstream string) error {
 }
 
 func (r Runner) CanSyncWithUpstream(path string, upstream string, strategy string) (bool, error) {
+	outcome, err := r.ProbeSyncWithUpstream(path, upstream, strategy)
+	if err != nil {
+		return false, err
+	}
+	return outcome == SyncProbeOutcomeClean, nil
+}
+
+func (r Runner) ProbeSyncWithUpstream(path string, upstream string, strategy string) (SyncProbeOutcome, error) {
 	upstream = strings.TrimSpace(upstream)
 	if upstream == "" {
-		return false, nil
+		return SyncProbeOutcomeUnknown, nil
 	}
 	strategy = strings.ToLower(strings.TrimSpace(strategy))
 	if strategy != "rebase" && strategy != "merge" {
-		return false, fmt.Errorf("unsupported sync strategy %q", strategy)
+		return SyncProbeOutcomeUnknown, fmt.Errorf("unsupported sync strategy %q", strategy)
 	}
 
 	tmpRoot, err := os.MkdirTemp("", "bb-sync-feasibility-*")
 	if err != nil {
-		return false, err
+		return SyncProbeOutcomeFailed, err
 	}
 	defer os.RemoveAll(tmpRoot)
 	worktreePath := filepath.Join(tmpRoot, "worktree")
 
 	if _, err := r.RunGit(path, "worktree", "add", "--detach", worktreePath, "HEAD"); err != nil {
-		return false, err
+		return SyncProbeOutcomeFailed, err
 	}
 	defer func() {
 		_, _ = r.RunGit(path, "worktree", "remove", "--force", worktreePath)
@@ -354,24 +384,26 @@ func (r Runner) CanSyncWithUpstream(path string, upstream string, strategy strin
 	var syncErr error
 	switch strategy {
 	case "merge":
-		_, syncErr = r.RunGit(worktreePath, "merge", "--no-edit", upstream)
+		_, syncErr = r.RunGitNoHooks(worktreePath, "merge", "--no-commit", "--no-ff", upstream)
 		if syncErr != nil {
-			_, _ = r.RunGit(worktreePath, "merge", "--abort")
+			_, _ = r.RunGitNoHooks(worktreePath, "merge", "--abort")
+		} else {
+			_, _ = r.RunGitNoHooks(worktreePath, "merge", "--abort")
 		}
 	default:
-		_, syncErr = r.RunGit(worktreePath, "rebase", upstream)
+		_, syncErr = r.RunGitNoHooks(worktreePath, "rebase", upstream)
 		if syncErr != nil {
-			_, _ = r.RunGit(worktreePath, "rebase", "--abort")
+			_, _ = r.RunGitNoHooks(worktreePath, "rebase", "--abort")
 		}
 	}
 
 	if syncErr == nil {
-		return true, nil
+		return SyncProbeOutcomeClean, nil
 	}
 	if looksLikeSyncConflict(syncErr.Error()) {
-		return false, nil
+		return SyncProbeOutcomeConflict, nil
 	}
-	return false, syncErr
+	return SyncProbeOutcomeFailed, nil
 }
 
 func (r Runner) Push(path string) error {

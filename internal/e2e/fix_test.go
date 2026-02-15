@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -171,6 +172,50 @@ func TestFixCases(t *testing.T) {
 		}
 		if parts[0] != "0" {
 			t.Fatalf("expected behind count to be 0 after sync-with-upstream, counts=%q", counts)
+		}
+	})
+
+	t.Run("sync feasibility probe ignores local hooks and does not report false conflict", func(t *testing.T) {
+		t.Parallel()
+		h, m, catalogRoot := setupSingleMachine(t)
+		repoPath, remotePath := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+
+		remoteClone := filepath.Join(h.Root, "remote-clones", "demo-hooks")
+		m.MustRunGit(now, catalogRoot, "clone", remotePath, remoteClone)
+		m.MustRunGit(now, remoteClone, "checkout", "-B", "main", "--track", "origin/main")
+		m.MustWriteFile(filepath.Join(remoteClone, "remote-hooks.txt"), "remote commit\n")
+		m.MustRunGit(now, remoteClone, "add", "remote-hooks.txt")
+		m.MustRunGit(now, remoteClone, "commit", "-m", "remote commit")
+		m.MustRunGit(now, remoteClone, "push", "origin", "main")
+
+		m.MustWriteFile(filepath.Join(repoPath, "local-hooks.txt"), "local commit\n")
+		m.MustRunGit(now, repoPath, "add", "local-hooks.txt")
+		m.MustRunGit(now, repoPath, "commit", "-m", "local commit")
+		m.MustRunGit(now, repoPath, "fetch", "origin")
+
+		preRebaseHook := filepath.Join(repoPath, ".git", "hooks", "pre-rebase")
+		preMergeHook := filepath.Join(repoPath, ".git", "hooks", "pre-merge-commit")
+		m.MustWriteFile(preRebaseHook, "#!/bin/sh\nexit 42\n")
+		m.MustWriteFile(preMergeHook, "#!/bin/sh\nexit 43\n")
+		if err := os.Chmod(preRebaseHook, 0o755); err != nil {
+			t.Fatalf("chmod pre-rebase hook: %v", err)
+		}
+		if err := os.Chmod(preMergeHook, 0o755); err != nil {
+			t.Fatalf("chmod pre-merge-commit hook: %v", err)
+		}
+
+		out, err := m.RunBB(now.Add(1*time.Minute), "fix", "demo")
+		if err == nil {
+			t.Fatalf("expected list mode exit 1 for diverged state, output=%s", out)
+		}
+		if !strings.Contains(out, "sync-with-upstream") {
+			t.Fatalf("expected sync-with-upstream action in output, got: %s", out)
+		}
+		if strings.Contains(out, "sync_conflict_requires_manual_resolution") {
+			t.Fatalf("did not expect false sync conflict reason from hook scripts, got: %s", out)
+		}
+		if strings.Contains(out, "sync feasibility") && strings.Contains(out, "probe failed") {
+			t.Fatalf("did not expect noisy probe-failed log output for hook scripts, got: %s", out)
 		}
 	})
 

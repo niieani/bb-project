@@ -44,6 +44,7 @@ const (
 	ReasonPushFailed             UnsyncableReason = "push_failed"
 	ReasonPullFailed             UnsyncableReason = "pull_failed"
 	ReasonSyncConflict           UnsyncableReason = "sync_conflict_requires_manual_resolution"
+	ReasonSyncProbeFailed        UnsyncableReason = "sync_feasibility_probe_failed"
 	ReasonCheckoutFailed         UnsyncableReason = "checkout_failed"
 	ReasonTargetPathNonRepo      UnsyncableReason = "target_path_nonempty_not_repo"
 	ReasonTargetPathRepoMismatch UnsyncableReason = "target_path_repo_mismatch"

@@ -74,8 +74,8 @@ func TestEligibleFixActions(t *testing.T) {
 			ctx: fixEligibilityContext{
 				SyncStrategy: FixSyncStrategyRebase,
 				SyncFeasibility: fixSyncFeasibility{
-					Checked:     true,
-					RebaseClean: true,
+					Checked:       true,
+					RebaseOutcome: fixSyncProbeClean,
 				},
 			},
 			actions: []string{FixActionSyncWithUpstream},
@@ -92,11 +92,31 @@ func TestEligibleFixActions(t *testing.T) {
 			ctx: fixEligibilityContext{
 				SyncStrategy: FixSyncStrategyRebase,
 				SyncFeasibility: fixSyncFeasibility{
-					Checked:    true,
-					MergeClean: true,
+					Checked:       true,
+					RebaseOutcome: fixSyncProbeConflict,
+					MergeOutcome:  fixSyncProbeClean,
 				},
 			},
 			actions: []string{},
+		},
+		{
+			name: "diverged probe failure still allows sync action",
+			rec: func() domain.MachineRepoRecord {
+				r := base
+				r.Ahead = 2
+				r.Behind = 1
+				r.Diverged = true
+				return r
+			}(),
+			ctx: fixEligibilityContext{
+				SyncStrategy: FixSyncStrategyRebase,
+				SyncFeasibility: fixSyncFeasibility{
+					Checked:       true,
+					RebaseOutcome: fixSyncProbeFailed,
+					MergeOutcome:  fixSyncProbeConflict,
+				},
+			},
+			actions: []string{FixActionSyncWithUpstream},
 		},
 		{
 			name:    "missing upstream allows set upstream push",

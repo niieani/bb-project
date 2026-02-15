@@ -3087,6 +3087,33 @@ func TestClassifyFixRepoMarksReadOnlyPushAccessAsFixableWithForkAction(t *testin
 	}
 }
 
+func TestClassifyFixRepoMarksSyncProbeFailedAsFixableWithSyncAction(t *testing.T) {
+	t.Parallel()
+
+	repo := fixRepoState{
+		Record: domain.MachineRepoRecord{
+			RepoKey:   "software/api",
+			Name:      "api",
+			Path:      "/repos/api",
+			OriginURL: "git@github.com:you/api.git",
+			Upstream:  "origin/main",
+			Syncable:  false,
+			Diverged:  true,
+			Ahead:     1,
+			Behind:    1,
+			UnsyncableReasons: []domain.UnsyncableReason{
+				domain.ReasonDiverged,
+				domain.ReasonSyncProbeFailed,
+			},
+		},
+	}
+	actions := []string{FixActionSyncWithUpstream}
+
+	if got := classifyFixRepo(repo, actions); got != fixRepoTierAutofixable {
+		t.Fatalf("tier = %v, want fixable when sync-with-upstream can still be attempted", got)
+	}
+}
+
 func TestSelectableFixActionsAddsAllFixesOptionForMultiple(t *testing.T) {
 	t.Parallel()
 

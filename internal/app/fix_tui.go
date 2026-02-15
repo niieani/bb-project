@@ -2217,6 +2217,8 @@ func unsyncableReasonsFullyCoverable(reasons []domain.UnsyncableReason, actions 
 			return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush] || has[FixActionCreateProject]
 		case domain.ReasonSyncConflict:
 			return false
+		case domain.ReasonSyncProbeFailed:
+			return has[FixActionSyncWithUpstream]
 		case domain.ReasonPushAccessBlocked:
 			return has[FixActionForkAndRetarget]
 		case domain.ReasonPullFailed:

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"bb-project/internal/domain"
+	"bb-project/internal/gitx"
 	"bb-project/internal/state"
 )
 
@@ -227,7 +228,7 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 		rec.Diverged &&
 		!rec.HasDirtyTracked &&
 		!rec.HasUntracked &&
-		ctx.SyncFeasibility.cleanFor(ctx.SyncStrategy) {
+		ctx.SyncFeasibility.canAttemptFor(ctx.SyncStrategy) {
 		actions = append(actions, FixActionSyncWithUpstream)
 	}
 	if rec.OriginURL != "" && rec.Upstream != "" && rec.Ahead > 0 && !rec.Diverged && pushAllowed {
@@ -276,12 +277,15 @@ func ineligibleFixReason(action string, rec domain.MachineRepoRecord, ctx fixEli
 		if !ctx.SyncFeasibility.Checked {
 			return "sync-with-upstream is blocked: sync feasibility has not been validated"
 		}
-		if !ctx.SyncFeasibility.cleanFor(ctx.SyncStrategy) {
+		if ctx.SyncFeasibility.conflictFor(ctx.SyncStrategy) {
 			return fmt.Sprintf(
 				"sync-with-upstream is blocked: %s (selected strategy: %s)",
 				domain.ReasonSyncConflict,
 				normalizeFixSyncStrategy(ctx.SyncStrategy),
 			)
+		}
+		if ctx.SyncFeasibility.probeFailedFor(ctx.SyncStrategy) {
+			return "sync-with-upstream feasibility check was inconclusive (probe failed without conflict signal); action can still be attempted"
 		}
 		return ""
 	}
@@ -404,7 +408,10 @@ func (a *App) loadFixRepos(includeCatalogs []string, refreshMode scanRefreshMode
 }
 
 func (a *App) enrichFixSyncFeasibility(rec domain.MachineRepoRecord) (domain.MachineRepoRecord, fixSyncFeasibility) {
-	feasibility := fixSyncFeasibility{}
+	feasibility := fixSyncFeasibility{
+		RebaseOutcome: fixSyncProbeUnknown,
+		MergeOutcome:  fixSyncProbeUnknown,
+	}
 	if strings.TrimSpace(rec.OriginURL) == "" ||
 		strings.TrimSpace(rec.Upstream) == "" ||
 		!rec.Diverged ||
@@ -416,26 +423,48 @@ func (a *App) enrichFixSyncFeasibility(rec domain.MachineRepoRecord) (domain.Mac
 
 	feasibility.Checked = true
 
-	canRebase, err := a.Git.CanSyncWithUpstream(rec.Path, rec.Upstream, string(FixSyncStrategyRebase))
+	rebaseOutcome, err := a.Git.ProbeSyncWithUpstream(rec.Path, rec.Upstream, string(FixSyncStrategyRebase))
 	if err != nil {
 		a.logf("fix: sync feasibility rebase probe failed for %s: %v", rec.Path, err)
+		feasibility.setOutcome(FixSyncStrategyRebase, fixSyncProbeFailed)
 	} else {
-		feasibility.RebaseClean = canRebase
+		feasibility.setOutcome(FixSyncStrategyRebase, mapSyncProbeOutcome(rebaseOutcome))
 	}
 
-	canMerge, err := a.Git.CanSyncWithUpstream(rec.Path, rec.Upstream, string(FixSyncStrategyMerge))
+	mergeOutcome, err := a.Git.ProbeSyncWithUpstream(rec.Path, rec.Upstream, string(FixSyncStrategyMerge))
 	if err != nil {
 		a.logf("fix: sync feasibility merge probe failed for %s: %v", rec.Path, err)
+		feasibility.setOutcome(FixSyncStrategyMerge, fixSyncProbeFailed)
 	} else {
-		feasibility.MergeClean = canMerge
+		feasibility.setOutcome(FixSyncStrategyMerge, mapSyncProbeOutcome(mergeOutcome))
 	}
 
-	if !feasibility.RebaseClean && !feasibility.MergeClean {
+	if feasibility.defaultStrategyConflictWithoutCleanFallback() {
 		rec.UnsyncableReasons = appendUniqueUnsyncableReason(rec.UnsyncableReasons, domain.ReasonSyncConflict)
 		rec.Syncable = false
 		rec.StateHash = domain.ComputeStateHash(rec)
 	}
+	if !feasibility.cleanFor(FixSyncStrategyRebase) &&
+		!feasibility.cleanFor(FixSyncStrategyMerge) &&
+		feasibility.anyProbeFailed() {
+		rec.UnsyncableReasons = appendUniqueUnsyncableReason(rec.UnsyncableReasons, domain.ReasonSyncProbeFailed)
+		rec.Syncable = false
+		rec.StateHash = domain.ComputeStateHash(rec)
+	}
 	return rec, feasibility
+}
+
+func mapSyncProbeOutcome(in gitx.SyncProbeOutcome) fixSyncProbeOutcome {
+	switch in {
+	case gitx.SyncProbeOutcomeClean:
+		return fixSyncProbeClean
+	case gitx.SyncProbeOutcomeConflict:
+		return fixSyncProbeConflict
+	case gitx.SyncProbeOutcomeFailed:
+		return fixSyncProbeFailed
+	default:
+		return fixSyncProbeUnknown
+	}
 }
 
 func (a *App) applyFixAction(includeCatalogs []string, repoPath string, action string, opts fixApplyOptions) (fixRepoState, error) {
@@ -703,7 +732,7 @@ func (a *App) executeFixAction(
 		if strings.TrimSpace(target.Record.Upstream) == "" {
 			return errors.New("upstream is required for sync-with-upstream")
 		}
-		if !target.SyncFeasibility.cleanFor(syncStrategy) {
+		if target.SyncFeasibility.conflictFor(syncStrategy) {
 			return &fixIneligibleError{
 				Action: action,
 				Reason: fmt.Sprintf(

@@ -332,6 +332,7 @@ Unsyncable reasons include:
 - `push_policy_blocked`
 - `push_failed`
 - `sync_conflict_requires_manual_resolution`
+- `sync_feasibility_probe_failed`
 - `pull_failed`
 - `checkout_failed`
 - `target_path_nonempty_not_repo`
