@@ -32,6 +32,7 @@ type fixActionPlanContext struct {
 }
 
 type fixActionPlanEntry struct {
+	ID      string
 	Command bool
 	Summary string
 }
@@ -109,6 +110,7 @@ func fixActionPlanFor(action string, ctx fixActionPlanContext) []fixActionPlanEn
 func planFixActionIgnore(_ fixActionPlanContext) []fixActionPlanEntry {
 	return []fixActionPlanEntry{
 		{
+			ID:      "ignore-session",
 			Command: false,
 			Summary: "Ignore this repository in the current interactive session only (no file changes).",
 		},
@@ -118,26 +120,26 @@ func planFixActionIgnore(_ fixActionPlanContext) []fixActionPlanEntry {
 func planFixActionAbortOperation(ctx fixActionPlanContext) []fixActionPlanEntry {
 	switch ctx.Operation {
 	case domain.OperationMerge:
-		return []fixActionPlanEntry{{Command: true, Summary: "git merge --abort"}}
+		return []fixActionPlanEntry{{ID: "abort-merge", Command: true, Summary: "git merge --abort"}}
 	case domain.OperationRebase:
-		return []fixActionPlanEntry{{Command: true, Summary: "git rebase --abort"}}
+		return []fixActionPlanEntry{{ID: "abort-rebase", Command: true, Summary: "git rebase --abort"}}
 	case domain.OperationCherryPick:
-		return []fixActionPlanEntry{{Command: true, Summary: "git cherry-pick --abort"}}
+		return []fixActionPlanEntry{{ID: "abort-cherry-pick", Command: true, Summary: "git cherry-pick --abort"}}
 	case domain.OperationBisect:
-		return []fixActionPlanEntry{{Command: true, Summary: "git bisect reset"}}
+		return []fixActionPlanEntry{{ID: "abort-bisect", Command: true, Summary: "git bisect reset"}}
 	default:
 		return []fixActionPlanEntry{
-			{Command: true, Summary: "git merge --abort (when merge is in progress)"},
-			{Command: true, Summary: "git rebase --abort (when rebase is in progress)"},
-			{Command: true, Summary: "git cherry-pick --abort (when cherry-pick is in progress)"},
-			{Command: true, Summary: "git bisect reset (when bisect is in progress)"},
+			{ID: "abort-merge-conditional", Command: true, Summary: "git merge --abort (when merge is in progress)"},
+			{ID: "abort-rebase-conditional", Command: true, Summary: "git rebase --abort (when rebase is in progress)"},
+			{ID: "abort-cherry-pick-conditional", Command: true, Summary: "git cherry-pick --abort (when cherry-pick is in progress)"},
+			{ID: "abort-bisect-conditional", Command: true, Summary: "git bisect reset (when bisect is in progress)"},
 		}
 	}
 }
 
 func planFixActionPush(_ fixActionPlanContext) []fixActionPlanEntry {
 	return []fixActionPlanEntry{
-		{Command: true, Summary: "git push"},
+		{ID: "push-main", Command: true, Summary: "git push"},
 	}
 }
 
@@ -147,11 +149,13 @@ func planFixActionStageCommitPush(ctx fixActionPlanContext) []fixActionPlanEntry
 		n := len(ctx.GitignorePatterns)
 		if ctx.MissingRootGitignore {
 			entries = append(entries, fixActionPlanEntry{
+				ID:      "stage-gitignore-generate",
 				Command: false,
 				Summary: fmt.Sprintf("Generate root .gitignore with %d selected pattern(s).", n),
 			})
 		} else {
 			entries = append(entries, fixActionPlanEntry{
+				ID:      "stage-gitignore-append",
 				Command: false,
 				Summary: fmt.Sprintf("Append %d selected pattern(s) to root .gitignore.", n),
 			})
@@ -159,11 +163,12 @@ func planFixActionStageCommitPush(ctx fixActionPlanContext) []fixActionPlanEntry
 	}
 
 	msg := plannedCommitMessage(ctx.CommitMessage)
-	entries = append(entries, fixActionPlanEntry{Command: true, Summary: "git add -A"})
-	entries = append(entries, fixActionPlanEntry{Command: true, Summary: fmt.Sprintf("git commit -m %q", msg)})
+	entries = append(entries, fixActionPlanEntry{ID: "stage-git-add", Command: true, Summary: "git add -A"})
+	entries = append(entries, fixActionPlanEntry{ID: "stage-git-commit", Command: true, Summary: fmt.Sprintf("git commit -m %q", msg)})
 
 	if strings.TrimSpace(ctx.OriginURL) == "" {
 		entries = append(entries, fixActionPlanEntry{
+			ID:      "stage-skip-push-no-origin",
 			Command: false,
 			Summary: "Skip push because no origin remote is configured.",
 		})
@@ -171,25 +176,27 @@ func planFixActionStageCommitPush(ctx fixActionPlanContext) []fixActionPlanEntry
 	}
 	if strings.TrimSpace(ctx.Upstream) == "" {
 		entries = append(entries, fixActionPlanEntry{
+			ID:      "stage-push-set-upstream",
 			Command: true,
 			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(ctx.Branch)),
 		})
 		return entries
 	}
-	entries = append(entries, fixActionPlanEntry{Command: true, Summary: "git push"})
+	entries = append(entries, fixActionPlanEntry{ID: "stage-push", Command: true, Summary: "git push"})
 	return entries
 }
 
 func planFixActionPullFFOnly(_ fixActionPlanContext) []fixActionPlanEntry {
 	return []fixActionPlanEntry{
-		{Command: true, Summary: "git fetch --prune (if sync.fetch_prune is enabled)"},
-		{Command: true, Summary: "git pull --ff-only"},
+		{ID: "pull-fetch-prune", Command: true, Summary: "git fetch --prune (if sync.fetch_prune is enabled)"},
+		{ID: "pull-ff-only", Command: true, Summary: "git pull --ff-only"},
 	}
 }
 
 func planFixActionSetUpstreamPush(ctx fixActionPlanContext) []fixActionPlanEntry {
 	return []fixActionPlanEntry{
 		{
+			ID:      "upstream-push",
 			Command: true,
 			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(ctx.Branch)),
 		},
@@ -201,27 +208,32 @@ func planFixActionCreateProject(ctx fixActionPlanContext) []fixActionPlanEntry {
 	projectName := plannedProjectName(ctx.CreateProjectName, ctx.RepoName)
 	owner := plannedGitHubOwner(ctx.GitHubOwner)
 	entries = append(entries, fixActionPlanEntry{
+		ID:      "create-gh-repo",
 		Command: true,
 		Summary: fmt.Sprintf("gh repo create %s/%s %s", owner, projectName, plannedVisibilityFlag(ctx.CreateProjectVisibility)),
 	})
 	if strings.TrimSpace(ctx.OriginURL) == "" {
 		originURL := plannedOriginURL(ctx.GitHubOwner, projectName, ctx.RemoteProtocol)
 		entries = append(entries, fixActionPlanEntry{
+			ID:      "create-add-origin",
 			Command: true,
 			Summary: fmt.Sprintf("git remote add origin %s", originURL),
 		})
 	} else {
 		entries = append(entries, fixActionPlanEntry{
+			ID:      "create-validate-origin",
 			Command: false,
 			Summary: "Validate existing origin URL matches the expected repository identity.",
 		})
 	}
 	entries = append(entries, fixActionPlanEntry{
+		ID:      "create-write-metadata",
 		Command: false,
 		Summary: "Write/update repo metadata (origin URL, visibility, default auto-push policy).",
 	})
 	if strings.TrimSpace(ctx.Upstream) == "" {
 		entries = append(entries, fixActionPlanEntry{
+			ID:      "create-initial-push",
 			Command: true,
 			Summary: fmt.Sprintf("git push -u %s %s (when HEAD has commits)", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(ctx.Branch)),
 		})
@@ -233,18 +245,22 @@ func planFixActionForkAndRetarget(ctx fixActionPlanContext) []fixActionPlanEntry
 	owner := plannedGitHubOwner(ctx.GitHubOwner)
 	return []fixActionPlanEntry{
 		{
+			ID:      "fork-gh-fork",
 			Command: true,
 			Summary: "gh repo fork <source-owner>/<repo> --remote=false --clone=false",
 		},
 		{
+			ID:      "fork-set-remote",
 			Command: true,
 			Summary: fmt.Sprintf("git remote add %s <fork-url> (or git remote set-url when that remote already exists)", owner),
 		},
 		{
+			ID:      "fork-push-upstream",
 			Command: true,
 			Summary: fmt.Sprintf("git push -u %s %s", owner, plannedBranch(ctx.Branch)),
 		},
 		{
+			ID:      "fork-write-metadata",
 			Command: false,
 			Summary: "Update repo metadata (preferred remote and push-access probe state).",
 		},
@@ -254,6 +270,7 @@ func planFixActionForkAndRetarget(ctx fixActionPlanContext) []fixActionPlanEntry
 func planFixActionEnableAutoPush(_ fixActionPlanContext) []fixActionPlanEntry {
 	return []fixActionPlanEntry{
 		{
+			ID:      "enable-auto-push",
 			Command: false,
 			Summary: "Write repo metadata: set auto_push=true.",
 		},

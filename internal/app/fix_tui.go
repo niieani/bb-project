@@ -886,6 +886,26 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncWizardViewport()
 		}
 		return m, nil
+	case spinner.TickMsg:
+		if m.viewMode == fixViewWizard && m.wizard.Applying {
+			var cmd tea.Cmd
+			m.wizard.ApplySpinner, cmd = m.wizard.ApplySpinner.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	case fixWizardApplyProgressMsg:
+		return m, m.handleWizardApplyProgress(msg)
+	case fixWizardApplyCompletedMsg:
+		return m, m.handleWizardApplyCompleted(msg)
+	case fixWizardApplyChannelClosedMsg:
+		if m.viewMode == fixViewWizard && m.wizard.Applying {
+			m.wizard.Applying = false
+			m.wizard.ApplyEvents = nil
+			if m.errText == "" {
+				m.errText = "internal: apply stream closed unexpectedly"
+			}
+		}
+		return m, nil
 	case tea.KeyMsg:
 		if m.viewMode == fixViewWizard {
 			return m.updateWizard(msg)

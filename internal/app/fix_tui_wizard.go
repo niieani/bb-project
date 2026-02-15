@@ -8,6 +8,7 @@ import (
 	"bb-project/internal/domain"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -60,6 +61,13 @@ type fixWizardState struct {
 	ActionFocus int
 
 	BodyViewport viewport.Model
+
+	Applying        bool
+	ApplySpinner    spinner.Model
+	ApplyEvents     <-chan tea.Msg
+	ApplyPlan       []fixActionPlanEntry
+	ApplyStepStatus map[string]fixWizardApplyStepStatus
+	ApplyDetail     string
 }
 
 type fixSummaryResult struct {
@@ -84,6 +92,26 @@ const (
 	fixWizardFocusGitignore
 	fixWizardFocusVisibility
 )
+
+type fixWizardApplyStepStatus int
+
+const (
+	fixWizardApplyStepPending fixWizardApplyStepStatus = iota
+	fixWizardApplyStepRunning
+	fixWizardApplyStepDone
+	fixWizardApplyStepFailed
+	fixWizardApplyStepSkipped
+)
+
+type fixWizardApplyProgressMsg struct {
+	Event fixApplyStepEvent
+}
+
+type fixWizardApplyCompletedMsg struct {
+	Err error
+}
+
+type fixWizardApplyChannelClosedMsg struct{}
 
 func isRiskyFixAction(action string) bool {
 	spec, ok := fixActionSpecFor(action)
@@ -152,6 +180,8 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	projectNameInput.Blur()
 
 	showGitignoreToggle := m.shouldShowGitignoreToggle(decision.Action, repoRisk)
+	applySpinner := spinner.New(spinner.WithSpinner(spinner.Dot))
+	applySpinner.Style = lipgloss.NewStyle().Foreground(accentColor)
 
 	m.wizard.RepoPath = decision.RepoPath
 	m.wizard.RepoName = repoName
@@ -183,6 +213,12 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	}
 	m.syncWizardFieldFocus()
 	m.wizard.ActionFocus = fixWizardActionCancel
+	m.wizard.Applying = false
+	m.wizard.ApplySpinner = applySpinner
+	m.wizard.ApplyEvents = nil
+	m.wizard.ApplyPlan = nil
+	m.wizard.ApplyStepStatus = nil
+	m.wizard.ApplyDetail = ""
 	m.syncWizardViewport()
 }
 
@@ -227,7 +263,11 @@ func (m *fixTUIModel) skipWizardCurrent() {
 	m.advanceWizard()
 }
 
-func (m *fixTUIModel) applyWizardCurrent() {
+func (m *fixTUIModel) applyWizardCurrent() tea.Cmd {
+	if m.wizard.Applying {
+		return nil
+	}
+
 	opts := fixApplyOptions{Interactive: true}
 	if m.wizard.EnableProjectName {
 		opts.CreateProjectName = sanitizeGitHubRepositoryNameInput(m.wizard.ProjectName.Value())
@@ -253,33 +293,143 @@ func (m *fixTUIModel) applyWizardCurrent() {
 
 	if err := m.validateWizardInputs(opts); err != nil {
 		m.errText = err.Error()
-		return
+		return nil
 	}
 	m.errText = ""
 
 	if m.app == nil {
 		m.appendSummaryResult(m.wizard.Action, "failed", "internal: app is not configured")
 		m.advanceWizard()
-		return
+		return nil
 	}
 
-	if _, err := m.app.applyFixAction(m.includeCatalogs, m.wizard.RepoPath, m.wizard.Action, opts); err != nil {
-		m.appendSummaryResult(m.wizard.Action, "failed", err.Error())
-	} else {
-		detail := ""
-		if opts.GenerateGitignore {
-			if m.wizard.Risk.MissingRootGitignore {
-				detail = "generated root .gitignore"
-			} else {
-				detail = "appended noisy patterns to root .gitignore"
-			}
-		}
-		m.appendSummaryResult(m.wizard.Action, "applied", detail)
+	entries := fixActionPlanFor(m.wizard.Action, m.wizardActionPlanContext())
+	m.wizard.ApplyPlan = append([]fixActionPlanEntry(nil), entries...)
+	m.wizard.ApplyStepStatus = make(map[string]fixWizardApplyStepStatus, len(entries))
+	for _, entry := range entries {
+		m.wizard.ApplyStepStatus[fixActionPlanEntryKey(entry)] = fixWizardApplyStepPending
 	}
-	if err := m.refreshRepos(scanRefreshAlways); err != nil {
-		m.errText = err.Error()
+	m.wizard.ApplyDetail = m.wizardApplySuccessDetail(opts)
+	m.wizard.Applying = true
+	m.status = fmt.Sprintf("applying %s for %s", fixActionLabel(m.wizard.Action), m.wizard.RepoName)
+
+	includeCatalogs := append([]string(nil), m.includeCatalogs...)
+	repoPath := m.wizard.RepoPath
+	action := m.wizard.Action
+	app := m.app
+	progress := make(chan tea.Msg, max(4, len(entries)+2))
+	m.wizard.ApplyEvents = progress
+
+	go func() {
+		_, err := app.applyFixActionWithObserver(includeCatalogs, repoPath, action, opts, func(event fixApplyStepEvent) {
+			progress <- fixWizardApplyProgressMsg{Event: event}
+		})
+		progress <- fixWizardApplyCompletedMsg{Err: err}
+		close(progress)
+	}()
+
+	return tea.Batch(m.wizard.ApplySpinner.Tick, waitWizardApplyMsg(progress))
+}
+
+func waitWizardApplyMsg(events <-chan tea.Msg) tea.Cmd {
+	if events == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg, ok := <-events
+		if !ok {
+			return fixWizardApplyChannelClosedMsg{}
+		}
+		return msg
+	}
+}
+
+func (m *fixTUIModel) wizardApplySuccessDetail(opts fixApplyOptions) string {
+	if !opts.GenerateGitignore {
+		return ""
+	}
+	if m.wizard.Risk.MissingRootGitignore {
+		return "generated root .gitignore"
+	}
+	return "appended noisy patterns to root .gitignore"
+}
+
+func fixActionPlanEntryKey(entry fixActionPlanEntry) string {
+	if id := strings.TrimSpace(entry.ID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(entry.Summary)
+}
+
+func (m *fixTUIModel) wizardStepStatusFor(entry fixActionPlanEntry) fixWizardApplyStepStatus {
+	if len(m.wizard.ApplyStepStatus) == 0 {
+		return fixWizardApplyStepPending
+	}
+	status, ok := m.wizard.ApplyStepStatus[fixActionPlanEntryKey(entry)]
+	if !ok {
+		return fixWizardApplyStepPending
+	}
+	return status
+}
+
+func (m *fixTUIModel) setWizardStepStatus(entry fixActionPlanEntry, status fixWizardApplyStepStatus) {
+	key := fixActionPlanEntryKey(entry)
+	if key == "" {
+		return
+	}
+	if m.wizard.ApplyStepStatus == nil {
+		m.wizard.ApplyStepStatus = map[string]fixWizardApplyStepStatus{}
+	}
+	m.wizard.ApplyStepStatus[key] = status
+}
+
+func (m *fixTUIModel) wizardApplyPlanEntries() []fixActionPlanEntry {
+	if len(m.wizard.ApplyPlan) > 0 {
+		return append([]fixActionPlanEntry(nil), m.wizard.ApplyPlan...)
+	}
+	return fixActionPlanFor(m.wizard.Action, m.wizardActionPlanContext())
+}
+
+func (m *fixTUIModel) handleWizardApplyProgress(msg fixWizardApplyProgressMsg) tea.Cmd {
+	switch msg.Event.Status {
+	case fixApplyStepRunning:
+		m.setWizardStepStatus(msg.Event.Entry, fixWizardApplyStepRunning)
+	case fixApplyStepDone:
+		m.setWizardStepStatus(msg.Event.Entry, fixWizardApplyStepDone)
+	case fixApplyStepFailed:
+		m.setWizardStepStatus(msg.Event.Entry, fixWizardApplyStepFailed)
+		if msg.Event.Err != nil {
+			m.errText = msg.Event.Err.Error()
+		}
+	case fixApplyStepSkipped:
+		m.setWizardStepStatus(msg.Event.Entry, fixWizardApplyStepSkipped)
+	}
+	if m.wizard.ApplyEvents != nil {
+		return waitWizardApplyMsg(m.wizard.ApplyEvents)
+	}
+	return nil
+}
+
+func (m *fixTUIModel) handleWizardApplyCompleted(msg fixWizardApplyCompletedMsg) tea.Cmd {
+	m.wizard.Applying = false
+	m.wizard.ApplyEvents = nil
+	if msg.Err != nil {
+		if m.errText == "" {
+			m.errText = msg.Err.Error()
+		}
+		m.status = fmt.Sprintf("apply failed for %s; review, retry, skip, or cancel", m.wizard.RepoName)
+		return nil
+	}
+
+	m.errText = ""
+	m.appendSummaryResult(m.wizard.Action, "applied", m.wizard.ApplyDetail)
+	if m.app != nil {
+		if err := m.refreshRepos(scanRefreshAlways); err != nil {
+			m.errText = err.Error()
+		}
 	}
 	m.advanceWizard()
+	return nil
 }
 
 func (m *fixTUIModel) detectWizardDefaults() (owner string, visibility domain.Visibility, remoteProtocol string) {
@@ -447,6 +597,9 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.syncWizardViewport()
 		return m, nil
 	}
+	if m.wizard.Applying {
+		return m, nil
+	}
 	switch msg.String() {
 	case "tab":
 		m.wizardMoveFocus(1, true)
@@ -557,7 +710,7 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case fixWizardActionSkip:
 			m.skipWizardCurrent()
 		case fixWizardActionApply:
-			m.applyWizardCurrent()
+			return m, m.applyWizardCurrent()
 		default:
 			m.viewMode = fixViewList
 			m.status = "cancelled remaining risky confirmations"
@@ -644,6 +797,12 @@ func (m *fixTUIModel) viewWizardContent() string {
 
 	controls := m.viewWizardStaticControls()
 	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus), m.wizardBodyLineWidth())
+	if m.wizard.Applying {
+		actions = hintStyle.Render(m.clampSingleLine(
+			"Applying selected fix... controls are disabled until execution completes.",
+			m.wizardBodyLineWidth(),
+		))
+	}
 	topIndicator := m.wizardScrollIndicatorTop()
 	bottomIndicator := m.wizardScrollIndicatorBottom()
 
@@ -864,37 +1023,23 @@ func (m *fixTUIModel) wizardActionPlanContext() fixActionPlanContext {
 }
 
 func (m *fixTUIModel) renderWizardApplyPlan() string {
-	entries := fixActionPlanFor(m.wizard.Action, m.wizardActionPlanContext())
-
-	commandRows := make([]string, 0, len(entries))
-	actionRows := make([]string, 0, len(entries))
+	entries := m.wizardApplyPlanEntries()
+	lines := make([]string, 0, len(entries)+1)
+	lines = append(lines, "Applying this fix will execute these steps in order:")
 	for _, entry := range entries {
 		summary := strings.TrimSpace(entry.Summary)
 		if summary == "" {
 			continue
 		}
+		label := summary
 		if entry.Command {
-			commandRows = append(commandRows, "• "+renderWizardCommandLine(summary))
-			continue
+			label = renderWizardCommandLine(summary)
 		}
-		actionRows = append(actionRows, "• "+summary)
+		lines = append(lines, m.renderWizardPlanMarker(m.wizardStepStatusFor(entry))+" "+label)
 	}
 
-	if len(commandRows) == 0 && len(actionRows) == 0 {
+	if len(lines) <= 1 {
 		return ""
-	}
-
-	lines := make([]string, 0, len(commandRows)+len(actionRows)+4)
-	if len(commandRows) > 0 {
-		lines = append(lines, "Applying this fix will run these commands:")
-		lines = append(lines, commandRows...)
-	}
-	if len(actionRows) > 0 {
-		if len(lines) > 0 {
-			lines = append(lines, "")
-		}
-		lines = append(lines, "It will also perform these side effects:")
-		lines = append(lines, actionRows...)
 	}
 
 	return renderFieldBlock(
@@ -904,6 +1049,21 @@ func (m *fixTUIModel) renderWizardApplyPlan() string {
 		strings.Join(lines, "\n"),
 		"",
 	)
+}
+
+func (m *fixTUIModel) renderWizardPlanMarker(status fixWizardApplyStepStatus) string {
+	switch status {
+	case fixWizardApplyStepRunning:
+		return lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render(m.wizard.ApplySpinner.View())
+	case fixWizardApplyStepDone:
+		return lipgloss.NewStyle().Foreground(successColor).Bold(true).Render("✓")
+	case fixWizardApplyStepFailed:
+		return lipgloss.NewStyle().Foreground(errorFgColor).Bold(true).Render("✗")
+	case fixWizardApplyStepSkipped:
+		return lipgloss.NewStyle().Foreground(mutedTextColor).Bold(true).Render("◦")
+	default:
+		return lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("•")
+	}
 }
 
 func (m *fixTUIModel) wizardChangedFilesFieldMeta() (string, string) {

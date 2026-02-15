@@ -782,11 +782,8 @@ func TestFixTUIWizardViewIncludesApplyingPlanBlock(t *testing.T) {
 	if !strings.Contains(view, "Review before applying") {
 		t.Fatalf("expected applying-plan block heading, got %q", view)
 	}
-	if !strings.Contains(view, "Applying this fix will run these commands:") {
-		t.Fatalf("expected command section in applying-plan block, got %q", view)
-	}
-	if strings.Contains(view, "It will also perform these side effects:") {
-		t.Fatalf("did not expect side-effects section for push action, got %q", view)
+	if !strings.Contains(view, "Applying this fix will execute these steps in order:") {
+		t.Fatalf("expected ordered apply steps heading in applying-plan block, got %q", view)
 	}
 	if !strings.Contains(view, "git push") {
 		t.Fatalf("expected push command in applying-plan block, got %q", view)
@@ -830,6 +827,106 @@ func TestFixTUIWizardApplyingPlanShowsCommandsAndNonCommandActions(t *testing.T)
 	}
 	if !strings.Contains(view, "Generate root .gitignore") {
 		t.Fatalf("expected non-command gitignore action in applying-plan block, got %q", view)
+	}
+	if strings.Contains(view, "Applying this fix will run these commands:") || strings.Contains(view, "It will also perform these side effects:") {
+		t.Fatalf("expected a single ordered steps list without split sections, got %q", view)
+	}
+	if strings.Index(view, "Generate root .gitignore") > strings.Index(view, "git add -A") {
+		t.Fatalf("expected side effect to be listed before later commands in execution order, got %q", view)
+	}
+}
+
+func TestFixTUIWizardApplyingPlanShowsRuntimeStepMarkers(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{
+				OriginURL:       "https://github.com/you/api.git",
+				AutoPush:        true,
+				PreferredRemote: "origin",
+			},
+			Risk: fixRiskSnapshot{
+				MissingRootGitignore:       true,
+				NoisyChangedPaths:          []string{"node_modules/pkg/index.js"},
+				SuggestedGitignorePatterns: []string{"node_modules/"},
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	entries := m.wizardApplyPlanEntries()
+	if len(entries) < 3 {
+		t.Fatalf("expected multi-step plan, got %d entries", len(entries))
+	}
+	m.wizard.ApplyPlan = append([]fixActionPlanEntry(nil), entries...)
+	m.wizard.ApplyStepStatus = map[string]fixWizardApplyStepStatus{}
+	m.setWizardStepStatus(entries[0], fixWizardApplyStepDone)
+	m.setWizardStepStatus(entries[1], fixWizardApplyStepRunning)
+	m.setWizardStepStatus(entries[2], fixWizardApplyStepFailed)
+
+	view := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(view, "✓") {
+		t.Fatalf("expected success marker in applying-plan block, got %q", view)
+	}
+	if !strings.Contains(view, "✗") {
+		t.Fatalf("expected failure marker in applying-plan block, got %q", view)
+	}
+}
+
+func TestFixTUIWizardApplyFailureStopsQueueOnCurrentItem(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "web",
+				Path:      "/repos/web",
+				OriginURL: "git@github.com:you/web.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/web.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{
+		{RepoPath: "/repos/api", Action: FixActionPush},
+		{RepoPath: "/repos/web", Action: FixActionPush},
+	})
+	m.wizard.Applying = true
+
+	m.handleWizardApplyCompleted(fixWizardApplyCompletedMsg{Err: fmt.Errorf("push failed")})
+
+	if m.wizard.Applying {
+		t.Fatal("expected applying=false after completion error")
+	}
+	if m.viewMode != fixViewWizard {
+		t.Fatalf("view mode = %v, want wizard mode after failed apply", m.viewMode)
+	}
+	if got := m.wizard.Index; got != 0 {
+		t.Fatalf("wizard index = %d, want 0 to stop on current item", got)
+	}
+	if len(m.summaryResults) != 0 {
+		t.Fatalf("summary results = %d, want no auto-advance result on failure", len(m.summaryResults))
+	}
+	if !strings.Contains(m.status, "apply failed for api") {
+		t.Fatalf("status = %q, want failure guidance for current repo", m.status)
 	}
 }
 

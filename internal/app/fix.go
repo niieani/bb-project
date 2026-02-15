@@ -45,6 +45,23 @@ type fixApplyOptions struct {
 	GitignorePatterns       []string
 }
 
+type fixApplyStepStatus string
+
+const (
+	fixApplyStepRunning fixApplyStepStatus = "running"
+	fixApplyStepDone    fixApplyStepStatus = "done"
+	fixApplyStepFailed  fixApplyStepStatus = "failed"
+	fixApplyStepSkipped fixApplyStepStatus = "skipped"
+)
+
+type fixApplyStepEvent struct {
+	Entry  fixActionPlanEntry
+	Status fixApplyStepStatus
+	Err    error
+}
+
+type fixApplyStepObserver func(event fixApplyStepEvent)
+
 type fixIneligibleError struct {
 	Action string
 	Reason string
@@ -347,6 +364,16 @@ func (a *App) loadFixRepos(includeCatalogs []string, refreshMode scanRefreshMode
 }
 
 func (a *App) applyFixAction(includeCatalogs []string, repoPath string, action string, opts fixApplyOptions) (fixRepoState, error) {
+	return a.applyFixActionWithObserver(includeCatalogs, repoPath, action, opts, nil)
+}
+
+func (a *App) applyFixActionWithObserver(
+	includeCatalogs []string,
+	repoPath string,
+	action string,
+	opts fixApplyOptions,
+	observer fixApplyStepObserver,
+) (fixRepoState, error) {
 	a.logf("fix: acquiring global lock for action %s", action)
 	lock, err := state.AcquireLock(a.Paths)
 	if err != nil {
@@ -385,7 +412,7 @@ func (a *App) applyFixAction(includeCatalogs []string, repoPath string, action s
 		}
 	}
 
-	if err := a.executeFixAction(cfg, target, action, opts); err != nil {
+	if err := a.executeFixAction(cfg, target, action, opts, observer); err != nil {
 		return fixRepoState{}, err
 	}
 	if err := a.refreshMachineSnapshotLocked(cfg, &machine, includeCatalogs, scanRefreshAlways); err != nil {
@@ -425,7 +452,13 @@ func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, 
 	return out, nil
 }
 
-func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, action string, opts fixApplyOptions) error {
+func (a *App) executeFixAction(
+	cfg domain.ConfigFile,
+	target fixRepoState,
+	action string,
+	opts fixApplyOptions,
+	observer fixApplyStepObserver,
+) error {
 	if err := validateFixApplyOptions(action, opts); err != nil {
 		return err
 	}
@@ -435,29 +468,70 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 	if target.Meta != nil {
 		preferredRemote = strings.TrimSpace(target.Meta.PreferredRemote)
 	}
+	planByID := fixActionPlanEntriesByID(
+		fixActionPlanFor(action, buildFixActionPlanContext(cfg, target, opts)),
+	)
+	entryFor := func(id string, fallback fixActionPlanEntry) fixActionPlanEntry {
+		return lookupFixActionPlanEntry(planByID, id, fallback)
+	}
+	runStep := func(id string, fallback fixActionPlanEntry, fn func() error) error {
+		return runFixApplyStep(observer, entryFor(id, fallback), fn)
+	}
+	markSkipped := func(id string, fallback fixActionPlanEntry) {
+		emitFixApplyStep(observer, entryFor(id, fallback), fixApplyStepSkipped, nil)
+	}
 	switch action {
 	case FixActionAbortOperation:
 		switch target.Record.OperationInProgress {
 		case domain.OperationMerge:
-			return a.Git.MergeAbort(path)
+			return runStep("abort-merge", fixActionPlanEntry{ID: "abort-merge", Command: true, Summary: "git merge --abort"}, func() error {
+				return a.Git.MergeAbort(path)
+			})
 		case domain.OperationRebase:
-			return a.Git.RebaseAbort(path)
+			return runStep("abort-rebase", fixActionPlanEntry{ID: "abort-rebase", Command: true, Summary: "git rebase --abort"}, func() error {
+				return a.Git.RebaseAbort(path)
+			})
 		case domain.OperationCherryPick:
-			return a.Git.CherryPickAbort(path)
+			return runStep("abort-cherry-pick", fixActionPlanEntry{ID: "abort-cherry-pick", Command: true, Summary: "git cherry-pick --abort"}, func() error {
+				return a.Git.CherryPickAbort(path)
+			})
 		case domain.OperationBisect:
-			return a.Git.BisectReset(path)
+			return runStep("abort-bisect", fixActionPlanEntry{ID: "abort-bisect", Command: true, Summary: "git bisect reset"}, func() error {
+				return a.Git.BisectReset(path)
+			})
 		default:
 			return fmt.Errorf("no operation in progress for %s", target.Record.Name)
 		}
 	case FixActionPush:
-		return a.Git.Push(path)
+		return runStep("push-main", fixActionPlanEntry{ID: "push-main", Command: true, Summary: "git push"}, func() error {
+			return a.Git.Push(path)
+		})
 	case FixActionCreateProject:
-		return a.createProjectFromFix(cfg, target, opts.CreateProjectName, opts.CreateProjectVisibility)
+		return a.createProjectFromFix(
+			cfg,
+			target,
+			opts.CreateProjectName,
+			opts.CreateProjectVisibility,
+			observer,
+			planByID,
+		)
 	case FixActionForkAndRetarget:
-		return a.forkAndRetargetFromFix(cfg, target)
+		return a.forkAndRetargetFromFix(cfg, target, observer, planByID)
 	case FixActionStageCommitPush:
 		if opts.GenerateGitignore && len(opts.GitignorePatterns) > 0 {
-			if err := writeOrAppendGitignore(path, opts.GitignorePatterns); err != nil {
+			stepID := "stage-gitignore-append"
+			summary := fmt.Sprintf("Append %d selected pattern(s) to root .gitignore.", len(opts.GitignorePatterns))
+			if target.Risk.MissingRootGitignore {
+				stepID = "stage-gitignore-generate"
+				summary = fmt.Sprintf("Generate root .gitignore with %d selected pattern(s).", len(opts.GitignorePatterns))
+			}
+			if err := runStep(stepID, fixActionPlanEntry{
+				ID:      stepID,
+				Command: false,
+				Summary: summary,
+			}, func() error {
+				return writeOrAppendGitignore(path, opts.GitignorePatterns)
+			}); err != nil {
 				return err
 			}
 		}
@@ -465,13 +539,26 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 		if msg == "" || msg == "auto" {
 			msg = DefaultFixCommitMessage
 		}
-		if err := a.Git.AddAll(path); err != nil {
+		if err := runStep("stage-git-add", fixActionPlanEntry{ID: "stage-git-add", Command: true, Summary: "git add -A"}, func() error {
+			return a.Git.AddAll(path)
+		}); err != nil {
 			return err
 		}
-		if err := a.Git.Commit(path, msg); err != nil {
+		if err := runStep("stage-git-commit", fixActionPlanEntry{
+			ID:      "stage-git-commit",
+			Command: true,
+			Summary: fmt.Sprintf("git commit -m %q", msg),
+		}, func() error {
+			return a.Git.Commit(path, msg)
+		}); err != nil {
 			return err
 		}
 		if strings.TrimSpace(target.Record.OriginURL) == "" {
+			markSkipped("stage-skip-push-no-origin", fixActionPlanEntry{
+				ID:      "stage-skip-push-no-origin",
+				Command: false,
+				Summary: "Skip push because no origin remote is configured.",
+			})
 			return nil
 		}
 		if target.Record.Upstream == "" {
@@ -482,16 +569,38 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 			if strings.TrimSpace(branch) == "" {
 				return errors.New("cannot determine branch for upstream push")
 			}
-			return a.Git.PushUpstreamWithPreferredRemote(path, branch, preferredRemote)
+			return runStep("stage-push-set-upstream", fixActionPlanEntry{
+				ID:      "stage-push-set-upstream",
+				Command: true,
+				Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(preferredRemote, target.Record.Upstream), plannedBranch(branch)),
+			}, func() error {
+				return a.Git.PushUpstreamWithPreferredRemote(path, branch, preferredRemote)
+			})
 		}
-		return a.Git.Push(path)
+		return runStep("stage-push", fixActionPlanEntry{ID: "stage-push", Command: true, Summary: "git push"}, func() error {
+			return a.Git.Push(path)
+		})
 	case FixActionPullFFOnly:
 		if cfg.Sync.FetchPrune {
-			if err := a.Git.FetchPrune(path); err != nil {
+			if err := runStep("pull-fetch-prune", fixActionPlanEntry{
+				ID:      "pull-fetch-prune",
+				Command: true,
+				Summary: "git fetch --prune (if sync.fetch_prune is enabled)",
+			}, func() error {
+				return a.Git.FetchPrune(path)
+			}); err != nil {
 				return err
 			}
+		} else {
+			markSkipped("pull-fetch-prune", fixActionPlanEntry{
+				ID:      "pull-fetch-prune",
+				Command: true,
+				Summary: "git fetch --prune (if sync.fetch_prune is enabled)",
+			})
 		}
-		return a.Git.PullFFOnly(path)
+		return runStep("pull-ff-only", fixActionPlanEntry{ID: "pull-ff-only", Command: true, Summary: "git pull --ff-only"}, func() error {
+			return a.Git.PullFFOnly(path)
+		})
 	case FixActionSetUpstreamPush:
 		branch := target.Record.Branch
 		if branch == "" {
@@ -500,23 +609,115 @@ func (a *App) executeFixAction(cfg domain.ConfigFile, target fixRepoState, actio
 		if strings.TrimSpace(branch) == "" {
 			return errors.New("cannot determine branch for upstream push")
 		}
-		return a.Git.PushUpstreamWithPreferredRemote(path, branch, preferredRemote)
+		return runStep("upstream-push", fixActionPlanEntry{
+			ID:      "upstream-push",
+			Command: true,
+			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(preferredRemote, target.Record.Upstream), plannedBranch(branch)),
+		}, func() error {
+			return a.Git.PushUpstreamWithPreferredRemote(path, branch, preferredRemote)
+		})
 	case FixActionEnableAutoPush:
 		if strings.TrimSpace(target.Record.RepoKey) == "" {
 			return errors.New("repo_key is required for enable-auto-push")
 		}
-		meta, err := state.LoadRepoMetadata(a.Paths, target.Record.RepoKey)
-		if err != nil {
-			return err
-		}
-		meta.AutoPush = true
-		return state.SaveRepoMetadata(a.Paths, meta)
+		return runStep("enable-auto-push", fixActionPlanEntry{
+			ID:      "enable-auto-push",
+			Command: false,
+			Summary: "Write repo metadata: set auto_push=true.",
+		}, func() error {
+			meta, err := state.LoadRepoMetadata(a.Paths, target.Record.RepoKey)
+			if err != nil {
+				return err
+			}
+			meta.AutoPush = true
+			return state.SaveRepoMetadata(a.Paths, meta)
+		})
 	default:
 		return fmt.Errorf("unknown fix action %q", action)
 	}
 }
 
-func (a *App) forkAndRetargetFromFix(cfg domain.ConfigFile, target fixRepoState) error {
+func buildFixActionPlanContext(cfg domain.ConfigFile, target fixRepoState, opts fixApplyOptions) fixActionPlanContext {
+	preferredRemote := ""
+	if target.Meta != nil {
+		preferredRemote = strings.TrimSpace(target.Meta.PreferredRemote)
+	}
+	return fixActionPlanContext{
+		Operation:               target.Record.OperationInProgress,
+		Branch:                  strings.TrimSpace(target.Record.Branch),
+		Upstream:                strings.TrimSpace(target.Record.Upstream),
+		OriginURL:               strings.TrimSpace(target.Record.OriginURL),
+		PreferredRemote:         preferredRemote,
+		GitHubOwner:             strings.TrimSpace(cfg.GitHub.Owner),
+		RemoteProtocol:          strings.TrimSpace(cfg.GitHub.RemoteProtocol),
+		RepoName:                strings.TrimSpace(target.Record.Name),
+		CommitMessage:           strings.TrimSpace(opts.CommitMessage),
+		CreateProjectName:       strings.TrimSpace(opts.CreateProjectName),
+		CreateProjectVisibility: opts.CreateProjectVisibility,
+		GenerateGitignore:       opts.GenerateGitignore,
+		GitignorePatterns:       append([]string(nil), opts.GitignorePatterns...),
+		MissingRootGitignore:    target.Risk.MissingRootGitignore,
+	}
+}
+
+func fixActionPlanEntriesByID(entries []fixActionPlanEntry) map[string]fixActionPlanEntry {
+	out := make(map[string]fixActionPlanEntry, len(entries))
+	for _, entry := range entries {
+		id := strings.TrimSpace(entry.ID)
+		if id == "" {
+			continue
+		}
+		out[id] = entry
+	}
+	return out
+}
+
+func lookupFixActionPlanEntry(planByID map[string]fixActionPlanEntry, id string, fallback fixActionPlanEntry) fixActionPlanEntry {
+	if planByID != nil {
+		if planned, ok := planByID[id]; ok {
+			return planned
+		}
+	}
+	if strings.TrimSpace(fallback.ID) == "" {
+		fallback.ID = id
+	}
+	return fallback
+}
+
+func emitFixApplyStep(observer fixApplyStepObserver, entry fixActionPlanEntry, status fixApplyStepStatus, err error) {
+	if observer == nil {
+		return
+	}
+	observer(fixApplyStepEvent{
+		Entry:  entry,
+		Status: status,
+		Err:    err,
+	})
+}
+
+func runFixApplyStep(observer fixApplyStepObserver, entry fixActionPlanEntry, fn func() error) error {
+	emitFixApplyStep(observer, entry, fixApplyStepRunning, nil)
+	if err := fn(); err != nil {
+		emitFixApplyStep(observer, entry, fixApplyStepFailed, err)
+		return err
+	}
+	emitFixApplyStep(observer, entry, fixApplyStepDone, nil)
+	return nil
+}
+
+func (a *App) forkAndRetargetFromFix(
+	cfg domain.ConfigFile,
+	target fixRepoState,
+	observer fixApplyStepObserver,
+	planByID map[string]fixActionPlanEntry,
+) error {
+	entryFor := func(id string, fallback fixActionPlanEntry) fixActionPlanEntry {
+		return lookupFixActionPlanEntry(planByID, id, fallback)
+	}
+	runStep := func(id string, fallback fixActionPlanEntry, fn func() error) error {
+		return runFixApplyStep(observer, entryFor(id, fallback), fn)
+	}
+
 	if target.Meta == nil {
 		return errors.New("repo metadata is required for fork-and-retarget")
 	}
@@ -536,8 +737,16 @@ func (a *App) forkAndRetargetFromFix(cfg domain.ConfigFile, target fixRepoState)
 		return errors.New("fork remote name is required")
 	}
 
-	forkURL, err := a.ensureForkRemoteRepo(originURL, owner, cfg.GitHub.RemoteProtocol, repoPath)
-	if err != nil {
+	var forkURL string
+	if err := runStep("fork-gh-fork", fixActionPlanEntry{
+		ID:      "fork-gh-fork",
+		Command: true,
+		Summary: "gh repo fork <source-owner>/<repo> --remote=false --clone=false",
+	}, func() error {
+		var err error
+		forkURL, err = a.ensureForkRemoteRepo(originURL, owner, cfg.GitHub.RemoteProtocol, repoPath)
+		return err
+	}); err != nil {
 		return err
 	}
 
@@ -551,14 +760,17 @@ func (a *App) forkAndRetargetFromFix(cfg domain.ConfigFile, target fixRepoState)
 			}
 		}
 	}
-	if remoteExists {
-		if err := a.Git.SetRemoteURL(repoPath, forkRemoteName, forkURL); err != nil {
-			return err
+	if err := runStep("fork-set-remote", fixActionPlanEntry{
+		ID:      "fork-set-remote",
+		Command: true,
+		Summary: fmt.Sprintf("git remote add %s <fork-url> (or git remote set-url when that remote already exists)", owner),
+	}, func() error {
+		if remoteExists {
+			return a.Git.SetRemoteURL(repoPath, forkRemoteName, forkURL)
 		}
-	} else {
-		if err := a.Git.AddRemote(repoPath, forkRemoteName, forkURL); err != nil {
-			return err
-		}
+		return a.Git.AddRemote(repoPath, forkRemoteName, forkURL)
+	}); err != nil {
+		return err
 	}
 
 	branch := strings.TrimSpace(target.Record.Branch)
@@ -568,28 +780,54 @@ func (a *App) forkAndRetargetFromFix(cfg domain.ConfigFile, target fixRepoState)
 	if strings.TrimSpace(branch) == "" {
 		return errors.New("cannot determine branch for fork-and-retarget")
 	}
-	if err := a.Git.PushUpstreamWithPreferredRemote(repoPath, branch, forkRemoteName); err != nil {
+	if err := runStep("fork-push-upstream", fixActionPlanEntry{
+		ID:      "fork-push-upstream",
+		Command: true,
+		Summary: fmt.Sprintf("git push -u %s %s", owner, plannedBranch(branch)),
+	}, func() error {
+		return a.Git.PushUpstreamWithPreferredRemote(repoPath, branch, forkRemoteName)
+	}); err != nil {
 		return err
 	}
 
-	meta := *target.Meta
-	meta.PreferredRemote = forkRemoteName
-	meta.PushAccess = domain.PushAccessUnknown
-	meta.PushAccessCheckedAt = time.Time{}
-	meta.PushAccessCheckedRemote = ""
-	meta.PushAccessManualOverride = false
+	return runStep("fork-write-metadata", fixActionPlanEntry{
+		ID:      "fork-write-metadata",
+		Command: false,
+		Summary: "Update repo metadata (preferred remote and push-access probe state).",
+	}, func() error {
+		meta := *target.Meta
+		meta.PreferredRemote = forkRemoteName
+		meta.PushAccess = domain.PushAccessUnknown
+		meta.PushAccessCheckedAt = time.Time{}
+		meta.PushAccessCheckedRemote = ""
+		meta.PushAccessManualOverride = false
 
-	updated, _, err := a.probeAndUpdateRepoPushAccess(repoPath, target.Record.OriginURL, meta, true)
-	if err != nil {
-		return err
-	}
-	if err := state.SaveRepoMetadata(a.Paths, updated); err != nil {
-		return err
-	}
-	return nil
+		updated, _, err := a.probeAndUpdateRepoPushAccess(repoPath, target.Record.OriginURL, meta, true)
+		if err != nil {
+			return err
+		}
+		return state.SaveRepoMetadata(a.Paths, updated)
+	})
 }
 
-func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, projectNameOverride string, visibilityOverride domain.Visibility) error {
+func (a *App) createProjectFromFix(
+	cfg domain.ConfigFile,
+	target fixRepoState,
+	projectNameOverride string,
+	visibilityOverride domain.Visibility,
+	observer fixApplyStepObserver,
+	planByID map[string]fixActionPlanEntry,
+) error {
+	entryFor := func(id string, fallback fixActionPlanEntry) fixActionPlanEntry {
+		return lookupFixActionPlanEntry(planByID, id, fallback)
+	}
+	runStep := func(id string, fallback fixActionPlanEntry, fn func() error) error {
+		return runFixApplyStep(observer, entryFor(id, fallback), fn)
+	}
+	markSkipped := func(id string, fallback fixActionPlanEntry) {
+		emitFixApplyStep(observer, entryFor(id, fallback), fixApplyStepSkipped, nil)
+	}
+
 	owner := strings.TrimSpace(cfg.GitHub.Owner)
 	if owner == "" {
 		return errors.New("github.owner is required; run 'bb config' and set github.owner")
@@ -624,20 +862,51 @@ func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, p
 		return err
 	}
 	if origin != "" {
-		matches, err := originsMatchNormalized(origin, expectedOrigin)
-		if err != nil {
-			return fmt.Errorf("invalid existing origin: %w", err)
-		}
-		if !matches {
-			return fmt.Errorf("conflicting origin: existing %q does not match expected %q", origin, expectedOrigin)
-		}
-	} else {
-		createdOrigin, err := a.createRemoteRepo(owner, projectName, visibility, cfg.GitHub.RemoteProtocol, target.Record.Path)
-		if err != nil {
+		markSkipped("create-gh-repo", fixActionPlanEntry{
+			ID:      "create-gh-repo",
+			Command: true,
+			Summary: fmt.Sprintf("gh repo create %s/%s %s", owner, projectName, plannedVisibilityFlag(visibility)),
+		})
+		if err := runStep("create-validate-origin", fixActionPlanEntry{
+			ID:      "create-validate-origin",
+			Command: false,
+			Summary: "Validate existing origin URL matches the expected repository identity.",
+		}, func() error {
+			matches, err := originsMatchNormalized(origin, expectedOrigin)
+			if err != nil {
+				return fmt.Errorf("invalid existing origin: %w", err)
+			}
+			if !matches {
+				return fmt.Errorf("conflicting origin: existing %q does not match expected %q", origin, expectedOrigin)
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
-		if err := a.Git.AddOrigin(target.Record.Path, createdOrigin); err != nil {
-			return fmt.Errorf("set origin failed: %w", err)
+	} else {
+		var createdOrigin string
+		if err := runStep("create-gh-repo", fixActionPlanEntry{
+			ID:      "create-gh-repo",
+			Command: true,
+			Summary: fmt.Sprintf("gh repo create %s/%s %s", owner, projectName, plannedVisibilityFlag(visibility)),
+		}, func() error {
+			var err error
+			createdOrigin, err = a.createRemoteRepo(owner, projectName, visibility, cfg.GitHub.RemoteProtocol, target.Record.Path)
+			return err
+		}); err != nil {
+			return err
+		}
+		if err := runStep("create-add-origin", fixActionPlanEntry{
+			ID:      "create-add-origin",
+			Command: true,
+			Summary: fmt.Sprintf("git remote add origin %s", plannedOriginURL(owner, projectName, cfg.GitHub.RemoteProtocol)),
+		}, func() error {
+			if err := a.Git.AddOrigin(target.Record.Path, createdOrigin); err != nil {
+				return fmt.Errorf("set origin failed: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 		origin = createdOrigin
 	}
@@ -645,8 +914,16 @@ func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, p
 	if strings.TrimSpace(target.Record.RepoKey) == "" {
 		return errors.New("repo_key is required for create-project")
 	}
-	meta, _, err := a.ensureRepoMetadata(cfg, target.Record.RepoKey, projectName, origin, visibility, target.Record.Catalog)
-	if err != nil {
+	var meta domain.RepoMetadataFile
+	if err := runStep("create-write-metadata", fixActionPlanEntry{
+		ID:      "create-write-metadata",
+		Command: false,
+		Summary: "Write/update repo metadata (origin URL, visibility, default auto-push policy).",
+	}, func() error {
+		var err error
+		meta, _, err = a.ensureRepoMetadata(cfg, target.Record.RepoKey, projectName, origin, visibility, target.Record.Catalog)
+		return err
+	}); err != nil {
 		return err
 	}
 
@@ -657,9 +934,24 @@ func (a *App) createProjectFromFix(cfg domain.ConfigFile, target fixRepoState, p
 		if branch == "" {
 			branch = "main"
 		}
-		if err := a.Git.PushUpstreamWithPreferredRemote(target.Record.Path, branch, meta.PreferredRemote); err != nil {
-			return fmt.Errorf("initial push failed: %w", err)
+		if err := runStep("create-initial-push", fixActionPlanEntry{
+			ID:      "create-initial-push",
+			Command: true,
+			Summary: fmt.Sprintf("git push -u %s %s (when HEAD has commits)", plannedRemote(meta.PreferredRemote, target.Record.Upstream), plannedBranch(branch)),
+		}, func() error {
+			if err := a.Git.PushUpstreamWithPreferredRemote(target.Record.Path, branch, meta.PreferredRemote); err != nil {
+				return fmt.Errorf("initial push failed: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
+	} else {
+		markSkipped("create-initial-push", fixActionPlanEntry{
+			ID:      "create-initial-push",
+			Command: true,
+			Summary: fmt.Sprintf("git push -u %s %s (when HEAD has commits)", plannedRemote(meta.PreferredRemote, target.Record.Upstream), plannedBranch(branch)),
+		})
 	}
 
 	return nil
