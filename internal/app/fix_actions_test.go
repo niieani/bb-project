@@ -43,7 +43,20 @@ func TestEligibleFixActions(t *testing.T) {
 			name:    "dirty allows stage commit push",
 			rec:     func() domain.MachineRepoRecord { r := base; r.HasDirtyTracked = true; return r }(),
 			ctx:     fixEligibilityContext{},
-			actions: []string{FixActionStageCommitPush},
+			actions: []string{FixActionStageCommitPush, FixActionPublishNewBranch},
+		},
+		{
+			name: "dirty diverged allows publish new branch",
+			rec: func() domain.MachineRepoRecord {
+				r := base
+				r.HasDirtyTracked = true
+				r.Diverged = true
+				r.Ahead = 1
+				r.Behind = 1
+				return r
+			}(),
+			ctx:     fixEligibilityContext{},
+			actions: []string{FixActionPublishNewBranch},
 		},
 		{
 			name: "dirty behind branch offers checkpoint then sync",
@@ -54,7 +67,7 @@ func TestEligibleFixActions(t *testing.T) {
 				return r
 			}(),
 			ctx:     fixEligibilityContext{},
-			actions: []string{FixActionCheckpointThenSync},
+			actions: []string{FixActionCheckpointThenSync, FixActionPublishNewBranch},
 		},
 		{
 			name:    "behind allows pull ff only",
@@ -243,7 +256,7 @@ func TestEligibleFixActions(t *testing.T) {
 					NoisyChangedPaths:    []string{"node_modules/pkg/index.js"},
 				},
 			},
-			actions: []string{FixActionStageCommitPush},
+			actions: []string{FixActionStageCommitPush, FixActionPublishNewBranch},
 		},
 	}
 
@@ -338,4 +351,83 @@ func TestIneligibleFixReasonSyncProbeFailedBlocksSyncAction(t *testing.T) {
 	if !strings.Contains(reason, string(domain.ReasonSyncProbeFailed)) {
 		t.Fatalf("reason = %q, want to contain %q", reason, domain.ReasonSyncProbeFailed)
 	}
+}
+
+func TestIneligibleFixReasonPublishNewBranch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("operation in progress", func(t *testing.T) {
+		t.Parallel()
+
+		rec := domain.MachineRepoRecord{
+			OperationInProgress: domain.OperationRebase,
+		}
+		reason := ineligibleFixReason(FixActionPublishNewBranch, rec, fixEligibilityContext{})
+		if !strings.Contains(reason, "operation is in progress") {
+			t.Fatalf("reason = %q, want operation-in-progress guidance", reason)
+		}
+	})
+
+	t.Run("missing origin", func(t *testing.T) {
+		t.Parallel()
+
+		rec := domain.MachineRepoRecord{
+			HasDirtyTracked: true,
+		}
+		reason := ineligibleFixReason(FixActionPublishNewBranch, rec, fixEligibilityContext{})
+		if !strings.Contains(reason, "origin remote is required") {
+			t.Fatalf("reason = %q, want missing-origin guidance", reason)
+		}
+	})
+
+	t.Run("no local changes", func(t *testing.T) {
+		t.Parallel()
+
+		rec := domain.MachineRepoRecord{
+			OriginURL: "git@github.com:you/api.git",
+			Branch:    "main",
+		}
+		reason := ineligibleFixReason(FixActionPublishNewBranch, rec, fixEligibilityContext{})
+		if !strings.Contains(reason, "no local uncommitted changes") {
+			t.Fatalf("reason = %q, want no-changes guidance", reason)
+		}
+	})
+
+	t.Run("secret-like changes", func(t *testing.T) {
+		t.Parallel()
+
+		rec := domain.MachineRepoRecord{
+			OriginURL:       "git@github.com:you/api.git",
+			Branch:          "main",
+			HasDirtyTracked: true,
+		}
+		reason := ineligibleFixReason(FixActionPublishNewBranch, rec, fixEligibilityContext{
+			Risk: fixRiskSnapshot{
+				SecretLikeChangedPaths: []string{".env"},
+			},
+		})
+		if !strings.Contains(reason, "secret-like uncommitted files") {
+			t.Fatalf("reason = %q, want secret-like guidance", reason)
+		}
+	})
+
+	t.Run("noisy changes in non-interactive mode", func(t *testing.T) {
+		t.Parallel()
+
+		rec := domain.MachineRepoRecord{
+			OriginURL:    "git@github.com:you/api.git",
+			Branch:       "main",
+			HasUntracked: true,
+		}
+		reason := ineligibleFixReason(FixActionPublishNewBranch, rec, fixEligibilityContext{
+			Interactive: false,
+			Risk: fixRiskSnapshot{
+				MissingRootGitignore: true,
+				NoisyChangedPaths:    []string{"node_modules/pkg/index.js"},
+			},
+		})
+		if !strings.Contains(reason, "root .gitignore is missing") {
+			t.Fatalf("reason = %q, want .gitignore guidance", reason)
+		}
+	})
 }

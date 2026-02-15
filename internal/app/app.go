@@ -69,12 +69,14 @@ type SchedulerInstallOptions struct {
 }
 
 type FixOptions struct {
-	IncludeCatalogs []string
-	Project         string
-	Action          string
-	CommitMessage   string
-	SyncStrategy    FixSyncStrategy
-	NoRefresh       bool
+	IncludeCatalogs               []string
+	Project                       string
+	Action                        string
+	CommitMessage                 string
+	PublishBranch                 string
+	ReturnToOriginalBranchAndSync bool
+	SyncStrategy                  FixSyncStrategy
+	NoRefresh                     bool
 }
 
 type scanRefreshMode int

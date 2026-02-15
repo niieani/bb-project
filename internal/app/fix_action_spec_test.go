@@ -18,6 +18,7 @@ func TestFixActionSpecsHaveCoreMetadata(t *testing.T) {
 		FixActionSyncWithUpstream,
 		FixActionPush,
 		FixActionStageCommitPush,
+		FixActionPublishNewBranch,
 		FixActionCheckpointThenSync,
 		FixActionPullFFOnly,
 		FixActionSetUpstreamPush,
@@ -55,6 +56,7 @@ func TestFixActionRiskUsesSharedSpec(t *testing.T) {
 	}{
 		{action: FixActionPush, risky: true},
 		{action: FixActionStageCommitPush, risky: true},
+		{action: FixActionPublishNewBranch, risky: true},
 		{action: FixActionCheckpointThenSync, risky: true},
 		{action: FixActionSyncWithUpstream, risky: true},
 		{action: FixActionPullFFOnly, risky: false},
@@ -268,6 +270,36 @@ func TestFixActionPlanStageCommitPushWithBranchRenamePublishesRenamedBranch(t *t
 	}
 	if !strings.Contains(plan[pushIdx].Summary, "git push -u origin feature/safe-publish") {
 		t.Fatalf("unexpected stage publish summary = %q", plan[pushIdx].Summary)
+	}
+}
+
+func TestFixActionPlanPublishNewBranchChecksOutBeforeCommitAndPushesTargetBranch(t *testing.T) {
+	t.Parallel()
+
+	plan := fixActionPlanFor(FixActionPublishNewBranch, fixActionPlanContext{
+		Branch:             "main",
+		Upstream:           "origin/main",
+		OriginURL:          "git@github.com:you/api.git",
+		PreferredRemote:    "origin",
+		CommitMessage:      "auto",
+		ForkBranchRenameTo: "feature/safe-publish",
+	})
+
+	checkoutIdx := planEntryIndex(plan, "publish-checkout-new-branch")
+	addIdx := planEntryIndex(plan, "stage-git-add")
+	commitIdx := planEntryIndex(plan, "stage-git-commit")
+	pushIdx := planEntryIndex(plan, "publish-push-set-upstream")
+	if checkoutIdx < 0 || addIdx < 0 || commitIdx < 0 || pushIdx < 0 {
+		t.Fatalf("missing expected publish-new-branch plan entries, got %#v", plan)
+	}
+	if !(checkoutIdx < addIdx && addIdx < commitIdx && commitIdx < pushIdx) {
+		t.Fatalf("expected checkout->add->commit->push order, got %#v", plan)
+	}
+	if !strings.Contains(plan[checkoutIdx].Summary, "git checkout -b feature/safe-publish") {
+		t.Fatalf("unexpected checkout summary = %q", plan[checkoutIdx].Summary)
+	}
+	if !strings.Contains(plan[pushIdx].Summary, "git push -u origin feature/safe-publish") {
+		t.Fatalf("unexpected push summary = %q", plan[pushIdx].Summary)
 	}
 }
 

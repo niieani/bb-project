@@ -313,6 +313,8 @@ func newStatusCommand(runtime *runtimeState) *cobra.Command {
 func newFixCommand(runtime *runtimeState) *cobra.Command {
 	var includeCatalogs []string
 	var message string
+	var publishBranch string
+	var returnToOriginalSync bool
 	var syncStrategy string
 	var noRefresh bool
 
@@ -331,10 +333,12 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 				return withExitCode(2, err)
 			}
 			opts := app.FixOptions{
-				IncludeCatalogs: includeCatalogs,
-				CommitMessage:   message,
-				SyncStrategy:    strategy,
-				NoRefresh:       noRefresh,
+				IncludeCatalogs:               includeCatalogs,
+				CommitMessage:                 message,
+				PublishBranch:                 publishBranch,
+				ReturnToOriginalBranchAndSync: returnToOriginalSync,
+				SyncStrategy:                  strategy,
+				NoRefresh:                     noRefresh,
 			}
 			if len(args) > 0 {
 				opts.Project = args[0]
@@ -348,7 +352,9 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 	}
 
 	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
-	cmd.Flags().StringVar(&message, "message", "", "Commit message for stage-commit-push/checkpoint-then-sync actions (or 'auto').")
+	cmd.Flags().StringVar(&message, "message", "", "Commit message for stage-commit-push/publish-new-branch/checkpoint-then-sync actions (or 'auto').")
+	cmd.Flags().StringVar(&publishBranch, "publish-branch", "", "Target branch name for publish-new-branch or optional publish-to-new-branch flows.")
+	cmd.Flags().BoolVar(&returnToOriginalSync, "return-to-original-sync", false, "After publish-new-branch, switch back to the original branch and run pull --ff-only.")
 	cmd.Flags().StringVar(&syncStrategy, "sync-strategy", string(app.FixSyncStrategyRebase), "Sync strategy for sync-with-upstream and pre-push validation (rebase|merge).")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Use current machine snapshot without running a refresh scan first.")
 

@@ -22,6 +22,7 @@ const (
 	FixActionSyncWithUpstream   = "sync-with-upstream"
 	FixActionPush               = "push"
 	FixActionStageCommitPush    = "stage-commit-push"
+	FixActionPublishNewBranch   = "publish-new-branch"
 	FixActionCheckpointThenSync = "checkpoint-then-sync"
 	FixActionPullFFOnly         = "pull-ff-only"
 	FixActionSetUpstreamPush    = "set-upstream-push"
@@ -41,14 +42,15 @@ type fixRepoState struct {
 }
 
 type fixApplyOptions struct {
-	Interactive             bool
-	CommitMessage           string
-	SyncStrategy            FixSyncStrategy
-	CreateProjectName       string
-	CreateProjectVisibility domain.Visibility
-	ForkBranchRenameTo      string
-	GenerateGitignore       bool
-	GitignorePatterns       []string
+	Interactive                   bool
+	CommitMessage                 string
+	SyncStrategy                  FixSyncStrategy
+	CreateProjectName             string
+	CreateProjectVisibility       domain.Visibility
+	ForkBranchRenameTo            string
+	ReturnToOriginalBranchAndSync bool
+	GenerateGitignore             bool
+	GitignorePatterns             []string
 }
 
 type fixApplyStepStatus string
@@ -140,9 +142,11 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 	}
 
 	updated, err := a.applyFixAction(opts.IncludeCatalogs, target.Record.Path, action, fixApplyOptions{
-		Interactive:   false,
-		CommitMessage: opts.CommitMessage,
-		SyncStrategy:  strategy,
+		Interactive:                   false,
+		CommitMessage:                 opts.CommitMessage,
+		ForkBranchRenameTo:            opts.PublishBranch,
+		ReturnToOriginalBranchAndSync: opts.ReturnToOriginalBranchAndSync,
+		SyncStrategy:                  strategy,
 	})
 	if errors.Is(err, errFixActionNotEligible) {
 		var ineligibleErr *fixIneligibleError
@@ -254,6 +258,15 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 		actions = append(actions, FixActionStageCommitPush)
 	}
 	if (rec.HasDirtyTracked || rec.HasUntracked) &&
+		strings.TrimSpace(rec.OriginURL) != "" &&
+		strings.TrimSpace(rec.Branch) != "" &&
+		strings.TrimSpace(rec.Branch) != "HEAD" &&
+		pushAllowed &&
+		!ctx.Risk.hasSecretLikeChanges() &&
+		!(ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive) {
+		actions = append(actions, FixActionPublishNewBranch)
+	}
+	if (rec.HasDirtyTracked || rec.HasUntracked) &&
 		!rec.Diverged &&
 		strings.TrimSpace(rec.OriginURL) != "" &&
 		strings.TrimSpace(rec.Upstream) != "" &&
@@ -282,6 +295,36 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 }
 
 func ineligibleFixReason(action string, rec domain.MachineRepoRecord, ctx fixEligibilityContext) string {
+	if action == FixActionPublishNewBranch {
+		if rec.OperationInProgress != domain.OperationNone && rec.OperationInProgress != "" {
+			return "publish-new-branch is blocked: a git operation is in progress; run abort-operation first"
+		}
+		if strings.TrimSpace(rec.OriginURL) == "" {
+			return "publish-new-branch is blocked: origin remote is required"
+		}
+		if containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonPushAccessBlocked) {
+			return "publish-new-branch is blocked: push access is read-only; run fork-and-retarget first"
+		}
+		if strings.TrimSpace(rec.Branch) == "" {
+			return "publish-new-branch is blocked: cannot determine current branch"
+		}
+		if strings.TrimSpace(rec.Branch) == "HEAD" {
+			return "publish-new-branch is blocked: detached HEAD is not supported; checkout a branch first"
+		}
+		if !rec.HasDirtyTracked && !rec.HasUntracked {
+			return "publish-new-branch is blocked: no local uncommitted changes to commit"
+		}
+		if ctx.Risk.hasSecretLikeChanges() {
+			return fmt.Sprintf(
+				"publish-new-branch is blocked: secret-like uncommitted files detected (%s)",
+				strings.Join(ctx.Risk.SecretLikeChangedPaths, ", "),
+			)
+		}
+		if ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive {
+			return "publish-new-branch is blocked: root .gitignore is missing and noisy uncommitted paths were detected; run interactive `bb fix` to review/generate .gitignore or add it manually"
+		}
+		return ""
+	}
 	if action == FixActionStageCommitPush {
 		if strings.TrimSpace(rec.OriginURL) != "" && strings.TrimSpace(rec.Upstream) != "" && (rec.Diverged || rec.Behind > 0) {
 			return "stage-commit-push is blocked: branch is behind upstream, so push would be rejected; run sync-with-upstream first"
@@ -890,6 +933,36 @@ func (a *App) executeFixAction(
 		}
 		return renameTo, true, nil
 	}
+	localBranchExists := func(branch string) bool {
+		if strings.TrimSpace(branch) == "" {
+			return false
+		}
+		_, err := a.Git.RunGit(path, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+		return err == nil
+	}
+	remoteBranchExists := func(remote string, branch string) bool {
+		remote = strings.TrimSpace(remote)
+		branch = strings.TrimSpace(branch)
+		if remote == "" || branch == "" {
+			return false
+		}
+		out, err := a.Git.RunGit(path, "ls-remote", "--heads", remote, "refs/heads/"+branch)
+		if err != nil {
+			return false
+		}
+		return strings.TrimSpace(out) != ""
+	}
+	resolvePushRemote := func(upstream string) string {
+		remote := plannedRemote(preferredRemote, upstream)
+		if _, err := a.Git.EffectiveRemote(path, remote); err == nil {
+			return remote
+		}
+		fallback, err := a.Git.EffectiveRemote(path, "")
+		if err != nil || strings.TrimSpace(fallback) == "" {
+			return remote
+		}
+		return fallback
+	}
 	switch action {
 	case FixActionAbortOperation:
 		switch target.Record.OperationInProgress {
@@ -928,7 +1001,7 @@ func (a *App) executeFixAction(
 			if err != nil {
 				return err
 			}
-			pushRemote := plannedRemote(preferredRemote, target.Record.Upstream)
+			pushRemote := resolvePushRemote(target.Record.Upstream)
 			return runStep("push-main", fixActionPlanEntry{
 				ID:      "push-main",
 				Command: true,
@@ -985,7 +1058,7 @@ func (a *App) executeFixAction(
 			return err
 		}
 		if target.Record.Upstream == "" || renamed {
-			pushRemote := plannedRemote(preferredRemote, target.Record.Upstream)
+			pushRemote := resolvePushRemote(target.Record.Upstream)
 			return runStep("stage-push-set-upstream", fixActionPlanEntry{
 				ID:      "stage-push-set-upstream",
 				Command: true,
@@ -996,6 +1069,106 @@ func (a *App) executeFixAction(
 		}
 		return runStep("stage-push", fixActionPlanEntry{ID: "stage-push", Command: true, Summary: "git push"}, func() error {
 			return a.Git.Push(path)
+		})
+	case FixActionPublishNewBranch:
+		originalBranch, err := resolveCurrentBranch()
+		if err != nil {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "publish-new-branch is blocked: cannot determine current branch",
+			}
+		}
+		targetBranch := strings.TrimSpace(opts.ForkBranchRenameTo)
+		if targetBranch == "" {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "publish-new-branch is blocked: publish branch target is required",
+			}
+		}
+		if targetBranch == originalBranch {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: fmt.Sprintf("publish-new-branch is blocked: publish branch target %q matches current branch; choose a different branch name", targetBranch),
+			}
+		}
+		if localBranchExists(targetBranch) {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: fmt.Sprintf("publish-new-branch is blocked: publish branch target %q already exists locally; choose a new branch name", targetBranch),
+			}
+		}
+		pushRemote := resolvePushRemote(target.Record.Upstream)
+		if remoteBranchExists(pushRemote, targetBranch) {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: fmt.Sprintf("publish-new-branch is blocked: publish branch target %q already exists on %s; choose a new branch name", targetBranch, pushRemote),
+			}
+		}
+		if opts.ReturnToOriginalBranchAndSync && strings.TrimSpace(target.Record.Upstream) == "" {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "publish-new-branch is blocked: return-and-sync requires original branch upstream",
+			}
+		}
+
+		if err := runStep("publish-checkout-new-branch", fixActionPlanEntry{
+			ID:      "publish-checkout-new-branch",
+			Command: true,
+			Summary: fmt.Sprintf("git checkout -b %s", targetBranch),
+		}, func() error {
+			_, err := a.Git.RunGit(path, "checkout", "-b", targetBranch)
+			return err
+		}); err != nil {
+			return err
+		}
+		if err := a.runFixStageCommitSteps(path, target, opts, runStep); err != nil {
+			return err
+		}
+		if err := runStep("publish-push-set-upstream", fixActionPlanEntry{
+			ID:      "publish-push-set-upstream",
+			Command: true,
+			Summary: fmt.Sprintf("git push -u %s %s", pushRemote, plannedBranch(targetBranch)),
+		}, func() error {
+			return a.Git.PushUpstreamWithPreferredRemote(path, targetBranch, pushRemote)
+		}); err != nil {
+			return err
+		}
+		if !opts.ReturnToOriginalBranchAndSync {
+			return nil
+		}
+		if err := runStep("publish-return-original-branch", fixActionPlanEntry{
+			ID:      "publish-return-original-branch",
+			Command: true,
+			Summary: fmt.Sprintf("git checkout %s", originalBranch),
+		}, func() error {
+			_, err := a.Git.RunGit(path, "checkout", originalBranch)
+			return err
+		}); err != nil {
+			return err
+		}
+		if cfg.Sync.FetchPrune {
+			if err := runStep("publish-return-fetch-prune", fixActionPlanEntry{
+				ID:      "publish-return-fetch-prune",
+				Command: true,
+				Summary: "git fetch --prune",
+			}, func() error {
+				return a.Git.FetchPrune(path)
+			}); err != nil {
+				return err
+			}
+		} else {
+			markSkipped("publish-return-fetch-prune", fixActionPlanEntry{
+				ID:      "publish-return-fetch-prune",
+				Command: false,
+				Summary: "Skip fetch prune because sync.fetch_prune is disabled.",
+			})
+		}
+		return runStep("publish-return-pull-ff-only", fixActionPlanEntry{
+			ID:      "publish-return-pull-ff-only",
+			Command: true,
+			Summary: "git pull --ff-only",
+		}, func() error {
+			return a.Git.PullFFOnly(path)
 		})
 	case FixActionCheckpointThenSync:
 		if strings.TrimSpace(target.Record.OriginURL) == "" {
@@ -1074,7 +1247,7 @@ func (a *App) executeFixAction(
 			return err
 		}
 		if renamed {
-			pushRemote := plannedRemote(preferredRemote, target.Record.Upstream)
+			pushRemote := resolvePushRemote(target.Record.Upstream)
 			return runStep("checkpoint-push", fixActionPlanEntry{
 				ID:      "checkpoint-push",
 				Command: true,
@@ -1120,7 +1293,7 @@ func (a *App) executeFixAction(
 		if err != nil {
 			return err
 		}
-		pushRemote := plannedRemote(preferredRemote, target.Record.Upstream)
+		pushRemote := resolvePushRemote(target.Record.Upstream)
 		return runStep("upstream-push", fixActionPlanEntry{
 			ID:      "upstream-push",
 			Command: true,
@@ -1177,25 +1350,26 @@ func (a *App) buildFixActionPlanContext(cfg domain.ConfigFile, target fixRepoSta
 		}
 	}
 	return fixActionPlanContext{
-		Operation:               target.Record.OperationInProgress,
-		Branch:                  strings.TrimSpace(target.Record.Branch),
-		Upstream:                strings.TrimSpace(target.Record.Upstream),
-		HeadSHA:                 strings.TrimSpace(target.Record.HeadSHA),
-		OriginURL:               strings.TrimSpace(target.Record.OriginURL),
-		SyncStrategy:            normalizeFixSyncStrategy(opts.SyncStrategy),
-		PreferredRemote:         preferredRemote,
-		GitHubOwner:             owner,
-		RemoteProtocol:          strings.TrimSpace(cfg.GitHub.RemoteProtocol),
-		ForkRemoteExists:        forkRemoteExists,
-		RepoName:                strings.TrimSpace(target.Record.Name),
-		CommitMessage:           strings.TrimSpace(opts.CommitMessage),
-		CreateProjectName:       strings.TrimSpace(opts.CreateProjectName),
-		CreateProjectVisibility: opts.CreateProjectVisibility,
-		ForkBranchRenameTo:      strings.TrimSpace(opts.ForkBranchRenameTo),
-		GenerateGitignore:       opts.GenerateGitignore,
-		GitignorePatterns:       append([]string(nil), opts.GitignorePatterns...),
-		MissingRootGitignore:    target.Risk.MissingRootGitignore,
-		FetchPrune:              cfg.Sync.FetchPrune,
+		Operation:                     target.Record.OperationInProgress,
+		Branch:                        strings.TrimSpace(target.Record.Branch),
+		Upstream:                      strings.TrimSpace(target.Record.Upstream),
+		HeadSHA:                       strings.TrimSpace(target.Record.HeadSHA),
+		OriginURL:                     strings.TrimSpace(target.Record.OriginURL),
+		SyncStrategy:                  normalizeFixSyncStrategy(opts.SyncStrategy),
+		PreferredRemote:               preferredRemote,
+		GitHubOwner:                   owner,
+		RemoteProtocol:                strings.TrimSpace(cfg.GitHub.RemoteProtocol),
+		ForkRemoteExists:              forkRemoteExists,
+		RepoName:                      strings.TrimSpace(target.Record.Name),
+		CommitMessage:                 strings.TrimSpace(opts.CommitMessage),
+		CreateProjectName:             strings.TrimSpace(opts.CreateProjectName),
+		CreateProjectVisibility:       opts.CreateProjectVisibility,
+		ForkBranchRenameTo:            strings.TrimSpace(opts.ForkBranchRenameTo),
+		ReturnToOriginalBranchAndSync: opts.ReturnToOriginalBranchAndSync,
+		GenerateGitignore:             opts.GenerateGitignore,
+		GitignorePatterns:             append([]string(nil), opts.GitignorePatterns...),
+		MissingRootGitignore:          target.Risk.MissingRootGitignore,
+		FetchPrune:                    cfg.Sync.FetchPrune,
 	}
 }
 

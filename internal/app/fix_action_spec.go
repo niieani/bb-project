@@ -15,25 +15,26 @@ type fixActionSpec struct {
 }
 
 type fixActionPlanContext struct {
-	Operation               domain.Operation
-	Branch                  string
-	Upstream                string
-	HeadSHA                 string
-	OriginURL               string
-	SyncStrategy            FixSyncStrategy
-	PreferredRemote         string
-	GitHubOwner             string
-	RemoteProtocol          string
-	ForkRemoteExists        bool
-	RepoName                string
-	CommitMessage           string
-	CreateProjectName       string
-	CreateProjectVisibility domain.Visibility
-	ForkBranchRenameTo      string
-	GenerateGitignore       bool
-	GitignorePatterns       []string
-	MissingRootGitignore    bool
-	FetchPrune              bool
+	Operation                     domain.Operation
+	Branch                        string
+	Upstream                      string
+	HeadSHA                       string
+	OriginURL                     string
+	SyncStrategy                  FixSyncStrategy
+	PreferredRemote               string
+	GitHubOwner                   string
+	RemoteProtocol                string
+	ForkRemoteExists              bool
+	RepoName                      string
+	CommitMessage                 string
+	CreateProjectName             string
+	CreateProjectVisibility       domain.Visibility
+	ForkBranchRenameTo            string
+	ReturnToOriginalBranchAndSync bool
+	GenerateGitignore             bool
+	GitignorePatterns             []string
+	MissingRootGitignore          bool
+	FetchPrune                    bool
 }
 
 type fixActionPlanEntry struct {
@@ -86,6 +87,12 @@ var fixActionSpecs = map[string]fixActionSpec{
 		Description: "Stage all local changes and create a commit; push when a remote target is configured.",
 		Risky:       true,
 		BuildPlan:   planFixActionStageCommitPush,
+	},
+	FixActionPublishNewBranch: {
+		Label:       "Publish as new branch",
+		Description: "Create a new branch first, stage and commit local changes there, then push that new branch.",
+		Risky:       true,
+		BuildPlan:   planFixActionPublishNewBranch,
 	},
 	FixActionCheckpointThenSync: {
 		Label:       "Checkpoint, sync & push",
@@ -267,6 +274,63 @@ func planFixActionStageCommitPush(ctx fixActionPlanContext) []fixActionPlanEntry
 		return entries
 	}
 	entries = append(entries, fixActionPlanEntry{ID: "stage-push", Command: true, Summary: "git push"})
+	return entries
+}
+
+func planFixActionPublishNewBranch(ctx fixActionPlanContext) []fixActionPlanEntry {
+	targetBranch := strings.TrimSpace(ctx.ForkBranchRenameTo)
+	entries := []fixActionPlanEntry{
+		{
+			ID:      "publish-checkout-new-branch",
+			Command: true,
+			Summary: fmt.Sprintf("git checkout -b %s", plannedBranch(targetBranch)),
+		},
+	}
+
+	stageEntries := planFixActionStageCommitPush(ctx)
+	for _, entry := range stageEntries {
+		switch entry.ID {
+		case "stage-skip-push-no-origin", "stage-push-set-upstream", "stage-push", "stage-rename-branch":
+			continue
+		default:
+			entries = append(entries, entry)
+		}
+	}
+
+	entries = append(entries, fixActionPlanEntry{
+		ID:      "publish-push-set-upstream",
+		Command: true,
+		Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(targetBranch)),
+	})
+
+	if !ctx.ReturnToOriginalBranchAndSync {
+		return entries
+	}
+
+	entries = append(entries, fixActionPlanEntry{
+		ID:      "publish-return-original-branch",
+		Command: true,
+		Summary: fmt.Sprintf("git checkout %s", plannedBranch(ctx.Branch)),
+	})
+	if ctx.FetchPrune {
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "publish-return-fetch-prune",
+			Command: true,
+			Summary: "git fetch --prune",
+		})
+	} else {
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "publish-return-fetch-prune",
+			Command: false,
+			Summary: "Skip fetch prune because sync.fetch_prune is disabled.",
+		})
+	}
+	entries = append(entries, fixActionPlanEntry{
+		ID:      "publish-return-pull-ff-only",
+		Command: true,
+		Summary: "git pull --ff-only",
+	})
+
 	return entries
 }
 

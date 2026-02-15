@@ -459,6 +459,28 @@ func TestRunFixForwardsOptions(t *testing.T) {
 		}
 	})
 
+	t.Run("forwards publish-branch and return-sync options", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{
+			"fix", "api", "publish-new-branch",
+			"--publish-branch=feature/safe-publish",
+			"--return-to-original-sync",
+			"--message=auto",
+		})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.fixOpts.PublishBranch != "feature/safe-publish" {
+			t.Fatalf("publish branch = %q, want %q", fake.fixOpts.PublishBranch, "feature/safe-publish")
+		}
+		if !fake.fixOpts.ReturnToOriginalBranchAndSync {
+			t.Fatal("expected return-to-original-sync option to be forwarded")
+		}
+	})
+
 	t.Run("invalid sync strategy returns usage error", func(t *testing.T) {
 		fake := &fakeApp{}
 		code, _, stderr, calls, _ := runCLI(t, fake, []string{"fix", "--sync-strategy=invalid"})

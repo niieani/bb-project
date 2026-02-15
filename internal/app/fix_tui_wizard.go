@@ -239,7 +239,9 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	m.wizard.Action = decision.Action
 	m.wizard.SyncStrategy = FixSyncStrategyRebase
 	m.wizard.Risk = repoRisk
-	m.wizard.EnableCommitMessage = decision.Action == FixActionStageCommitPush || decision.Action == FixActionCheckpointThenSync
+	m.wizard.EnableCommitMessage = decision.Action == FixActionStageCommitPush ||
+		decision.Action == FixActionPublishNewBranch ||
+		decision.Action == FixActionCheckpointThenSync
 	m.wizard.CommitMessage = commitInput
 	m.wizard.CommitFocused = false
 	m.wizard.EnableProjectName = decision.Action == FixActionCreateProject
@@ -623,6 +625,9 @@ func (m *fixTUIModel) shouldShowGitignoreToggle(action string, risk fixRiskSnaps
 }
 
 func shouldEnablePublishBranchInput(action string, branch string, defaultBranch string, originURL string) bool {
+	if action == FixActionPublishNewBranch {
+		return strings.TrimSpace(originURL) != ""
+	}
 	if !isDefaultBranch(branch, defaultBranch) {
 		return false
 	}
@@ -1141,10 +1146,16 @@ func (m *fixTUIModel) viewWizardStaticControls() string {
 		))
 	}
 	if m.wizard.EnableForkBranchRename {
+		branchTitle := "Publish as new branch (optional)"
+		branchDescription := "Leave empty to keep the current branch push target."
+		if m.wizard.Action == FixActionPublishNewBranch {
+			branchTitle = "Publish as new branch"
+			branchDescription = "Required. This fix always creates and pushes a new branch."
+		}
 		controls = append(controls, renderFieldBlock(
 			m.wizard.FocusArea == fixWizardFocusForkBranch,
-			"Publish as new branch (optional)",
-			"Leave empty to keep the current branch push target.",
+			branchTitle,
+			branchDescription,
 			renderInputContainer(m.wizard.ForkBranchName.View(), m.wizard.FocusArea == fixWizardFocusForkBranch),
 			"",
 		))
@@ -1363,7 +1374,7 @@ func (m *fixTUIModel) renderWizardPlanMarker(status fixWizardApplyStepStatus) st
 
 func (m *fixTUIModel) wizardChangedFilesFieldMeta() (string, string) {
 	switch m.wizard.Action {
-	case FixActionStageCommitPush, FixActionCheckpointThenSync:
+	case FixActionStageCommitPush, FixActionPublishNewBranch, FixActionCheckpointThenSync:
 		return "Uncommitted changed files", "These uncommitted files will be staged and committed by this fix."
 	default:
 		return "Uncommitted changed files", "Shown for review only. This fix does not stage or commit uncommitted files."

@@ -145,4 +145,31 @@ func TestValidateFixApplyOptionsCreateProject(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation error for invalid branch rename target")
 	}
+
+	err = validateFixApplyOptions(FixActionPublishNewBranch, fixApplyOptions{})
+	if err == nil {
+		t.Fatal("expected validation error when publish-new-branch is missing target branch")
+	}
+
+	err = validateFixApplyOptions(FixActionPublishNewBranch, fixApplyOptions{
+		ForkBranchRenameTo: "feature/safe-publish",
+	})
+	if err != nil {
+		t.Fatalf("expected publish-new-branch target to be valid, got %v", err)
+	}
+
+	err = validateFixApplyOptions(FixActionPush, fixApplyOptions{
+		ReturnToOriginalBranchAndSync: true,
+	})
+	if err == nil {
+		t.Fatal("expected validation error when return/sync is requested for unsupported action")
+	}
+
+	err = validateFixApplyOptions(FixActionPublishNewBranch, fixApplyOptions{
+		ForkBranchRenameTo:            "feature/safe-publish",
+		ReturnToOriginalBranchAndSync: true,
+	})
+	if err != nil {
+		t.Fatalf("expected return/sync to be valid for publish-new-branch, got %v", err)
+	}
 }

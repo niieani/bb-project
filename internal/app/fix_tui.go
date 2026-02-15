@@ -2339,6 +2339,7 @@ func fixActionsForAllExecution(actions []string) []string {
 		return nil
 	}
 	stageCommitSelected := containsAction(actions, FixActionStageCommitPush)
+	publishNewBranchSelected := containsAction(actions, FixActionPublishNewBranch)
 	checkpointThenSyncSelected := containsAction(actions, FixActionCheckpointThenSync)
 	seen := make(map[string]struct{}, len(actions))
 	out := make([]string, 0, len(actions))
@@ -2348,6 +2349,9 @@ func fixActionsForAllExecution(actions []string) []string {
 		}
 		seen[action] = struct{}{}
 		if stageCommitSelected && (action == FixActionPush || action == FixActionSetUpstreamPush) {
+			continue
+		}
+		if publishNewBranchSelected && (action == FixActionPush || action == FixActionSetUpstreamPush || action == FixActionStageCommitPush) {
 			continue
 		}
 		if checkpointThenSyncSelected && (action == FixActionPush || action == FixActionSetUpstreamPush || action == FixActionSyncWithUpstream || action == FixActionStageCommitPush) {
@@ -2368,6 +2372,8 @@ func fixActionSelectionPriority(action string) int {
 		return 30
 	case FixActionCheckpointThenSync:
 		return 35
+	case FixActionPublishNewBranch:
+		return 38
 	case FixActionStageCommitPush:
 		return 40
 	case FixActionCreateProject:
@@ -2543,6 +2549,8 @@ func fixActionStyleFor(action string) lipgloss.Style {
 	case FixActionPush:
 		return fixActionPushStyle
 	case FixActionStageCommitPush:
+		return fixActionStageStyle
+	case FixActionPublishNewBranch:
 		return fixActionStageStyle
 	case FixActionCheckpointThenSync:
 		return fixActionSyncStyle

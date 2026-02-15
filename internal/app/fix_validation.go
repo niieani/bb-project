@@ -122,6 +122,12 @@ func validateFixApplyOptions(action string, opts fixApplyOptions) error {
 			return fmt.Errorf("invalid publish branch target: %w", err)
 		}
 	}
+	if action == FixActionPublishNewBranch && strings.TrimSpace(opts.ForkBranchRenameTo) == "" {
+		return errors.New("invalid publish branch target: action \"publish-new-branch\" requires --publish-branch")
+	}
+	if opts.ReturnToOriginalBranchAndSync && action != FixActionPublishNewBranch {
+		return fmt.Errorf("invalid return-to-original-sync: action %q does not support return/sync", action)
+	}
 	return nil
 }
 
@@ -130,6 +136,7 @@ func actionSupportsPublishBranch(action string) bool {
 	case FixActionForkAndRetarget,
 		FixActionPush,
 		FixActionStageCommitPush,
+		FixActionPublishNewBranch,
 		FixActionCheckpointThenSync,
 		FixActionSetUpstreamPush:
 		return true
