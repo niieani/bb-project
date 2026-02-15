@@ -809,6 +809,34 @@ func TestFixTUIImmediateApplyLocksNavigationKeys(t *testing.T) {
 	}
 }
 
+func TestFixTUIImmediateApplyAllEntersBusyState(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Behind:    1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	m.cycleCurrentAction(1) // pull-ff-only
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	if cmd == nil {
+		t.Fatal("expected immediate apply-all command to be scheduled")
+	}
+	if !m.immediateApplying {
+		t.Fatal("expected immediate apply-all to set in-progress state")
+	}
+}
+
 func TestFixTUISettingToggleKeyUpdatesAutoPush(t *testing.T) {
 	t.Parallel()
 

@@ -1593,7 +1593,7 @@ func (m *fixTUIModel) immediateApplyStatusLine() string {
 	if phase == "" {
 		phase = fixWizardApplyPhasePreparing
 	}
-	line := fmt.Sprintf("%s... controls are locked until execution completes.", phase)
+	line := fmt.Sprintf("%s %s... controls are locked until execution completes.", m.immediateApplySpinner.View(), phase)
 	if step := strings.TrimSpace(m.immediateStep); step != "" {
 		line += " Current step: " + step
 	}
