@@ -1,2 +1,2 @@
-- [ ] cron/notification installator
+- [x] cron/notification installator
 - [ ] "this will run the following commands"

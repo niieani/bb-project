@@ -13,6 +13,8 @@ import (
 )
 
 func TestValidateConfigForSaveRequiresOwner(t *testing.T) {
+	t.Parallel()
+
 	cfg := state.DefaultConfig()
 	cfg.GitHub.Owner = "  "
 
@@ -21,6 +23,22 @@ func TestValidateConfigForSaveRequiresOwner(t *testing.T) {
 		t.Fatal("expected owner validation error")
 	}
 	if !strings.Contains(err.Error(), "github.owner") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateConfigForSaveRequiresSchedulerInterval(t *testing.T) {
+	t.Parallel()
+
+	cfg := state.DefaultConfig()
+	cfg.GitHub.Owner = "you"
+	cfg.Scheduler.IntervalMinutes = 0
+
+	err := validateConfigForSave(cfg)
+	if err == nil {
+		t.Fatal("expected scheduler interval validation error")
+	}
+	if !strings.Contains(err.Error(), "scheduler.interval_minutes") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

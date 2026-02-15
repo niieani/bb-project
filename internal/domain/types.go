@@ -67,11 +67,12 @@ type Catalog struct {
 }
 
 type ConfigFile struct {
-	Version        int            `yaml:"version"`
-	StateTransport StateTransport `yaml:"state_transport"`
-	GitHub         GitHubConfig   `yaml:"github"`
-	Sync           SyncConfig     `yaml:"sync"`
-	Notify         NotifyConfig   `yaml:"notify"`
+	Version        int             `yaml:"version"`
+	StateTransport StateTransport  `yaml:"state_transport"`
+	GitHub         GitHubConfig    `yaml:"github"`
+	Sync           SyncConfig      `yaml:"sync"`
+	Scheduler      SchedulerConfig `yaml:"scheduler"`
+	Notify         NotifyConfig    `yaml:"notify"`
 }
 
 type StateTransport struct {
@@ -92,6 +93,10 @@ type SyncConfig struct {
 	FetchPrune              bool `yaml:"fetch_prune"`
 	PullFFOnly              bool `yaml:"pull_ff_only"`
 	ScanFreshnessSeconds    int  `yaml:"scan_freshness_seconds"`
+}
+
+type SchedulerConfig struct {
+	IntervalMinutes int `yaml:"interval_minutes"`
 }
 
 type NotifyConfig struct {
@@ -172,11 +177,22 @@ type ObservedRepoState struct {
 }
 
 type NotifyCacheFile struct {
-	Version  int                         `yaml:"version"`
-	LastSent map[string]NotifyCacheEntry `yaml:"last_sent"`
+	Version          int                              `yaml:"version"`
+	LastSent         map[string]NotifyCacheEntry      `yaml:"last_sent"`
+	DeliveryFailures map[string]NotifyDeliveryFailure `yaml:"delivery_failures,omitempty"`
 }
 
 type NotifyCacheEntry struct {
 	Fingerprint string    `yaml:"fingerprint"`
 	SentAt      time.Time `yaml:"sent_at"`
+}
+
+type NotifyDeliveryFailure struct {
+	Backend     string    `yaml:"backend"`
+	RepoKey     string    `yaml:"repo_key,omitempty"`
+	RepoName    string    `yaml:"repo_name,omitempty"`
+	RepoPath    string    `yaml:"repo_path,omitempty"`
+	Fingerprint string    `yaml:"fingerprint,omitempty"`
+	Error       string    `yaml:"error"`
+	FailedAt    time.Time `yaml:"failed_at"`
 }

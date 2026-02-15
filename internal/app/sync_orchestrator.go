@@ -56,7 +56,7 @@ func (a *App) runSync(opts SyncOptions) (int, error) {
 
 	if opts.Notify {
 		a.logf("sync: processing notifications")
-		if err := a.notifyUnsyncable(cfg, machine.Repos); err != nil {
+		if err := a.notifyUnsyncable(cfg, machine.Repos, opts.NotifyBackend); err != nil {
 			return 2, err
 		}
 	}

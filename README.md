@@ -81,6 +81,7 @@ Top-level commands:
 - `status`
 - `doctor`
 - `ensure`
+- `scheduler`
 - `fix`
 - `repo`
 - `catalog`
@@ -131,6 +132,7 @@ Flags:
 - `--include-catalog <name>` (repeatable)
 - `--push` (allow pushing ahead commits when repo policy blocks by default)
 - `--notify` (emit deduped unsyncable notifications)
+- `--notify-backend <stdout|osascript>` (override notification backend; falls back to `BB_NOTIFY_BACKEND`, then `stdout`)
 - `--dry-run` (observe/reconcile decisions without write-side sync actions)
 
 Exit code is `1` when selected catalogs still contain unsyncable repos after sync.
@@ -153,6 +155,19 @@ Returns `1` if any unsyncable repo is present in selected catalogs.
 ### `bb ensure [--include-catalog <name> ...]`
 
 Alias for sync convergence (`bb sync` with include filters).
+
+### `bb scheduler`
+
+Manage macOS launchd scheduling for periodic sync.
+
+- `bb scheduler install [--notify-backend <stdout|osascript>]`
+  - installs/replaces a LaunchAgent that runs `bb sync --notify --quiet`
+  - reads `scheduler.interval_minutes` from config
+  - defaults scheduled backend to `osascript` unless overridden by flag or `BB_NOTIFY_BACKEND`
+- `bb scheduler status`
+  - reports whether LaunchAgent is installed and current interval/backend
+- `bb scheduler remove`
+  - unloads and removes the LaunchAgent
 
 ### `bb fix [project] [action] [flags]`
 
@@ -272,6 +287,8 @@ sync:
   fetch_prune: true
   pull_ff_only: true
   scan_freshness_seconds: 60
+scheduler:
+  interval_minutes: 60
 notify:
   enabled: true
   dedupe: true
@@ -282,7 +299,7 @@ Important notes:
 
 - v1 supports only `state_transport.mode: external`.
 - `github.owner` is required (`bb init` fails if blank).
-- `notify.throttle_minutes` is present in config; throttling hardening is tracked in v1.1 plan.
+- `scheduler.interval_minutes` controls cadence used by `bb scheduler install`.
 
 ## State Layout
 
@@ -345,7 +362,9 @@ When `sync --notify` is used:
 
 - only unsyncable repos are considered
 - notifications are deduplicated by reason fingerprint per repo cache key
-- messages are written to stdout (`notify <repo>: <fingerprint>`)
+- backend selection priority: `--notify-backend` > `BB_NOTIFY_BACKEND` > `stdout`
+- `stdout` backend writes `notify <repo>: <fingerprint>`
+- `osascript` backend sends macOS desktop notifications
 
 ## Safety Guarantees
 
@@ -372,10 +391,10 @@ On machine B:
 ./bb status
 ```
 
-Run periodically (for example with `launchd`):
+Install periodic scheduler:
 
 ```bash
-./bb sync --notify --quiet
+./bb scheduler install
 ```
 
 ## Development

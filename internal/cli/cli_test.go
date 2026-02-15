@@ -38,6 +38,11 @@ type fakeApp struct {
 	catalogRMName  string
 	catalogDefName string
 
+	schedulerInstallOpts  app.SchedulerInstallOptions
+	schedulerInstallCalls int
+	schedulerStatusCalls  int
+	schedulerRemoveCalls  int
+
 	initErr         error
 	scanCode        int
 	scanErr         error
@@ -68,6 +73,13 @@ type fakeApp struct {
 	catalogListCode int
 	catalogListErr  error
 	configErr       error
+
+	schedulerInstallCode int
+	schedulerInstallErr  error
+	schedulerStatusCode  int
+	schedulerStatusErr   error
+	schedulerRemoveCode  int
+	schedulerRemoveErr   error
 }
 
 func (f *fakeApp) SetVerbose(verbose bool) {
@@ -155,6 +167,22 @@ func (f *fakeApp) RunCatalogList() (int, error) {
 
 func (f *fakeApp) RunConfig() error {
 	return f.configErr
+}
+
+func (f *fakeApp) RunSchedulerInstall(opts app.SchedulerInstallOptions) (int, error) {
+	f.schedulerInstallCalls++
+	f.schedulerInstallOpts = opts
+	return f.schedulerInstallCode, f.schedulerInstallErr
+}
+
+func (f *fakeApp) RunSchedulerStatus() (int, error) {
+	f.schedulerStatusCalls++
+	return f.schedulerStatusCode, f.schedulerStatusErr
+}
+
+func (f *fakeApp) RunSchedulerRemove() (int, error) {
+	f.schedulerRemoveCalls++
+	return f.schedulerRemoveCode, f.schedulerRemoveErr
 }
 
 func TestRunHelpDoesNotCreateApp(t *testing.T) {
@@ -291,7 +319,7 @@ func TestRunScanAndSyncForwardOptions(t *testing.T) {
 
 	t.Run("sync flags", func(t *testing.T) {
 		fake := &fakeApp{}
-		code, _, stderr, _, _ := runCLI(t, fake, []string{"sync", "--include-catalog", "software", "--push", "--notify", "--dry-run"})
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"sync", "--include-catalog", "software", "--push", "--notify", "--dry-run", "--notify-backend", "osascript"})
 		if code != 0 {
 			t.Fatalf("exit code = %d, want 0", code)
 		}
@@ -300,6 +328,9 @@ func TestRunScanAndSyncForwardOptions(t *testing.T) {
 		}
 		if !fake.syncOpts.Push || !fake.syncOpts.Notify || !fake.syncOpts.DryRun {
 			t.Fatalf("sync flags not forwarded: %#v", fake.syncOpts)
+		}
+		if fake.syncOpts.NotifyBackend != "osascript" {
+			t.Fatalf("notify backend = %q, want %q", fake.syncOpts.NotifyBackend, "osascript")
 		}
 		mustEqualSlices(t, fake.syncOpts.IncludeCatalogs, []string{"software"})
 	})
@@ -583,6 +614,51 @@ func TestRunCatalogAndConfigCommands(t *testing.T) {
 		}
 		if fake.catalogAddName != "software" || fake.catalogAddRoot != "/tmp/software" {
 			t.Fatalf("catalog add forwarding mismatch: name=%q root=%q", fake.catalogAddName, fake.catalogAddRoot)
+		}
+	})
+
+	t.Run("scheduler install forwards backend", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"scheduler", "install", "--notify-backend", "osascript"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.schedulerInstallCalls != 1 {
+			t.Fatalf("install calls = %d, want 1", fake.schedulerInstallCalls)
+		}
+		if fake.schedulerInstallOpts.NotifyBackend != "osascript" {
+			t.Fatalf("notify backend = %q, want %q", fake.schedulerInstallOpts.NotifyBackend, "osascript")
+		}
+	})
+
+	t.Run("scheduler status", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"scheduler", "status"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.schedulerStatusCalls != 1 {
+			t.Fatalf("status calls = %d, want 1", fake.schedulerStatusCalls)
+		}
+	})
+
+	t.Run("scheduler remove", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"scheduler", "remove"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.schedulerRemoveCalls != 1 {
+			t.Fatalf("remove calls = %d, want 1", fake.schedulerRemoveCalls)
 		}
 	})
 

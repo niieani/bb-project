@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -10,11 +9,26 @@ import (
 	"bb-project/internal/state"
 )
 
-func (a *App) notifyUnsyncable(cfg domain.ConfigFile, repos []domain.MachineRepoRecord) error {
+func (a *App) notifyUnsyncable(cfg domain.ConfigFile, repos []domain.MachineRepoRecord, backendOverride string) error {
 	if !cfg.Notify.Enabled {
 		a.logf("notify: disabled in config")
 		return nil
 	}
+	backendName, err := a.resolveNotifyBackend(backendOverride)
+	if err != nil {
+		return err
+	}
+	factory := a.NewNotifySender
+	if factory == nil {
+		factory = func(name string) (notifySender, error) {
+			return newNotifySender(name, a.Stdout, a.RunCommand)
+		}
+	}
+	sender, err := factory(backendName)
+	if err != nil {
+		return err
+	}
+
 	cache, err := state.LoadNotifyCache(a.Paths)
 	if err != nil {
 		return err
@@ -39,9 +53,27 @@ func (a *App) notifyUnsyncable(cfg domain.ConfigFile, repos []domain.MachineRepo
 				continue
 			}
 		}
-		a.logf("notify: emitting for %s (%s)", rec.Name, fingerprint)
-		fmt.Fprintf(a.Stdout, "notify %s: %s\n", rec.Name, fingerprint)
+		msg := notifyMessage{
+			Repo:        rec,
+			Fingerprint: fingerprint,
+		}
+		if err := sender.Send(msg); err != nil {
+			failureKey := notifyFailureCacheKey(backendName, rec)
+			a.logf("notify: backend %s failed for %s: %v", backendName, rec.Name, err)
+			cache.DeliveryFailures[failureKey] = domain.NotifyDeliveryFailure{
+				Backend:     backendName,
+				RepoKey:     strings.TrimSpace(rec.RepoKey),
+				RepoName:    strings.TrimSpace(rec.Name),
+				RepoPath:    strings.TrimSpace(rec.Path),
+				Fingerprint: fingerprint,
+				Error:       err.Error(),
+				FailedAt:    now,
+			}
+			continue
+		}
+		a.logf("notify: backend %s emitted for %s (%s)", backendName, rec.Name, fingerprint)
 		cache.LastSent[cacheKey] = domain.NotifyCacheEntry{Fingerprint: fingerprint, SentAt: now}
+		delete(cache.DeliveryFailures, notifyFailureCacheKey(backendName, rec))
 	}
 	return state.SaveNotifyCache(a.Paths, cache)
 }

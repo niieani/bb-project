@@ -69,7 +69,8 @@ A catalog is a named local root directory that may contain git projects.
    - Policy is editable later.
 
 5. Scheduler
-   - macOS `launchd` runs `bb sync --notify` periodically.
+   - `bb scheduler install` configures macOS `launchd` to run `bb sync --notify --quiet` periodically.
+   - `bb scheduler status` and `bb scheduler remove` manage lifecycle visibility and teardown.
    - Notifications are deduplicated by fingerprint until state changes.
 
 6. Safe path handling
@@ -431,11 +432,14 @@ release lock
 ## Commands (v1)
 
 - `bb init [project] [--catalog <name>] [--public] [--push] [--https]`
-- `bb sync [--push] [--notify] [--dry-run] [--include-catalog <name> ...]`
+- `bb sync [--push] [--notify] [--notify-backend <stdout|osascript>] [--dry-run] [--include-catalog <name> ...]`
 - `bb status [--json] [--include-catalog <name> ...]`
 - `bb doctor [--include-catalog <name> ...]`
 - `bb scan [--include-catalog <name> ...]`
 - `bb ensure [--include-catalog <name> ...]`
+- `bb scheduler install [--notify-backend <stdout|osascript>]`
+- `bb scheduler status`
+- `bb scheduler remove`
 - `bb repo policy <repo> --auto-push=<true|false>`
 - `bb catalog add <name> <root>`
 - `bb catalog rm <name>`

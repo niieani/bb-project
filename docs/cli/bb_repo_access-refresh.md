@@ -1,16 +1,15 @@
-## bb repo policy
+## bb repo access-refresh
 
-Set repository auto-push policy.
+Probe and refresh cached repository push access.
 
 ```
-bb repo policy <repo> [flags]
+bb repo access-refresh <repo> [flags]
 ```
 
 ### Options
 
 ```
-      --auto-push string   Set auto-push mode (false|true|include-default-branch).
-  -h, --help               help for policy
+  -h, --help   help for access-refresh
 ```
 
 ### Options inherited from parent commands

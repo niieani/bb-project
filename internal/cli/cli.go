@@ -21,6 +21,9 @@ type appRunner interface {
 	RunStatus(jsonOut bool, include []string) (int, error)
 	RunDoctor(include []string) (int, error)
 	RunEnsure(include []string) (int, error)
+	RunSchedulerInstall(opts app.SchedulerInstallOptions) (int, error)
+	RunSchedulerStatus() (int, error)
+	RunSchedulerRemove() (int, error)
 	RunRepoPolicy(repoSelector string, autoPushMode domain.AutoPushMode) (int, error)
 	RunRepoPreferredRemote(repoSelector string, preferredRemote string) (int, error)
 	RunRepoPushAccessSet(repoSelector string, pushAccess string) (int, error)
@@ -164,6 +167,7 @@ func newRootCommand(runtime *runtimeState) *cobra.Command {
 		newStatusCommand(runtime),
 		newDoctorCommand(runtime),
 		newEnsureCommand(runtime),
+		newSchedulerCommand(runtime),
 		newRepoCommand(runtime),
 		newCatalogCommand(runtime),
 		newConfigCommand(runtime),
@@ -250,6 +254,7 @@ func newSyncCommand(runtime *runtimeState) *cobra.Command {
 	var includeCatalogs []string
 	var push bool
 	var notify bool
+	var notifyBackend string
 	var dryRun bool
 
 	cmd := &cobra.Command{
@@ -265,6 +270,7 @@ func newSyncCommand(runtime *runtimeState) *cobra.Command {
 				IncludeCatalogs: includeCatalogs,
 				Push:            push,
 				Notify:          notify,
+				NotifyBackend:   notifyBackend,
 				DryRun:          dryRun,
 			})
 			return withExitCode(code, err)
@@ -274,6 +280,7 @@ func newSyncCommand(runtime *runtimeState) *cobra.Command {
 	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
 	cmd.Flags().BoolVar(&push, "push", false, "Allow pushing ahead commits when policy blocks by default.")
 	cmd.Flags().BoolVar(&notify, "notify", false, "Emit notifications for unsyncable repositories.")
+	cmd.Flags().StringVar(&notifyBackend, "notify-backend", "", "Notification backend override (stdout|osascript).")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show reconcile decisions without write-side sync actions.")
 
 	return cmd
@@ -390,6 +397,70 @@ func newEnsureCommand(runtime *runtimeState) *cobra.Command {
 	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
 
 	return cmd
+}
+
+func newSchedulerCommand(runtime *runtimeState) *cobra.Command {
+	schedulerCmd := &cobra.Command{
+		Use:           "scheduler",
+		Short:         "Manage periodic sync scheduler integration.",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := cmd.Help(); err != nil {
+				return withExitCode(2, err)
+			}
+			return withExitCode(2, errors.New("scheduler subcommand is required"))
+		},
+	}
+
+	var notifyBackend string
+	installCmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install or update periodic scheduler job for bb sync.",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunSchedulerInstall(app.SchedulerInstallOptions{
+				NotifyBackend: notifyBackend,
+			})
+			return withExitCode(code, err)
+		},
+	}
+	installCmd.Flags().StringVar(&notifyBackend, "notify-backend", "", "Notification backend for scheduled runs (stdout|osascript).")
+
+	statusCmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show scheduler installation status.",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunSchedulerStatus()
+			return withExitCode(code, err)
+		},
+	}
+
+	removeCmd := &cobra.Command{
+		Use:   "remove",
+		Short: "Remove scheduler integration.",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunSchedulerRemove()
+			return withExitCode(code, err)
+		},
+	}
+
+	schedulerCmd.AddCommand(installCmd, statusCmd, removeCmd)
+	return schedulerCmd
 }
 
 func newRepoCommand(runtime *runtimeState) *cobra.Command {

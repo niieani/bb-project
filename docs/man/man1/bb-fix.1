@@ -1,0 +1,43 @@
+.nh
+.TH "BB" "1" "Feb 2026" "bb" ""
+
+.SH NAME
+bb-fix - Inspect repositories and apply context-aware fixes.
+
+
+.SH SYNOPSIS
+\fBbb fix [project] [action] [flags]\fP
+
+
+.SH DESCRIPTION
+Inspect repositories and apply context-aware fixes.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for fix
+
+.PP
+\fB--include-catalog\fP=[]
+	Limit scope to selected catalogs (repeatable).
+
+.PP
+\fB--message\fP=""
+	Commit message for stage-commit-push action (or 'auto').
+
+.PP
+\fB--no-refresh\fP[=false]
+	Use current machine snapshot without running a refresh scan first.
+
+.PP
+\fB--sync-strategy\fP="rebase"
+	Sync strategy for sync-with-upstream and pre-push validation (rebase|merge).
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB-q\fP, \fB--quiet\fP[=false]
+	Suppress verbose bb logs.
+
+
+.SH SEE ALSO
+\fBbb(1)\fP

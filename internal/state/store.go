@@ -90,6 +90,9 @@ func DefaultConfig() domain.ConfigFile {
 			PullFFOnly:              true,
 			ScanFreshnessSeconds:    60,
 		},
+		Scheduler: domain.SchedulerConfig{
+			IntervalMinutes: 60,
+		},
 		Notify: domain.NotifyConfig{Enabled: true, Dedupe: true, ThrottleMinutes: 60},
 	}
 }
@@ -122,6 +125,9 @@ func LoadConfig(paths Paths) (domain.ConfigFile, error) {
 	}
 	if cfg.Sync.ScanFreshnessSeconds < 0 {
 		cfg.Sync.ScanFreshnessSeconds = 0
+	}
+	if cfg.Scheduler.IntervalMinutes <= 0 {
+		cfg.Scheduler.IntervalMinutes = 60
 	}
 	return cfg, nil
 }
@@ -249,7 +255,11 @@ func LoadAllMachineFiles(paths Paths) ([]domain.MachineFile, error) {
 func LoadNotifyCache(paths Paths) (domain.NotifyCacheFile, error) {
 	cachePath := paths.NotifyCachePath()
 	if _, err := os.Stat(cachePath); errors.Is(err, os.ErrNotExist) {
-		return domain.NotifyCacheFile{Version: 1, LastSent: map[string]domain.NotifyCacheEntry{}}, nil
+		return domain.NotifyCacheFile{
+			Version:          1,
+			LastSent:         map[string]domain.NotifyCacheEntry{},
+			DeliveryFailures: map[string]domain.NotifyDeliveryFailure{},
+		}, nil
 	}
 	var cache domain.NotifyCacheFile
 	if err := LoadYAML(cachePath, &cache); err != nil {
@@ -257,6 +267,9 @@ func LoadNotifyCache(paths Paths) (domain.NotifyCacheFile, error) {
 	}
 	if cache.LastSent == nil {
 		cache.LastSent = map[string]domain.NotifyCacheEntry{}
+	}
+	if cache.DeliveryFailures == nil {
+		cache.DeliveryFailures = map[string]domain.NotifyDeliveryFailure{}
 	}
 	if cache.Version == 0 {
 		cache.Version = 1
@@ -268,6 +281,9 @@ func SaveNotifyCache(paths Paths, cache domain.NotifyCacheFile) error {
 	cache.Version = 1
 	if cache.LastSent == nil {
 		cache.LastSent = map[string]domain.NotifyCacheEntry{}
+	}
+	if cache.DeliveryFailures == nil {
+		cache.DeliveryFailures = map[string]domain.NotifyDeliveryFailure{}
 	}
 	return SaveYAML(paths.NotifyCachePath(), cache)
 }

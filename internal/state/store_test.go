@@ -179,3 +179,12 @@ name: legacy
 		t.Fatalf("unexpected repo key order: %q, %q", repos[0].RepoKey, repos[1].RepoKey)
 	}
 }
+
+func TestDefaultConfigSetsSchedulerInterval(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultConfig()
+	if cfg.Scheduler.IntervalMinutes != 60 {
+		t.Fatalf("scheduler interval = %d, want 60", cfg.Scheduler.IntervalMinutes)
+	}
+}

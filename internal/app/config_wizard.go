@@ -23,6 +23,7 @@ const (
 	stepIntro configStep = iota
 	stepGitHub
 	stepSync
+	stepScheduler
 	stepNotify
 	stepCatalogs
 	stepReview
@@ -167,6 +168,8 @@ type configWizardModel struct {
 	githubFocus      int
 
 	syncCursor int
+
+	schedulerInterval textinput.Model
 
 	notifyThrottle textinput.Model
 	notifyFocus    int
@@ -389,7 +392,11 @@ func newConfigWizardModel(input ConfigWizardInput) *configWizardModel {
 	if m.config.StateTransport.Mode != "external" {
 		m.config.StateTransport.Mode = "external"
 	}
+	if m.config.Scheduler.IntervalMinutes <= 0 {
+		m.config.Scheduler.IntervalMinutes = 60
+	}
 	m.initGitHubInputs()
+	m.initSchedulerInput()
 	m.initNotifyInput()
 	m.initCatalogTable()
 	m.focusTabs = true
@@ -459,6 +466,8 @@ func (m *configWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateGitHub(msg)
 	case stepSync:
 		return m.updateSync(msg)
+	case stepScheduler:
+		return m.updateScheduler(msg)
 	case stepNotify:
 		return m.updateNotify(msg)
 	case stepCatalogs:
@@ -517,6 +526,8 @@ func (m *configWizardModel) View() string {
 		content = m.viewGitHub()
 	case stepSync:
 		content = m.viewSync()
+	case stepScheduler:
+		content = m.viewScheduler()
 	case stepNotify:
 		content = m.viewNotify()
 	case stepCatalogs:
@@ -709,6 +720,46 @@ func (m *configWizardModel) updateSync(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *configWizardModel) updateScheduler(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
+		case "up":
+			if m.focusTabs {
+				return m, nil
+			}
+			m.focusTabs = true
+			m.updateSchedulerFocus()
+			return m, nil
+		case "down":
+			if m.focusTabs {
+				m.focusTabs = false
+				m.updateSchedulerFocus()
+				return m, nil
+			}
+		case "enter":
+			if !m.focusTabs {
+				if v, err := strconv.Atoi(strings.TrimSpace(m.schedulerInterval.Value())); err == nil {
+					m.config.Scheduler.IntervalMinutes = v
+				}
+				m.advanceStep()
+				return m, nil
+			}
+		}
+	}
+
+	if m.focusTabs {
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.schedulerInterval, cmd = m.schedulerInterval.Update(msg)
+	if v, err := strconv.Atoi(strings.TrimSpace(m.schedulerInterval.Value())); err == nil {
+		m.config.Scheduler.IntervalMinutes = v
+	}
+	m.recomputeDirty()
+	return m, cmd
 }
 
 func (m *configWizardModel) updateNotify(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1087,6 +1138,25 @@ func (m *configWizardModel) initGitHubInputs() {
 	m.updateGitHubFocus()
 }
 
+func (m *configWizardModel) initSchedulerInput() {
+	interval := textinput.New()
+	interval.Prompt = ""
+	interval.Placeholder = "minutes (>= 1)"
+	interval.SetValue(strconv.Itoa(m.config.Scheduler.IntervalMinutes))
+	interval.Validate = func(v string) error {
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("must be an integer")
+		}
+		if n < 1 {
+			return fmt.Errorf("must be >= 1")
+		}
+		return nil
+	}
+	interval.Blur()
+	m.schedulerInterval = interval
+}
+
 func (m *configWizardModel) initNotifyInput() {
 	throttle := textinput.New()
 	throttle.Prompt = ""
@@ -1187,6 +1257,14 @@ func (m *configWizardModel) updateGitHubFocus() {
 	m.githubOwnerInput.Focus()
 }
 
+func (m *configWizardModel) updateSchedulerFocus() {
+	if m.focusTabs || m.step != stepScheduler {
+		m.schedulerInterval.Blur()
+		return
+	}
+	m.schedulerInterval.Focus()
+}
+
 func (m *configWizardModel) updateNotifyFocus() {
 	if m.focusTabs {
 		m.notifyThrottle.Blur()
@@ -1272,6 +1350,7 @@ func (m *configWizardModel) onStepChanged() {
 	m.errorText = ""
 	m.confirmQuit = false
 	m.updateGitHubFocus()
+	m.updateSchedulerFocus()
 	m.updateNotifyFocus()
 	m.updateCatalogFocus()
 }
@@ -1326,6 +1405,10 @@ func (m *configWizardModel) validateCurrentStep() error {
 		if m.config.GitHub.RemoteProtocol != "ssh" && m.config.GitHub.RemoteProtocol != "https" {
 			return fmt.Errorf("remote protocol must be ssh or https")
 		}
+	case stepScheduler:
+		if m.schedulerInterval.Err != nil {
+			return m.schedulerInterval.Err
+		}
 	case stepNotify:
 		if m.notifyThrottle.Err != nil {
 			return m.notifyThrottle.Err
@@ -1341,6 +1424,9 @@ func (m *configWizardModel) validateCurrentStep() error {
 func (m *configWizardModel) validateAll() error {
 	if err := m.validateCurrentStep(); err != nil {
 		return err
+	}
+	if v, err := strconv.Atoi(strings.TrimSpace(m.schedulerInterval.Value())); err == nil {
+		m.config.Scheduler.IntervalMinutes = v
 	}
 	if v, err := strconv.Atoi(strings.TrimSpace(m.notifyThrottle.Value())); err == nil {
 		m.config.Notify.ThrottleMinutes = v
@@ -1362,7 +1448,7 @@ func (m *configWizardModel) recomputeDirty() {
 }
 
 func (m *configWizardModel) stepsHeader() string {
-	labels := []string{"Intro", "GitHub", "Sync", "Notify", "Catalogs", "Review"}
+	labels := []string{"Intro", "GitHub", "Sync", "Scheduler", "Notify", "Catalogs", "Review"}
 	parts := make([]string, 0, len(labels))
 	for i, l := range labels {
 		if i == int(m.step) {
@@ -1481,6 +1567,22 @@ func (m *configWizardModel) viewSync() string {
 			b.WriteString("\n\n")
 		}
 	}
+	return b.String()
+}
+
+func (m *configWizardModel) viewScheduler() string {
+	var b strings.Builder
+	b.WriteString(labelStyle.Render("Scheduler Settings"))
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Render("Configure periodic background sync cadence used by `bb scheduler install`."))
+	b.WriteString("\n\n")
+	b.WriteString(renderFieldBlock(
+		!m.focusTabs,
+		"Run interval (minutes)",
+		"Scheduler launch interval for background `bb sync --notify`.",
+		renderInputContainer(m.schedulerInterval.View(), !m.focusTabs),
+		errorText(m.schedulerInterval.Err),
+	))
 	return b.String()
 }
 
@@ -1670,6 +1772,9 @@ func (m *configWizardModel) diffLines() []string {
 	}
 	if m.originalConfig.Sync != m.config.Sync {
 		out = append(out, "sync settings updated")
+	}
+	if m.originalConfig.Scheduler != m.config.Scheduler {
+		out = append(out, "scheduler settings updated")
 	}
 	if m.originalConfig.Notify != m.config.Notify {
 		out = append(out, "notify settings updated")

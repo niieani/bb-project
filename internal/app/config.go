@@ -191,6 +191,9 @@ func validateConfigForSave(cfg domain.ConfigFile) error {
 	if cfg.Notify.ThrottleMinutes < 0 {
 		return fmt.Errorf("notify.throttle_minutes must be >= 0")
 	}
+	if cfg.Scheduler.IntervalMinutes < 1 {
+		return fmt.Errorf("scheduler.interval_minutes must be >= 1")
+	}
 	return nil
 }
 

@@ -19,17 +19,22 @@ import (
 )
 
 type App struct {
-	Paths    state.Paths
-	Stdout   io.Writer
-	Stderr   io.Writer
-	Verbose  bool
-	Now      func() time.Time
-	Hostname func() (string, error)
-	Getwd    func() (string, error)
-	Git      gitx.Runner
+	Paths          state.Paths
+	Stdout         io.Writer
+	Stderr         io.Writer
+	Verbose        bool
+	Now            func() time.Time
+	Hostname       func() (string, error)
+	Getwd          func() (string, error)
+	Getenv         func(string) string
+	Git            gitx.Runner
+	RunCommand     func(name string, args ...string) (string, error)
+	GOOS           func() string
+	ExecutablePath func() (string, error)
 
 	IsInteractiveTerminal func() bool
 	RunConfigWizard       ConfigWizardRunner
+	NewNotifySender       func(backend string) (notifySender, error)
 
 	repoMetadataMu      sync.Mutex
 	observeRepoHook     func(cfg domain.ConfigFile, repo discoveredRepo, allowPush bool) (domain.MachineRepoRecord, error)
@@ -55,7 +60,12 @@ type SyncOptions struct {
 	IncludeCatalogs []string
 	Push            bool
 	Notify          bool
+	NotifyBackend   string
 	DryRun          bool
+}
+
+type SchedulerInstallOptions struct {
+	NotifyBackend string
 }
 
 type FixOptions struct {
@@ -85,7 +95,7 @@ func New(paths state.Paths, stdout io.Writer, stderr io.Writer) *App {
 		return time.Now().UTC()
 	}
 
-	return &App{
+	a := &App{
 		Paths:   paths,
 		Stdout:  stdout,
 		Stderr:  stderr,
@@ -95,10 +105,18 @@ func New(paths state.Paths, stdout io.Writer, stderr io.Writer) *App {
 			return os.Hostname()
 		},
 		Getwd:                 os.Getwd,
+		Getenv:                os.Getenv,
 		Git:                   gitx.Runner{Now: nowFn},
+		RunCommand:            defaultRunCommand,
+		GOOS:                  func() string { return runtime.GOOS },
+		ExecutablePath:        os.Executable,
 		IsInteractiveTerminal: defaultIsInteractiveTerminal,
 		RunConfigWizard:       runConfigWizardInteractive,
 	}
+	a.NewNotifySender = func(backend string) (notifySender, error) {
+		return newNotifySender(backend, a.Stdout, a.RunCommand)
+	}
+	return a
 }
 
 func (a *App) SetVerbose(verbose bool) {
@@ -1233,6 +1251,14 @@ func (a *App) RunDoctor(include []string) (int, error) {
 			unsyncable = true
 			fmt.Fprintf(a.Stdout, "%s: %v\n", r.Name, r.UnsyncableReasons)
 		}
+	}
+
+	warningCount, err := a.reportNotifyDeliveryFailures()
+	if err != nil {
+		return 2, err
+	}
+	if warningCount > 0 {
+		a.logf("doctor: found %d notification delivery warning(s)", warningCount)
 	}
 	if unsyncable {
 		a.logf("doctor: found unsyncable repos")

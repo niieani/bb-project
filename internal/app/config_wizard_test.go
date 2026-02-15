@@ -92,11 +92,27 @@ func TestWizardSyncSpaceTogglesAndEnterAdvances(t *testing.T) {
 
 	current := m.config.Sync.AutoDiscover
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.step != stepNotify {
-		t.Fatalf("step = %v, want %v", m.step, stepNotify)
+	if m.step != stepScheduler {
+		t.Fatalf("step = %v, want %v", m.step, stepScheduler)
 	}
 	if m.config.Sync.AutoDiscover != current {
 		t.Fatal("enter should not toggle current option")
+	}
+}
+
+func TestWizardSchedulerInputEnterAdvancesToNotify(t *testing.T) {
+	m := testConfigWizardModel(t)
+	m.step = stepScheduler
+	m.focusTabs = false
+	m.updateSchedulerFocus()
+	m.schedulerInterval.SetValue("45")
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.step != stepNotify {
+		t.Fatalf("step = %v, want %v", m.step, stepNotify)
+	}
+	if m.config.Scheduler.IntervalMinutes != 45 {
+		t.Fatalf("scheduler interval = %d, want 45", m.config.Scheduler.IntervalMinutes)
 	}
 }
 
@@ -184,8 +200,13 @@ func TestWizardTabsFocusedCanSwitchAcrossMultipleSteps(t *testing.T) {
 	}
 
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	if m.step != stepNotify || !m.focusTabs {
+	if m.step != stepScheduler || !m.focusTabs {
 		t.Fatalf("after second right: step=%v focusTabs=%v", m.step, m.focusTabs)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if m.step != stepNotify || !m.focusTabs {
+		t.Fatalf("after third right: step=%v focusTabs=%v", m.step, m.focusTabs)
 	}
 }
 
