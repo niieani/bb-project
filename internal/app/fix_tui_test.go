@@ -3367,11 +3367,12 @@ func TestFixTUISelectFixesInteractiveLabelAppearsOnlyOnSelectedRow(t *testing.T)
 	repos := []fixRepoState{
 		{
 			Record: domain.MachineRepoRecord{
-				Name:      "api",
-				Path:      "/repos/api",
-				OriginURL: "git@github.com:you/api.git",
-				Upstream:  "origin/main",
-				Ahead:     1,
+				Name:            "api",
+				Path:            "/repos/api",
+				OriginURL:       "git@github.com:you/api.git",
+				Upstream:        "origin/main",
+				Ahead:           1,
+				HasDirtyTracked: true,
 			},
 			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
@@ -3392,8 +3393,8 @@ func TestFixTUISelectFixesInteractiveLabelAppearsOnlyOnSelectedRow(t *testing.T)
 	m.setCursor(0)
 	viewSelectedFirst := ansi.Strip(m.repoList.View())
 	lineFirst := lineContaining(viewSelectedFirst, "api")
-	if !strings.Contains(viewSelectedFirst, fixActionLabel(FixActionPush)) {
-		t.Fatalf("expected selected row to show current push action, got %q", viewSelectedFirst)
+	if !strings.Contains(viewSelectedFirst, fixActionLabel(FixActionStageCommitPush)) {
+		t.Fatalf("expected selected row to show current stage-commit action, got %q", viewSelectedFirst)
 	}
 	if !strings.Contains(lineFirst, "←") || !strings.Contains(lineFirst, "→") {
 		t.Fatalf("expected selected row to include left/right affordance arrows, got %q", lineFirst)
@@ -3408,8 +3409,8 @@ func TestFixTUISelectFixesInteractiveLabelAppearsOnlyOnSelectedRow(t *testing.T)
 	if !strings.Contains(viewSelectedSecond, fixActionLabel(FixActionPullFFOnly)) {
 		t.Fatalf("expected selected row to show current pull action, got %q", viewSelectedSecond)
 	}
-	if !strings.Contains(lineSecond, "←") || !strings.Contains(lineSecond, "→") {
-		t.Fatalf("expected selected row to include left/right affordance arrows, got %q", lineSecond)
+	if strings.Contains(lineSecond, "←") || strings.Contains(lineSecond, "→") {
+		t.Fatalf("expected no arrows for row with a single fix option, got %q", lineSecond)
 	}
 	if strings.Contains(viewSelectedSecond, fixActionLabel(FixActionPush)) {
 		t.Fatalf("expected non-selected row to hide current action label, got %q", viewSelectedSecond)
@@ -3475,6 +3476,51 @@ func TestFixTUISelectFixesColumnPrependsSelectedSquares(t *testing.T) {
 	ixLabel := strings.Index(line, fixActionLabel(FixActionPush))
 	if ixSquare < 0 || ixLabel < 0 || ixSquare > ixLabel {
 		t.Fatalf("expected selected square prefix before current label in row, got %q", line)
+	}
+}
+
+func TestFixTUIRepoListShowsStickyCurrentCatalogLine(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				Catalog:   "software",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta:             &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+			IsDefaultCatalog: true,
+		},
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "ref",
+				Path:      "/repos/ref",
+				Catalog:   "references",
+				OriginURL: "git@github.com:you/ref.git",
+				Upstream:  "origin/main",
+				Behind:    1,
+			},
+			Meta:             &domain.RepoMetadataFile{OriginURL: "https://github.com/you/ref.git", AutoPush: domain.AutoPushModeDisabled},
+			IsDefaultCatalog: false,
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 170, Height: 24})
+
+	m.setCursor(0)
+	lines := strings.Split(ansi.Strip(m.viewRepoList()), "\n")
+	if len(lines) < 2 || !strings.Contains(lines[1], "Catalog: software (default)") {
+		t.Fatalf("expected sticky catalog line for selected default-catalog repo, got %q", strings.Join(lines, "\n"))
+	}
+
+	m.setCursor(1)
+	lines = strings.Split(ansi.Strip(m.viewRepoList()), "\n")
+	if len(lines) < 2 || !strings.Contains(lines[1], "Catalog: references") {
+		t.Fatalf("expected sticky catalog line to follow selected repo catalog, got %q", strings.Join(lines, "\n"))
 	}
 }
 

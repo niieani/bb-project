@@ -467,22 +467,23 @@ type fixTUIModel struct {
 }
 
 type fixListItem struct {
-	Kind              fixListItemKind
-	Catalog           string
-	NamePlain         string
-	Path              string
-	Name              string
-	Branch            string
-	State             string
-	AutoPushMode      domain.AutoPushMode
-	AutoPushAvailable bool
-	Reasons           string
-	CurrentAction     string
-	HasLeftChoice     bool
-	HasRightChoice    bool
-	ScheduledActions  []string
-	Tier              fixRepoTier
-	Ignored           bool
+	Kind               fixListItemKind
+	Catalog            string
+	NamePlain          string
+	Path               string
+	Name               string
+	Branch             string
+	State              string
+	AutoPushMode       domain.AutoPushMode
+	AutoPushAvailable  bool
+	Reasons            string
+	CurrentAction      string
+	HasMultipleChoices bool
+	HasLeftChoice      bool
+	HasRightChoice     bool
+	ScheduledActions   []string
+	Tier               fixRepoTier
+	Ignored            bool
 }
 
 type fixListItemKind int
@@ -596,6 +597,7 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	selectFixesCell := renderFixSelectFixesCell(
 		row.ScheduledActions,
 		row.CurrentAction,
+		row.HasMultipleChoices,
 		row.HasLeftChoice,
 		row.HasRightChoice,
 		layout.SelectFixes,
@@ -1274,8 +1276,28 @@ func (m *fixTUIModel) viewRepoList() string {
 	var b strings.Builder
 	b.WriteString(m.viewRepoHeader())
 	b.WriteString("\n")
+	if sticky := m.viewStickyCatalogHeader(); sticky != "" {
+		b.WriteString(sticky)
+		b.WriteString("\n")
+	}
 	b.WriteString(m.repoList.View())
 	return b.String()
+}
+
+func (m *fixTUIModel) viewStickyCatalogHeader() string {
+	repo, ok := m.currentRepo()
+	if !ok {
+		return ""
+	}
+	catalog := strings.TrimSpace(repo.Record.Catalog)
+	if catalog == "" {
+		catalog = "unknown"
+	}
+	label := fmt.Sprintf("Catalog: %s", catalog)
+	if repo.IsDefaultCatalog {
+		label += " (default)"
+	}
+	return fixCatalogHeaderStyle.Render(label)
 }
 
 func (m *fixTUIModel) viewRepoHeader() string {
@@ -1825,22 +1847,23 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 		scheduled := m.scheduledActionsForRepo(path, options)
 		repoIndex := len(m.visible)
 		items = append(items, fixListItem{
-			Kind:              fixListItemRepo,
-			Catalog:           repo.Record.Catalog,
-			NamePlain:         repo.Record.Name,
-			Path:              path,
-			Name:              formatRepoDisplayName(repo),
-			Branch:            repo.Record.Branch,
-			State:             state,
-			AutoPushMode:      repoMetaAutoPushMode(repo.Meta),
-			AutoPushAvailable: repoMetaAllowsAutoPush(repo.Meta),
-			Reasons:           reasons,
-			CurrentAction:     currentAction,
-			HasLeftChoice:     len(options) > 1 && cursor > 0,
-			HasRightChoice:    len(options) > 1 && cursor < len(options)-1,
-			ScheduledActions:  append([]string(nil), scheduled...),
-			Tier:              entry.tier,
-			Ignored:           ignored,
+			Kind:               fixListItemRepo,
+			Catalog:            repo.Record.Catalog,
+			NamePlain:          repo.Record.Name,
+			Path:               path,
+			Name:               formatRepoDisplayName(repo),
+			Branch:             repo.Record.Branch,
+			State:              state,
+			AutoPushMode:       repoMetaAutoPushMode(repo.Meta),
+			AutoPushAvailable:  repoMetaAllowsAutoPush(repo.Meta),
+			Reasons:            reasons,
+			CurrentAction:      currentAction,
+			HasMultipleChoices: len(options) > 1,
+			HasLeftChoice:      len(options) > 1 && cursor > 0,
+			HasRightChoice:     len(options) > 1 && cursor < len(options)-1,
+			ScheduledActions:   append([]string(nil), scheduled...),
+			Tier:               entry.tier,
+			Ignored:            ignored,
 		})
 		m.rowRepoIndex = append(m.rowRepoIndex, repoIndex)
 		m.repoIndexToRow = append(m.repoIndexToRow, rowIndex)
@@ -2409,15 +2432,18 @@ func renderFixColumnCell(value string, width int, style lipgloss.Style) string {
 	return style.Width(width).MaxWidth(width).Render(ansi.Truncate(value, width, "…"))
 }
 
-func renderFixSelectFixesCell(actions []string, current string, hasLeft bool, hasRight bool, width int, selected bool, ignored bool) string {
+func renderFixSelectFixesCell(actions []string, current string, hasChoices bool, hasLeft bool, hasRight bool, width int, selected bool, ignored bool) string {
 	squares := renderScheduledSquares(actions, ignored, selected)
 	if !selected {
 		return renderFixColumnCell(squares, width, lipgloss.NewStyle())
 	}
-	left := fixChoiceArrowStyle(hasLeft).Render("←")
-	right := fixChoiceArrowStyle(hasRight).Render("→")
 	chip := renderCurrentChoiceChip(current, ignored)
-	parts := []string{squares, left, chip, right}
+	parts := []string{squares, chip}
+	if hasChoices {
+		left := fixChoiceArrowStyle(hasLeft).Render("←")
+		right := fixChoiceArrowStyle(hasRight).Render("→")
+		parts = []string{squares, left, chip, right}
+	}
 	cell := strings.TrimSpace(strings.Join(parts, " "))
 	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(ansi.Truncate(cell, width, "…"))
 }
