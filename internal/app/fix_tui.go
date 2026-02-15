@@ -172,7 +172,6 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 	canToggleAutoPush := hasRepo && !m.ignored[repo.Record.Path] && repoMetaAllowsAutoPush(repo.Meta)
 	canIgnoreRepo := hasRepo && !m.ignored[repo.Record.Path]
 	canUnignoreRepo := hasRepo && m.ignored[repo.Record.Path]
-	canClearIgnored := len(m.ignored) > 0 && !canUnignoreRepo
 
 	if canApplySelected {
 		b := newHelpBinding([]string{"enter"}, "enter", "apply selected")
@@ -206,11 +205,6 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 	}
 	if canUnignoreRepo {
 		b := newHelpBinding([]string{"u"}, "u", "unignore repo")
-		short = append(short, b)
-		secondary = append(secondary, b)
-	}
-	if canClearIgnored {
-		b := newHelpBinding([]string{"u"}, "u", "clear ignored")
 		short = append(short, b)
 		secondary = append(secondary, b)
 	}
@@ -1904,11 +1898,11 @@ func (m *fixTUIModel) unignoreCurrentRepo() {
 		m.status = "no ignored repositories"
 		return
 	}
-	for path := range m.ignored {
-		delete(m.ignored, path)
+	if ok {
+		m.status = fmt.Sprintf("%s is not ignored", repo.Record.Name)
+		return
 	}
-	m.status = "cleared ignored repositories"
-	m.rebuildList("")
+	m.status = "select an ignored repo to unignore"
 }
 
 func (m *fixTUIModel) currentActionForRepo(path string, actions []string) string {

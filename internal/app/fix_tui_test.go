@@ -556,6 +556,81 @@ func TestFixTUIIgnoredRepoIsExcludedFromApplyAllSelection(t *testing.T) {
 	}
 }
 
+func TestFixTUIUnignoreDoesNotClearOtherIgnoredRepos(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+		},
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "web",
+				Path:      "/repos/web",
+				OriginURL: "git@github.com:you/web.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/web.git", AutoPush: false},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	m.ignoreCurrentRepo()
+	m.setCursor(1)
+	m.unignoreCurrentRepo()
+
+	if !m.ignored["/repos/api"] {
+		t.Fatal("expected other ignored repo to remain ignored")
+	}
+	if got := m.status; !strings.Contains(got, "is not ignored") {
+		t.Fatalf("status = %q, want non-destructive unignore message", got)
+	}
+}
+
+func TestFixTUIHelpDoesNotExposeClearIgnoredShortcut(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+		},
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "web",
+				Path:      "/repos/web",
+				OriginURL: "git@github.com:you/web.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/web.git", AutoPush: false},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	m.ignoreCurrentRepo()
+	m.setCursor(1)
+
+	entries := shortHelpEntries(m.contextualHelpMap().ShortHelp())
+	if helpContains(entries, "u clear ignored") {
+		t.Fatalf("help should not expose clear ignored shortcut, got %v", entries)
+	}
+}
+
 func TestFixTUIRevalidateShortcutEntersBusyState(t *testing.T) {
 	t.Parallel()
 
