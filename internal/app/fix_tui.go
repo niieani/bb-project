@@ -62,11 +62,11 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 		),
 		Toggle: key.NewBinding(
 			key.WithKeys(" ", "space"),
-			key.WithHelp("space", "schedule fix"),
+			key.WithHelp("space", "select fix"),
 		),
 		Apply: key.NewBinding(
 			key.WithKeys("enter"),
-			key.WithHelp("enter", "run scheduled"),
+			key.WithHelp("enter", "run selected"),
 		),
 		Setting: key.NewBinding(
 			key.WithKeys("s"),
@@ -78,7 +78,7 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 		),
 		ApplyAll: key.NewBinding(
 			key.WithKeys("ctrl+a"),
-			key.WithHelp("ctrl+a", "run all scheduled"),
+			key.WithHelp("ctrl+a", "run all selected"),
 		),
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),
@@ -181,12 +181,12 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 	canUnignoreRepo := hasRepo && m.ignored[repo.Record.Path]
 
 	if canApplySelected {
-		b := newHelpBinding([]string{"enter"}, "enter", "run scheduled")
+		b := newHelpBinding([]string{"enter"}, "enter", "run selected")
 		short = append(short, b)
 		primary = append(primary, b)
 	}
 	if canApplyAll {
-		b := newHelpBinding([]string{"ctrl+a"}, "ctrl+a", "run all scheduled")
+		b := newHelpBinding([]string{"ctrl+a"}, "ctrl+a", "run all selected")
 		short = append(short, b)
 		primary = append(primary, b)
 	}
@@ -196,12 +196,12 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 		primary = append(primary, b)
 	}
 	if canChangeFix {
-		b := newHelpBinding([]string{"left", "right"}, "←/→", "browse fix")
+		b := newHelpBinding([]string{"left", "right"}, "←/→", "choose fix")
 		short = append(short, b)
 		primary = append(primary, b)
 	}
 	if canToggleSchedule {
-		b := newHelpBinding([]string{"space"}, "space", "schedule/unschedule")
+		b := newHelpBinding([]string{"space"}, "space", "select/unselect")
 		short = append(short, b)
 		primary = append(primary, b)
 	}
@@ -477,7 +477,7 @@ type fixListItem struct {
 	AutoPushMode      domain.AutoPushMode
 	AutoPushAvailable bool
 	Reasons           string
-	BrowseAction      string
+	CurrentAction     string
 	ScheduledActions  []string
 	Tier              fixRepoTier
 	Ignored           bool
@@ -492,16 +492,17 @@ const (
 )
 
 func (i fixListItem) FilterValue() string {
-	return i.NamePlain + " " + i.Path + " " + i.Branch + " " + i.Reasons + " " + fixScheduledPlainText(i.ScheduledActions) + " " + i.Catalog
+	return i.NamePlain + " " + i.Path + " " + i.Branch + " " + i.Reasons + " " + fixScheduledPlainText(i.ScheduledActions) + " " + fixActionLabel(i.CurrentAction) + " " + i.Catalog
 }
 
 type fixColumnLayout struct {
-	Repo    int
-	Branch  int
-	State   int
-	Auto    int
-	Reasons int
-	Action  int
+	Repo     int
+	Branch   int
+	State    int
+	Auto     int
+	Reasons  int
+	Selected int
+	Current  int
 }
 
 type fixRepoTier int
@@ -543,7 +544,7 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	// Leave one guard column to avoid terminal auto-wrap when the rendered row
 	// exactly matches viewport width.
-	contentWidth := m.Width() - 3 // indicator + wrap guard
+	contentWidth := m.Width() - 5 // indicator + wrap guard
 	if contentWidth < 50 {
 		contentWidth = 50
 	}
@@ -591,7 +592,8 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 	autoPushCell := renderFixColumnCell(autoPushText, layout.Auto, autoPushStyle)
 	reasonsCell := renderFixColumnCell(row.Reasons, layout.Reasons, reasonsStyle)
-	actionCell := renderFixScheduledCell(row.ScheduledActions, layout.Action, selected, row.Ignored)
+	selectedCell := renderFixScheduledCell(row.ScheduledActions, layout.Selected, selected, row.Ignored)
+	currentCell := renderFixCurrentCell(row.CurrentAction, layout.Current, selected, row.Ignored)
 
 	line := lipgloss.JoinHorizontal(lipgloss.Top,
 		repoCell,
@@ -604,7 +606,9 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		fixListColumnGap,
 		reasonsCell,
 		fixListColumnGap,
-		actionCell,
+		selectedCell,
+		fixListColumnGap,
+		currentCell,
 	)
 
 	indicatorStyle := fixIndicatorStyle
@@ -1216,9 +1220,9 @@ func (m *fixTUIModel) viewMainContent() string {
 	}
 	b.WriteString(labelStyle.Render(title))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Browse eligible fixes with ←/→, press space to schedule or unschedule."))
+	b.WriteString(hintStyle.Render("Choose eligible fixes with ←/→, press space to select or unselect."))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Enter runs scheduled fixes for the selected repo; ctrl+a runs scheduled fixes across repos."))
+	b.WriteString(hintStyle.Render("Enter runs selected fixes for the selected repo; ctrl+a runs selected fixes across repos."))
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Grouped by catalog (default catalog first), then fixable, unsyncable, syncable, and ignored."))
 	if m.immediateApplying {
@@ -1273,7 +1277,9 @@ func (m *fixTUIModel) viewRepoHeader() string {
 		fixListColumnGap,
 		renderFixColumnCell("Reasons", layout.Reasons, fixHeaderCellStyle),
 		fixListColumnGap,
-		renderFixColumnCell("Scheduled", layout.Action, fixHeaderCellStyle),
+		renderFixColumnCell("Selected", layout.Selected, fixHeaderCellStyle),
+		fixListColumnGap,
+		renderFixColumnCell("Current", layout.Current, fixHeaderCellStyle),
 	)
 	// Match row rendering width: two-char indicator plus one guard column.
 	return "  " + header
@@ -1294,7 +1300,6 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	action := m.currentActionForRepo(repo.Record.Path, options)
 	scheduled := m.scheduledActionsForRepo(repo.Record.Path, options)
 	ignored := m.ignored[repo.Record.Path]
-	actionLabelValue := fixActionLabel(action)
 
 	reasonText := "none"
 	if len(repo.Record.UnsyncableReasons) > 0 {
@@ -1334,7 +1339,6 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	b.WriteString("\n")
 	stateLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("State:")
 	autoPushLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Auto-push:")
-	browseLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Browse:")
 	branchLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Branch:")
 	autoPushValue := autoPushModeDisplayLabel(repoMetaAutoPushMode(repo.Meta))
 	autoPushValueStyle := fixAutoPushOffStyle
@@ -1355,10 +1359,6 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 		" ",
 		autoPushValueStyle.Render(autoPushValue),
 		"   ",
-		browseLabel,
-		" ",
-		fixActionStyleFor(action).Render(actionLabelValue),
-		"   ",
 		branchLabel,
 		" ",
 		fixBranchStyle.Render(repo.Record.Branch),
@@ -1366,7 +1366,7 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Reasons: ") + fixReasonsStyle.Render(reasonText))
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Scheduled: ") + renderScheduledDetails(scheduled, ignored))
+	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Selected fixes: ") + renderScheduledDetails(scheduled, ignored))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Action help: ") + hintStyle.Render(fixActionDescription(action)))
 	return b.String()
@@ -1405,7 +1405,7 @@ func (m *fixTUIModel) viewFixSummary() string {
 		}
 	}
 	totalStyle := renderStatusPill(fmt.Sprintf("%d repos", total))
-	pendingStyle := renderStatusPill(fmt.Sprintf("%d scheduled", pending))
+	pendingStyle := renderStatusPill(fmt.Sprintf("%d selected", pending))
 	autoStyle := renderFixSummaryPill(fmt.Sprintf("%d fixable", fixable), lipgloss.Color("214"))
 	blockedStyle := renderFixSummaryPill(fmt.Sprintf("%d unsyncable", blocked), errorFgColor)
 	syncStyle := renderFixSummaryPill(fmt.Sprintf("%d syncable", syncable), successColor)
@@ -1800,7 +1800,7 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 		}
 
 		options := selectableFixActions(fixActionsForSelection(entry.actions))
-		browseAction := m.currentActionForRepo(path, options)
+		currentAction := m.currentActionForRepo(path, options)
 		scheduled := m.scheduledActionsForRepo(path, options)
 		repoIndex := len(m.visible)
 		items = append(items, fixListItem{
@@ -1814,7 +1814,7 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			AutoPushMode:      repoMetaAutoPushMode(repo.Meta),
 			AutoPushAvailable: repoMetaAllowsAutoPush(repo.Meta),
 			Reasons:           reasons,
-			BrowseAction:      browseAction,
+			CurrentAction:     currentAction,
 			ScheduledActions:  append([]string(nil), scheduled...),
 			Tier:              entry.tier,
 			Ignored:           ignored,
@@ -1928,7 +1928,7 @@ func (m *fixTUIModel) cycleCurrentAction(delta int) {
 	}
 	m.actionCursor[key] = pos
 	selected := options[pos]
-	m.status = fmt.Sprintf("browsing %s for %s; press space to schedule", fixActionLabel(selected), repo.Record.Name)
+	m.status = fmt.Sprintf("current fix for %s: %s (space to select)", repo.Record.Name, fixActionLabel(selected))
 	m.rebuildList(repo.Record.Path)
 }
 
@@ -1972,13 +1972,13 @@ func (m *fixTUIModel) toggleCurrentActionScheduled() {
 		m.scheduled[repo.Record.Path] = scheduled
 	}
 	if containsAction(scheduled, current) {
-		m.status = fmt.Sprintf("scheduled %s for %s", fixActionLabel(current), repo.Record.Name)
+		m.status = fmt.Sprintf("selected %s for %s", fixActionLabel(current), repo.Record.Name)
 	} else if wasScheduled {
-		m.status = fmt.Sprintf("unscheduled %s for %s", fixActionLabel(current), repo.Record.Name)
+		m.status = fmt.Sprintf("unselected %s for %s", fixActionLabel(current), repo.Record.Name)
 	} else if len(scheduled) > 0 {
 		m.status = fmt.Sprintf("%s superseded by %s for %s", fixActionLabel(current), fixActionLabel(scheduled[0]), repo.Record.Name)
 	} else {
-		m.status = fmt.Sprintf("no fixes scheduled for %s", repo.Record.Name)
+		m.status = fmt.Sprintf("no fixes selected for %s", repo.Record.Name)
 	}
 	m.rebuildList(repo.Record.Path)
 }
@@ -2002,7 +2002,7 @@ func (m *fixTUIModel) applyCurrentSelection() {
 	options := selectableFixActions(fixActionsForSelection(actions))
 	selections := m.scheduledActionsForRepo(repo.Record.Path, options)
 	if len(selections) == 0 {
-		m.status = fmt.Sprintf("no fixes scheduled for %s", repo.Record.Name)
+		m.status = fmt.Sprintf("no fixes selected for %s", repo.Record.Name)
 		return
 	}
 	m.resetSummaryFollowUpState()
@@ -2339,42 +2339,46 @@ func fixActionSelectionPriority(action string) int {
 
 func fixListColumnsForWidth(listWidth int) fixColumnLayout {
 	const (
-		repoMin    = 7
-		branchMin  = 7
-		stateMin   = 10
-		autoMin    = 9
-		reasonsMin = 12
-		actionMin  = 10
+		repoMin     = 7
+		branchMin   = 7
+		stateMin    = 10
+		autoMin     = 9
+		reasonsMin  = 12
+		selectedMin = 10
+		currentMin  = 16
 	)
 
 	layout := fixColumnLayout{
-		Repo:    repoMin,
-		Branch:  branchMin,
-		State:   stateMin,
-		Auto:    autoMin,
-		Reasons: reasonsMin,
-		Action:  actionMin,
+		Repo:     repoMin,
+		Branch:   branchMin,
+		State:    stateMin,
+		Auto:     autoMin,
+		Reasons:  reasonsMin,
+		Selected: selectedMin,
+		Current:  currentMin,
 	}
 
-	minTotal := repoMin + branchMin + stateMin + autoMin + reasonsMin + actionMin
+	minTotal := repoMin + branchMin + stateMin + autoMin + reasonsMin + selectedMin + currentMin
 	budget := listWidth - fixListReservedCols
 	if budget < minTotal {
 		budget = minTotal
 	}
 	extra := budget - minTotal
 	if extra > 0 {
-		repoExtra := extra * 14 / 100
-		branchExtra := extra * 14 / 100
-		stateExtra := extra * 8 / 100
-		autoExtra := extra * 8 / 100
-		reasonsExtra := extra * 28 / 100
-		actionExtra := extra - repoExtra - branchExtra - stateExtra - autoExtra - reasonsExtra
+		repoExtra := extra * 12 / 100
+		branchExtra := extra * 12 / 100
+		stateExtra := extra * 7 / 100
+		autoExtra := extra * 7 / 100
+		reasonsExtra := extra * 24 / 100
+		selectedExtra := extra * 13 / 100
+		currentExtra := extra - repoExtra - branchExtra - stateExtra - autoExtra - reasonsExtra - selectedExtra
 		layout.Repo += repoExtra
 		layout.Branch += branchExtra
 		layout.State += stateExtra
 		layout.Auto += autoExtra
 		layout.Reasons += reasonsExtra
-		layout.Action += actionExtra
+		layout.Selected += selectedExtra
+		layout.Current += currentExtra
 	}
 	return layout
 }
@@ -2410,6 +2414,24 @@ func renderFixScheduledCell(actions []string, width int, selected bool, ignored 
 	}
 	cell := strings.Join(parts, " ")
 	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(ansi.Truncate(cell, width, "…"))
+}
+
+func renderFixCurrentCell(action string, width int, selected bool, ignored bool) string {
+	if !selected {
+		return renderFixColumnCell("", width, lipgloss.NewStyle())
+	}
+	if action == fixNoAction {
+		style := fixNoActionStyle
+		if ignored {
+			style = style.Copy().Faint(true)
+		}
+		return renderFixColumnCell(fixNoAction, width, style.Copy().Bold(true))
+	}
+	style := fixActionStyleFor(action).Copy().Bold(true)
+	if ignored {
+		style = style.Copy().Foreground(mutedTextColor).Faint(true)
+	}
+	return renderFixColumnCell(fixActionLabel(action), width, style)
 }
 
 func renderScheduledDetails(actions []string, ignored bool) string {
@@ -2497,7 +2519,7 @@ func fixActionLabel(action string) string {
 func fixActionDescription(action string) string {
 	switch action {
 	case fixNoAction:
-		return "No eligible fix is currently selected for browsing."
+		return "No eligible fix is currently available for selection."
 	}
 	if spec, ok := fixActionSpecFor(action); ok {
 		return spec.Description

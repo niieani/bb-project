@@ -2140,16 +2140,16 @@ func TestFixTUIListGlobalFooterHelpShowsOnlyAvailableActions(t *testing.T) {
 	m.setCursor(0)
 
 	initial := shortHelpEntries(m.contextualHelpMap().ShortHelp())
-	if helpContains(initial, "enter run scheduled") || helpContains(initial, "ctrl+a run all scheduled") {
+	if helpContains(initial, "enter run selected") || helpContains(initial, "ctrl+a run all selected") {
 		t.Fatalf("expected apply shortcuts hidden when nothing is selected, got %v", initial)
 	}
 
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")}) // schedule push
 	selected := shortHelpEntries(m.contextualHelpMap().ShortHelp())
-	if len(selected) == 0 || selected[0] != "enter run scheduled" {
-		t.Fatalf("expected most important shortcut first (enter run scheduled), got %v", selected)
+	if len(selected) == 0 || selected[0] != "enter run selected" {
+		t.Fatalf("expected most important shortcut first (enter run selected), got %v", selected)
 	}
-	if !helpContains(selected, "ctrl+a run all scheduled") || !helpContains(selected, "s cycle auto-push") {
+	if !helpContains(selected, "ctrl+a run all selected") || !helpContains(selected, "s cycle auto-push") {
 		t.Fatalf("expected selected-action footer help to include apply-all and auto-push, got %v", selected)
 	}
 	if strings.Contains(strings.Join(selected, " • "), "Left") || strings.Contains(strings.Join(selected, " • "), "Right") {
@@ -3217,8 +3217,11 @@ func TestFixTUIResizeExpandsWideColumns(t *testing.T) {
 	if layout.Reasons <= 32 {
 		t.Fatalf("reasons width = %d, want > 32 in wide viewport", layout.Reasons)
 	}
-	if layout.Action <= 22 {
-		t.Fatalf("selected-fix width = %d, want > 22 in wide viewport", layout.Action)
+	if layout.Selected <= 16 {
+		t.Fatalf("selected-fix width = %d, want > 16 in wide viewport", layout.Selected)
+	}
+	if layout.Current <= 20 {
+		t.Fatalf("current-fix width = %d, want > 20 in wide viewport", layout.Current)
 	}
 }
 
@@ -3307,7 +3310,7 @@ func TestFixRepoDelegateLeavesWrapGuardColumn(t *testing.T) {
 	t.Parallel()
 
 	repoList := newFixRepoListModel()
-	repoList.SetSize(80, 10)
+	repoList.SetSize(120, 10)
 	repoList.Select(0)
 
 	item := fixListItem{
@@ -3328,6 +3331,111 @@ func TestFixRepoDelegateLeavesWrapGuardColumn(t *testing.T) {
 	}
 	if width := ansi.StringWidth(row); width >= repoList.Width() {
 		t.Fatalf("delegate row width %d must stay below list width %d to avoid hard wrap", width, repoList.Width())
+	}
+}
+
+func TestFixTUIRepoHeaderUsesSelectedAndCurrentColumns(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 170, Height: 24})
+
+	header := ansi.Strip(m.viewRepoHeader())
+	if strings.Contains(header, "Scheduled") {
+		t.Fatalf("repo header should not include old Scheduled label, got %q", header)
+	}
+	if !strings.Contains(header, "Selected") || !strings.Contains(header, "Current") {
+		t.Fatalf("repo header should include Selected and Current columns, got %q", header)
+	}
+}
+
+func TestFixTUICurrentColumnAppearsOnlyOnSelectedRow(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "web",
+				Path:      "/repos/web",
+				OriginURL: "git@github.com:you/web.git",
+				Upstream:  "origin/main",
+				Behind:    1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/web.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 190, Height: 24})
+
+	m.setCursor(0)
+	viewSelectedFirst := ansi.Strip(m.repoList.View())
+	if !strings.Contains(viewSelectedFirst, fixActionLabel(FixActionPush)) {
+		t.Fatalf("expected selected row to show current push action, got %q", viewSelectedFirst)
+	}
+	if strings.Contains(viewSelectedFirst, fixActionLabel(FixActionPullFFOnly)) {
+		t.Fatalf("expected non-selected row to hide current action label, got %q", viewSelectedFirst)
+	}
+
+	m.setCursor(1)
+	viewSelectedSecond := ansi.Strip(m.repoList.View())
+	if !strings.Contains(viewSelectedSecond, fixActionLabel(FixActionPullFFOnly)) {
+		t.Fatalf("expected selected row to show current pull action, got %q", viewSelectedSecond)
+	}
+	if strings.Contains(viewSelectedSecond, fixActionLabel(FixActionPush)) {
+		t.Fatalf("expected non-selected row to hide current action label, got %q", viewSelectedSecond)
+	}
+}
+
+func TestFixTUICurrentColumnUpdatesWhenCyclingChoices(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:            "api",
+				Path:            "/repos/api",
+				OriginURL:       "git@github.com:you/api.git",
+				Upstream:        "origin/main",
+				Ahead:           1,
+				HasDirtyTracked: true,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 190, Height: 24})
+	m.setCursor(0)
+
+	before := ansi.Strip(m.repoList.View())
+	if !strings.Contains(before, fixActionLabel(FixActionStageCommitPush)) {
+		t.Fatalf("expected initial current action label in row, got %q", before)
+	}
+	m.cycleCurrentAction(1)
+	after := ansi.Strip(m.repoList.View())
+	if !strings.Contains(after, fixActionLabel(FixActionPush)) {
+		t.Fatalf("expected current action label to update after cycle, got %q", after)
 	}
 }
 
