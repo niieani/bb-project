@@ -285,7 +285,17 @@ func ineligibleFixReason(action string, rec domain.MachineRepoRecord, ctx fixEli
 			)
 		}
 		if ctx.SyncFeasibility.probeFailedFor(ctx.SyncStrategy) {
-			return "sync-with-upstream feasibility check was inconclusive (probe failed without conflict signal); action can still be attempted"
+			return fmt.Sprintf(
+				"sync-with-upstream is blocked: %s (selected strategy: %s)",
+				domain.ReasonSyncProbeFailed,
+				normalizeFixSyncStrategy(ctx.SyncStrategy),
+			)
+		}
+		if !ctx.SyncFeasibility.cleanFor(ctx.SyncStrategy) {
+			return fmt.Sprintf(
+				"sync-with-upstream is blocked: sync strategy %s is not marked clean by feasibility validation",
+				normalizeFixSyncStrategy(ctx.SyncStrategy),
+			)
 		}
 		return ""
 	}
@@ -738,6 +748,25 @@ func (a *App) executeFixAction(
 				Reason: fmt.Sprintf(
 					"sync-with-upstream is blocked: %s (selected strategy: %s)",
 					domain.ReasonSyncConflict,
+					syncStrategy,
+				),
+			}
+		}
+		if target.SyncFeasibility.probeFailedFor(syncStrategy) {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: fmt.Sprintf(
+					"sync-with-upstream is blocked: %s (selected strategy: %s)",
+					domain.ReasonSyncProbeFailed,
+					syncStrategy,
+				),
+			}
+		}
+		if !target.SyncFeasibility.cleanFor(syncStrategy) {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: fmt.Sprintf(
+					"sync-with-upstream is blocked: sync strategy %s is not marked clean by feasibility validation",
 					syncStrategy,
 				),
 			}

@@ -100,7 +100,7 @@ func TestEligibleFixActions(t *testing.T) {
 			actions: []string{},
 		},
 		{
-			name: "diverged probe failure still allows sync action",
+			name: "diverged probe failure blocks sync action",
 			rec: func() domain.MachineRepoRecord {
 				r := base
 				r.Ahead = 2
@@ -116,7 +116,7 @@ func TestEligibleFixActions(t *testing.T) {
 					MergeOutcome:  fixSyncProbeConflict,
 				},
 			},
-			actions: []string{FixActionSyncWithUpstream},
+			actions: []string{},
 		},
 		{
 			name:    "missing upstream allows set upstream push",
@@ -298,5 +298,28 @@ func TestResolveFixTargetNameAmbiguous(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestIneligibleFixReasonSyncProbeFailedBlocksSyncAction(t *testing.T) {
+	t.Parallel()
+
+	rec := domain.MachineRepoRecord{
+		OriginURL: "git@github.com:you/api.git",
+		Upstream:  "origin/main",
+		Diverged:  true,
+		Ahead:     1,
+		Behind:    1,
+	}
+	reason := ineligibleFixReason(FixActionSyncWithUpstream, rec, fixEligibilityContext{
+		SyncStrategy: FixSyncStrategyRebase,
+		SyncFeasibility: fixSyncFeasibility{
+			Checked:       true,
+			RebaseOutcome: fixSyncProbeFailed,
+			MergeOutcome:  fixSyncProbeConflict,
+		},
+	})
+	if !strings.Contains(reason, string(domain.ReasonSyncProbeFailed)) {
+		t.Fatalf("reason = %q, want to contain %q", reason, domain.ReasonSyncProbeFailed)
 	}
 }

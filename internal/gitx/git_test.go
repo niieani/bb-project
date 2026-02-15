@@ -1,6 +1,9 @@
 package gitx
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestLooksLikePushAccessDenied(t *testing.T) {
 	t.Parallel()
@@ -87,6 +90,9 @@ func TestGitCommandEnvDisablesInteractivePrompts(t *testing.T) {
 	}
 	if got := values["SSH_ASKPASS_REQUIRE"]; got != "never" {
 		t.Fatalf("SSH_ASKPASS_REQUIRE = %q, want %q", got, "never")
+	}
+	if got := values["GIT_CONFIG_GLOBAL"]; got != os.DevNull {
+		t.Fatalf("GIT_CONFIG_GLOBAL = %q, want %q", got, os.DevNull)
 	}
 }
 

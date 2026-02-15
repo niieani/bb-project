@@ -21,13 +21,13 @@ func TestFixSyncFeasibilityCanAttemptFor(t *testing.T) {
 			canAttempt: true,
 		},
 		{
-			name: "probe failed strategy is still attemptable",
+			name: "probe failed strategy is not attemptable",
 			feas: fixSyncFeasibility{
 				Checked:      true,
 				MergeOutcome: fixSyncProbeFailed,
 			},
 			strategy:   FixSyncStrategyMerge,
-			canAttempt: true,
+			canAttempt: false,
 		},
 		{
 			name: "conflict strategy is not attemptable",

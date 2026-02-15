@@ -3087,7 +3087,7 @@ func TestClassifyFixRepoMarksReadOnlyPushAccessAsFixableWithForkAction(t *testin
 	}
 }
 
-func TestClassifyFixRepoMarksSyncProbeFailedAsFixableWithSyncAction(t *testing.T) {
+func TestClassifyFixRepoMarksSyncProbeFailedAsBlocked(t *testing.T) {
 	t.Parallel()
 
 	repo := fixRepoState{
@@ -3109,8 +3109,8 @@ func TestClassifyFixRepoMarksSyncProbeFailedAsFixableWithSyncAction(t *testing.T
 	}
 	actions := []string{FixActionSyncWithUpstream}
 
-	if got := classifyFixRepo(repo, actions); got != fixRepoTierAutofixable {
-		t.Fatalf("tier = %v, want fixable when sync-with-upstream can still be attempted", got)
+	if got := classifyFixRepo(repo, actions); got != fixRepoTierUnsyncableBlocked {
+		t.Fatalf("tier = %v, want unsyncable when sync feasibility probe was inconclusive", got)
 	}
 }
 

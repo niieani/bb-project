@@ -39,12 +39,7 @@ func (f fixSyncFeasibility) probeFailedFor(strategy FixSyncStrategy) bool {
 }
 
 func (f fixSyncFeasibility) canAttemptFor(strategy FixSyncStrategy) bool {
-	switch f.outcomeFor(strategy) {
-	case fixSyncProbeClean, fixSyncProbeFailed:
-		return true
-	default:
-		return false
-	}
+	return f.outcomeFor(strategy) == fixSyncProbeClean
 }
 
 func (f fixSyncFeasibility) allStrategiesConflict() bool {
