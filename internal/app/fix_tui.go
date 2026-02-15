@@ -478,6 +478,8 @@ type fixListItem struct {
 	AutoPushAvailable bool
 	Reasons           string
 	CurrentAction     string
+	HasLeftChoice     bool
+	HasRightChoice    bool
 	ScheduledActions  []string
 	Tier              fixRepoTier
 	Ignored           bool
@@ -496,13 +498,12 @@ func (i fixListItem) FilterValue() string {
 }
 
 type fixColumnLayout struct {
-	Repo     int
-	Branch   int
-	State    int
-	Auto     int
-	Reasons  int
-	Selected int
-	Current  int
+	Repo        int
+	Branch      int
+	State       int
+	Auto        int
+	Reasons     int
+	SelectFixes int
 }
 
 type fixRepoTier int
@@ -592,8 +593,15 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 	autoPushCell := renderFixColumnCell(autoPushText, layout.Auto, autoPushStyle)
 	reasonsCell := renderFixColumnCell(row.Reasons, layout.Reasons, reasonsStyle)
-	selectedCell := renderFixScheduledCell(row.ScheduledActions, layout.Selected, selected, row.Ignored)
-	currentCell := renderFixCurrentCell(row.CurrentAction, layout.Current, selected, row.Ignored)
+	selectFixesCell := renderFixSelectFixesCell(
+		row.ScheduledActions,
+		row.CurrentAction,
+		row.HasLeftChoice,
+		row.HasRightChoice,
+		layout.SelectFixes,
+		selected,
+		row.Ignored,
+	)
 
 	line := lipgloss.JoinHorizontal(lipgloss.Top,
 		repoCell,
@@ -606,9 +614,7 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		fixListColumnGap,
 		reasonsCell,
 		fixListColumnGap,
-		selectedCell,
-		fixListColumnGap,
-		currentCell,
+		selectFixesCell,
 	)
 
 	indicatorStyle := fixIndicatorStyle
@@ -674,7 +680,8 @@ var (
 
 	fixHeaderCellStyle = lipgloss.NewStyle().
 				Foreground(textColor).
-				Bold(true)
+				Bold(true).
+				Align(lipgloss.Left)
 
 	fixDetailsLabelStyle = lipgloss.NewStyle().
 				Foreground(accentColor).
@@ -713,6 +720,18 @@ var (
 
 	fixActionAbortStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("203"))
+
+	fixChoiceArrowAvailableStyle = lipgloss.NewStyle().
+					Foreground(textColor).
+					Bold(true)
+
+	fixChoiceArrowDimStyle = lipgloss.NewStyle().
+				Foreground(mutedTextColor).
+				Faint(true)
+
+	fixChoiceChipStyle = lipgloss.NewStyle().
+				Background(lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#30363D"}).
+				Padding(0, 1)
 
 	fixAutoPushOnStyle = lipgloss.NewStyle().
 				Foreground(successColor)
@@ -1277,9 +1296,7 @@ func (m *fixTUIModel) viewRepoHeader() string {
 		fixListColumnGap,
 		renderFixColumnCell("Reasons", layout.Reasons, fixHeaderCellStyle),
 		fixListColumnGap,
-		renderFixColumnCell("Selected", layout.Selected, fixHeaderCellStyle),
-		fixListColumnGap,
-		renderFixColumnCell("Current", layout.Current, fixHeaderCellStyle),
+		renderFixColumnCell("Select Fixes", layout.SelectFixes, fixHeaderCellStyle),
 	)
 	// Match row rendering width: two-char indicator plus one guard column.
 	return "  " + header
@@ -1801,6 +1818,10 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 
 		options := selectableFixActions(fixActionsForSelection(entry.actions))
 		currentAction := m.currentActionForRepo(path, options)
+		cursor := m.actionCursor[path]
+		if cursor < 0 || cursor >= len(options) {
+			cursor = 0
+		}
 		scheduled := m.scheduledActionsForRepo(path, options)
 		repoIndex := len(m.visible)
 		items = append(items, fixListItem{
@@ -1815,6 +1836,8 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			AutoPushAvailable: repoMetaAllowsAutoPush(repo.Meta),
 			Reasons:           reasons,
 			CurrentAction:     currentAction,
+			HasLeftChoice:     len(options) > 1 && cursor > 0,
+			HasRightChoice:    len(options) > 1 && cursor < len(options)-1,
 			ScheduledActions:  append([]string(nil), scheduled...),
 			Tier:              entry.tier,
 			Ignored:           ignored,
@@ -2339,26 +2362,24 @@ func fixActionSelectionPriority(action string) int {
 
 func fixListColumnsForWidth(listWidth int) fixColumnLayout {
 	const (
-		repoMin     = 7
-		branchMin   = 7
-		stateMin    = 10
-		autoMin     = 9
-		reasonsMin  = 12
-		selectedMin = 10
-		currentMin  = 16
+		repoMin        = 7
+		branchMin      = 7
+		stateMin       = 10
+		autoMin        = 9
+		reasonsMin     = 12
+		selectFixesMin = 20
 	)
 
 	layout := fixColumnLayout{
-		Repo:     repoMin,
-		Branch:   branchMin,
-		State:    stateMin,
-		Auto:     autoMin,
-		Reasons:  reasonsMin,
-		Selected: selectedMin,
-		Current:  currentMin,
+		Repo:        repoMin,
+		Branch:      branchMin,
+		State:       stateMin,
+		Auto:        autoMin,
+		Reasons:     reasonsMin,
+		SelectFixes: selectFixesMin,
 	}
 
-	minTotal := repoMin + branchMin + stateMin + autoMin + reasonsMin + selectedMin + currentMin
+	minTotal := repoMin + branchMin + stateMin + autoMin + reasonsMin + selectFixesMin
 	budget := listWidth - fixListReservedCols
 	if budget < minTotal {
 		budget = minTotal
@@ -2370,15 +2391,13 @@ func fixListColumnsForWidth(listWidth int) fixColumnLayout {
 		stateExtra := extra * 7 / 100
 		autoExtra := extra * 7 / 100
 		reasonsExtra := extra * 24 / 100
-		selectedExtra := extra * 13 / 100
-		currentExtra := extra - repoExtra - branchExtra - stateExtra - autoExtra - reasonsExtra - selectedExtra
+		selectFixesExtra := extra - repoExtra - branchExtra - stateExtra - autoExtra - reasonsExtra
 		layout.Repo += repoExtra
 		layout.Branch += branchExtra
 		layout.State += stateExtra
 		layout.Auto += autoExtra
 		layout.Reasons += reasonsExtra
-		layout.Selected += selectedExtra
-		layout.Current += currentExtra
+		layout.SelectFixes += selectFixesExtra
 	}
 	return layout
 }
@@ -2390,16 +2409,29 @@ func renderFixColumnCell(value string, width int, style lipgloss.Style) string {
 	return style.Width(width).MaxWidth(width).Render(ansi.Truncate(value, width, "…"))
 }
 
-func renderFixScheduledCell(actions []string, width int, selected bool, ignored bool) string {
+func renderFixSelectFixesCell(actions []string, current string, hasLeft bool, hasRight bool, width int, selected bool, ignored bool) string {
+	squares := renderScheduledSquares(actions, ignored, selected)
+	if !selected {
+		return renderFixColumnCell(squares, width, lipgloss.NewStyle())
+	}
+	left := fixChoiceArrowStyle(hasLeft).Render("←")
+	right := fixChoiceArrowStyle(hasRight).Render("→")
+	chip := renderCurrentChoiceChip(current, ignored)
+	parts := []string{squares, left, chip, right}
+	cell := strings.TrimSpace(strings.Join(parts, " "))
+	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(ansi.Truncate(cell, width, "…"))
+}
+
+func renderScheduledSquares(actions []string, ignored bool, selectedRow bool) string {
 	if len(actions) == 0 {
 		style := fixNoActionStyle
 		if ignored {
 			style = style.Copy().Faint(true)
 		}
-		if selected {
+		if selectedRow {
 			style = style.Copy().Bold(true)
 		}
-		return renderFixColumnCell(fixNoAction, width, style)
+		return style.Render(fixNoAction)
 	}
 	parts := make([]string, 0, len(actions))
 	for _, action := range actions {
@@ -2407,31 +2439,33 @@ func renderFixScheduledCell(actions []string, width int, selected bool, ignored 
 		if ignored {
 			style = style.Copy().Foreground(mutedTextColor).Faint(true)
 		}
-		if selected {
+		if selectedRow {
 			style = style.Copy().Bold(true)
 		}
 		parts = append(parts, style.Render("■"))
 	}
-	cell := strings.Join(parts, " ")
-	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(ansi.Truncate(cell, width, "…"))
+	return strings.Join(parts, " ")
 }
 
-func renderFixCurrentCell(action string, width int, selected bool, ignored bool) string {
-	if !selected {
-		return renderFixColumnCell("", width, lipgloss.NewStyle())
-	}
+func renderCurrentChoiceChip(action string, ignored bool) string {
+	label := fixActionLabel(action)
+	base := fixChoiceChipStyle
 	if action == fixNoAction {
-		style := fixNoActionStyle
-		if ignored {
-			style = style.Copy().Faint(true)
-		}
-		return renderFixColumnCell(fixNoAction, width, style.Copy().Bold(true))
+		base = base.Inherit(fixNoActionStyle)
+	} else {
+		base = base.Inherit(fixActionStyleFor(action))
 	}
-	style := fixActionStyleFor(action).Copy().Bold(true)
 	if ignored {
-		style = style.Copy().Foreground(mutedTextColor).Faint(true)
+		base = base.Foreground(mutedTextColor).Faint(true)
 	}
-	return renderFixColumnCell(fixActionLabel(action), width, style)
+	return base.Render(label)
+}
+
+func fixChoiceArrowStyle(available bool) lipgloss.Style {
+	if available {
+		return fixChoiceArrowAvailableStyle
+	}
+	return fixChoiceArrowDimStyle
 }
 
 func renderScheduledDetails(actions []string, ignored bool) string {

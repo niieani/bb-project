@@ -3217,11 +3217,8 @@ func TestFixTUIResizeExpandsWideColumns(t *testing.T) {
 	if layout.Reasons <= 32 {
 		t.Fatalf("reasons width = %d, want > 32 in wide viewport", layout.Reasons)
 	}
-	if layout.Selected <= 16 {
-		t.Fatalf("selected-fix width = %d, want > 16 in wide viewport", layout.Selected)
-	}
-	if layout.Current <= 20 {
-		t.Fatalf("current-fix width = %d, want > 20 in wide viewport", layout.Current)
+	if layout.SelectFixes <= 30 {
+		t.Fatalf("select-fixes width = %d, want > 30 in wide viewport", layout.SelectFixes)
 	}
 }
 
@@ -3334,7 +3331,7 @@ func TestFixRepoDelegateLeavesWrapGuardColumn(t *testing.T) {
 	}
 }
 
-func TestFixTUIRepoHeaderUsesSelectedAndCurrentColumns(t *testing.T) {
+func TestFixTUIRepoHeaderUsesSelectFixesColumn(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
@@ -3356,12 +3353,15 @@ func TestFixTUIRepoHeaderUsesSelectedAndCurrentColumns(t *testing.T) {
 	if strings.Contains(header, "Scheduled") {
 		t.Fatalf("repo header should not include old Scheduled label, got %q", header)
 	}
-	if !strings.Contains(header, "Selected") || !strings.Contains(header, "Current") {
-		t.Fatalf("repo header should include Selected and Current columns, got %q", header)
+	if strings.Contains(header, "Current") || strings.Contains(header, "Selected ") {
+		t.Fatalf("repo header should not split selection/current into separate columns, got %q", header)
+	}
+	if !strings.Contains(header, "Select Fixes") {
+		t.Fatalf("repo header should include Select Fixes column, got %q", header)
 	}
 }
 
-func TestFixTUICurrentColumnAppearsOnlyOnSelectedRow(t *testing.T) {
+func TestFixTUISelectFixesInteractiveLabelAppearsOnlyOnSelectedRow(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
@@ -3391,8 +3391,12 @@ func TestFixTUICurrentColumnAppearsOnlyOnSelectedRow(t *testing.T) {
 
 	m.setCursor(0)
 	viewSelectedFirst := ansi.Strip(m.repoList.View())
+	lineFirst := lineContaining(viewSelectedFirst, "api")
 	if !strings.Contains(viewSelectedFirst, fixActionLabel(FixActionPush)) {
 		t.Fatalf("expected selected row to show current push action, got %q", viewSelectedFirst)
+	}
+	if !strings.Contains(lineFirst, "←") || !strings.Contains(lineFirst, "→") {
+		t.Fatalf("expected selected row to include left/right affordance arrows, got %q", lineFirst)
 	}
 	if strings.Contains(viewSelectedFirst, fixActionLabel(FixActionPullFFOnly)) {
 		t.Fatalf("expected non-selected row to hide current action label, got %q", viewSelectedFirst)
@@ -3400,15 +3404,19 @@ func TestFixTUICurrentColumnAppearsOnlyOnSelectedRow(t *testing.T) {
 
 	m.setCursor(1)
 	viewSelectedSecond := ansi.Strip(m.repoList.View())
+	lineSecond := lineContaining(viewSelectedSecond, "web")
 	if !strings.Contains(viewSelectedSecond, fixActionLabel(FixActionPullFFOnly)) {
 		t.Fatalf("expected selected row to show current pull action, got %q", viewSelectedSecond)
+	}
+	if !strings.Contains(lineSecond, "←") || !strings.Contains(lineSecond, "→") {
+		t.Fatalf("expected selected row to include left/right affordance arrows, got %q", lineSecond)
 	}
 	if strings.Contains(viewSelectedSecond, fixActionLabel(FixActionPush)) {
 		t.Fatalf("expected non-selected row to hide current action label, got %q", viewSelectedSecond)
 	}
 }
 
-func TestFixTUICurrentColumnUpdatesWhenCyclingChoices(t *testing.T) {
+func TestFixTUISelectFixesLabelUpdatesWhenCyclingChoices(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
@@ -3436,6 +3444,37 @@ func TestFixTUICurrentColumnUpdatesWhenCyclingChoices(t *testing.T) {
 	after := ansi.Strip(m.repoList.View())
 	if !strings.Contains(after, fixActionLabel(FixActionPush)) {
 		t.Fatalf("expected current action label to update after cycle, got %q", after)
+	}
+}
+
+func TestFixTUISelectFixesColumnPrependsSelectedSquares(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:            "api",
+				Path:            "/repos/api",
+				OriginURL:       "git@github.com:you/api.git",
+				Upstream:        "origin/main",
+				Ahead:           1,
+				HasDirtyTracked: true,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 190, Height: 24})
+	m.setCursor(0)
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")}) // select stage-commit-push
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")}) // move to push
+
+	line := lineContaining(ansi.Strip(m.repoList.View()), "api")
+	ixSquare := strings.Index(line, "■")
+	ixLabel := strings.Index(line, fixActionLabel(FixActionPush))
+	if ixSquare < 0 || ixLabel < 0 || ixSquare > ixLabel {
+		t.Fatalf("expected selected square prefix before current label in row, got %q", line)
 	}
 }
 
