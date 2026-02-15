@@ -18,6 +18,7 @@ func TestFixActionSpecsHaveCoreMetadata(t *testing.T) {
 		FixActionSyncWithUpstream,
 		FixActionPush,
 		FixActionStageCommitPush,
+		FixActionCheckpointThenSync,
 		FixActionPullFFOnly,
 		FixActionSetUpstreamPush,
 		FixActionEnableAutoPush,
@@ -54,6 +55,7 @@ func TestFixActionRiskUsesSharedSpec(t *testing.T) {
 	}{
 		{action: FixActionPush, risky: true},
 		{action: FixActionStageCommitPush, risky: true},
+		{action: FixActionCheckpointThenSync, risky: true},
 		{action: FixActionSyncWithUpstream, risky: true},
 		{action: FixActionPullFFOnly, risky: false},
 		{action: FixActionEnableAutoPush, risky: false},
@@ -242,6 +244,41 @@ func TestFixActionPlanSyncWithUpstreamUsesSelectedStrategy(t *testing.T) {
 	}
 }
 
+func TestFixActionPlanCheckpointThenSyncIncludesCommitSyncAndPush(t *testing.T) {
+	t.Parallel()
+
+	plan := fixActionPlanFor(FixActionCheckpointThenSync, fixActionPlanContext{
+		Branch:               "main",
+		Upstream:             "origin/main",
+		OriginURL:            "git@github.com:you/api.git",
+		CommitMessage:        "auto",
+		GenerateGitignore:    true,
+		GitignorePatterns:    []string{"node_modules/"},
+		MissingRootGitignore: true,
+		SyncStrategy:         FixSyncStrategyRebase,
+		FetchPrune:           true,
+	})
+
+	if !planContains(plan, true, "git add -A") {
+		t.Fatalf("expected add command in checkpoint-then-sync plan, got %#v", plan)
+	}
+	if !planContains(plan, true, "git commit -m") {
+		t.Fatalf("expected commit command in checkpoint-then-sync plan, got %#v", plan)
+	}
+	if !planContains(plan, true, "git rebase origin/main") {
+		t.Fatalf("expected rebase command in checkpoint-then-sync plan, got %#v", plan)
+	}
+	if !planContains(plan, true, "git push") {
+		t.Fatalf("expected push command in checkpoint-then-sync plan, got %#v", plan)
+	}
+	if planContains(plan, true, "git push -u") {
+		t.Fatalf("did not expect set-upstream push command in checkpoint-then-sync plan, got %#v", plan)
+	}
+	if !planContains(plan, false, "Generate root .gitignore") {
+		t.Fatalf("expected gitignore generation effect in checkpoint-then-sync plan, got %#v", plan)
+	}
+}
+
 func TestFixActionPlanSyncAndPullFetchPrunePreviewFollowsConfig(t *testing.T) {
 	t.Parallel()
 
@@ -310,6 +347,14 @@ func TestFixActionPlanCommandSummariesAreConcreteCommands(t *testing.T) {
 		Upstream:      "",
 		OriginURL:     "git@github.com:you/api.git",
 		CommitMessage: "auto",
+	}))
+	check(FixActionCheckpointThenSync, fixActionPlanFor(FixActionCheckpointThenSync, fixActionPlanContext{
+		Branch:        "main",
+		Upstream:      "origin/main",
+		OriginURL:     "git@github.com:you/api.git",
+		CommitMessage: "auto",
+		SyncStrategy:  FixSyncStrategyRebase,
+		FetchPrune:    true,
 	}))
 	check(FixActionPullFFOnly, fixActionPlanFor(FixActionPullFFOnly, fixActionPlanContext{
 		FetchPrune: true,

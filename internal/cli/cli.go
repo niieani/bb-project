@@ -348,7 +348,7 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 	}
 
 	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
-	cmd.Flags().StringVar(&message, "message", "", "Commit message for stage-commit-push action (or 'auto').")
+	cmd.Flags().StringVar(&message, "message", "", "Commit message for stage-commit-push/checkpoint-then-sync actions (or 'auto').")
 	cmd.Flags().StringVar(&syncStrategy, "sync-strategy", string(app.FixSyncStrategyRebase), "Sync strategy for sync-with-upstream and pre-push validation (rebase|merge).")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Use current machine snapshot without running a refresh scan first.")
 

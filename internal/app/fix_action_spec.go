@@ -86,6 +86,12 @@ var fixActionSpecs = map[string]fixActionSpec{
 		Risky:       true,
 		BuildPlan:   planFixActionStageCommitPush,
 	},
+	FixActionCheckpointThenSync: {
+		Label:       "Checkpoint, sync & push",
+		Description: "Stage and commit local changes, sync with upstream, then push the integrated result.",
+		Risky:       true,
+		BuildPlan:   planFixActionCheckpointThenSync,
+	},
 	FixActionPullFFOnly: {
 		Label:       "Pull (ff-only)",
 		Description: "Fast-forward your branch to upstream without creating a merge commit.",
@@ -225,6 +231,28 @@ func planFixActionStageCommitPush(ctx fixActionPlanContext) []fixActionPlanEntry
 		return entries
 	}
 	entries = append(entries, fixActionPlanEntry{ID: "stage-push", Command: true, Summary: "git push"})
+	return entries
+}
+
+func planFixActionCheckpointThenSync(ctx fixActionPlanContext) []fixActionPlanEntry {
+	stageEntries := planFixActionStageCommitPush(ctx)
+	stageOnly := make([]fixActionPlanEntry, 0, len(stageEntries))
+	for _, entry := range stageEntries {
+		switch entry.ID {
+		case "stage-skip-push-no-origin", "stage-push-set-upstream", "stage-push":
+			continue
+		default:
+			stageOnly = append(stageOnly, entry)
+		}
+	}
+	entries := make([]fixActionPlanEntry, 0, len(stageOnly)+4)
+	entries = append(entries, stageOnly...)
+	entries = append(entries, planFixActionSyncWithUpstream(ctx)...)
+	entries = append(entries, fixActionPlanEntry{
+		ID:      "checkpoint-push",
+		Command: true,
+		Summary: "git push",
+	})
 	return entries
 }
 

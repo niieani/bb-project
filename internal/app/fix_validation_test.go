@@ -96,6 +96,14 @@ func TestValidateFixApplyOptionsCreateProject(t *testing.T) {
 		t.Fatalf("expected gitignore generation to be allowed for stage-commit-push, got %v", err)
 	}
 
+	err = validateFixApplyOptions(FixActionCheckpointThenSync, fixApplyOptions{
+		GenerateGitignore: true,
+		GitignorePatterns: []string{"node_modules/"},
+	})
+	if err != nil {
+		t.Fatalf("expected gitignore generation to be allowed for checkpoint-then-sync, got %v", err)
+	}
+
 	err = validateFixApplyOptions(FixActionPush, fixApplyOptions{
 		SyncStrategy: FixSyncStrategy("squash"),
 	})

@@ -70,7 +70,7 @@ func validateFixApplyOptions(action string, opts fixApplyOptions) error {
 	if _, err := ParseFixSyncStrategy(string(opts.SyncStrategy)); err != nil {
 		return fmt.Errorf("invalid sync strategy: %w", err)
 	}
-	if opts.GenerateGitignore && action != FixActionStageCommitPush {
+	if opts.GenerateGitignore && action != FixActionStageCommitPush && action != FixActionCheckpointThenSync {
 		return fmt.Errorf("invalid gitignore generation: action %q does not create a commit", action)
 	}
 	if action == FixActionCreateProject && strings.TrimSpace(opts.CreateProjectName) != "" {

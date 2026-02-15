@@ -2202,6 +2202,7 @@ func fixActionsForAllExecution(actions []string) []string {
 		return nil
 	}
 	stageCommitSelected := containsAction(actions, FixActionStageCommitPush)
+	checkpointThenSyncSelected := containsAction(actions, FixActionCheckpointThenSync)
 	seen := make(map[string]struct{}, len(actions))
 	out := make([]string, 0, len(actions))
 	for _, action := range actions {
@@ -2210,6 +2211,9 @@ func fixActionsForAllExecution(actions []string) []string {
 		}
 		seen[action] = struct{}{}
 		if stageCommitSelected && (action == FixActionPush || action == FixActionSetUpstreamPush) {
+			continue
+		}
+		if checkpointThenSyncSelected && (action == FixActionPush || action == FixActionSetUpstreamPush || action == FixActionSyncWithUpstream || action == FixActionStageCommitPush) {
 			continue
 		}
 		out = append(out, action)
@@ -2225,6 +2229,8 @@ func fixActionSelectionPriority(action string) int {
 		return 20
 	case FixActionPullFFOnly:
 		return 30
+	case FixActionCheckpointThenSync:
+		return 35
 	case FixActionStageCommitPush:
 		return 40
 	case FixActionCreateProject:
@@ -2310,6 +2316,8 @@ func fixActionStyleFor(action string) lipgloss.Style {
 		return fixActionPushStyle
 	case FixActionStageCommitPush:
 		return fixActionStageStyle
+	case FixActionCheckpointThenSync:
+		return fixActionSyncStyle
 	case FixActionPullFFOnly:
 		return fixActionPullStyle
 	case FixActionSetUpstreamPush:
@@ -2484,7 +2492,7 @@ func fixReasonCoveredByActions(reason domain.UnsyncableReason, has map[string]bo
 	case domain.ReasonOperationInProgress:
 		return has[FixActionAbortOperation]
 	case domain.ReasonDirtyTracked, domain.ReasonDirtyUntracked:
-		return has[FixActionStageCommitPush]
+		return has[FixActionStageCommitPush] || has[FixActionCheckpointThenSync]
 	case domain.ReasonMissingUpstream:
 		return has[FixActionSetUpstreamPush] || has[FixActionStageCommitPush] || has[FixActionCreateProject]
 	case domain.ReasonDiverged:

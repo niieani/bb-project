@@ -46,7 +46,7 @@ func TestEligibleFixActions(t *testing.T) {
 			actions: []string{FixActionStageCommitPush},
 		},
 		{
-			name: "dirty behind branch blocks stage commit push",
+			name: "dirty behind branch offers checkpoint then sync",
 			rec: func() domain.MachineRepoRecord {
 				r := base
 				r.HasDirtyTracked = true
@@ -54,7 +54,7 @@ func TestEligibleFixActions(t *testing.T) {
 				return r
 			}(),
 			ctx:     fixEligibilityContext{},
-			actions: []string{},
+			actions: []string{FixActionCheckpointThenSync},
 		},
 		{
 			name:    "behind allows pull ff only",

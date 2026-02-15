@@ -223,7 +223,7 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	m.wizard.Action = decision.Action
 	m.wizard.SyncStrategy = FixSyncStrategyRebase
 	m.wizard.Risk = repoRisk
-	m.wizard.EnableCommitMessage = decision.Action == FixActionStageCommitPush
+	m.wizard.EnableCommitMessage = decision.Action == FixActionStageCommitPush || decision.Action == FixActionCheckpointThenSync
 	m.wizard.CommitMessage = commitInput
 	m.wizard.CommitFocused = false
 	m.wizard.EnableProjectName = decision.Action == FixActionCreateProject
@@ -568,7 +568,7 @@ func (m *fixTUIModel) wizardFocusOrder() []fixWizardFocusArea {
 }
 
 func (m *fixTUIModel) shouldShowGitignoreToggle(action string, risk fixRiskSnapshot) bool {
-	if action != FixActionStageCommitPush {
+	if action != FixActionStageCommitPush && action != FixActionCheckpointThenSync {
 		return false
 	}
 	if len(risk.NoisyChangedPaths) == 0 {
@@ -1266,7 +1266,7 @@ func (m *fixTUIModel) renderWizardPlanMarker(status fixWizardApplyStepStatus) st
 
 func (m *fixTUIModel) wizardChangedFilesFieldMeta() (string, string) {
 	switch m.wizard.Action {
-	case FixActionStageCommitPush:
+	case FixActionStageCommitPush, FixActionCheckpointThenSync:
 		return "Uncommitted changed files", "These uncommitted files will be staged and committed by this fix."
 	default:
 		return "Uncommitted changed files", "Shown for review only. This fix does not stage or commit uncommitted files."

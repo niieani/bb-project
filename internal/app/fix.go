@@ -15,16 +15,17 @@ import (
 )
 
 const (
-	FixActionIgnore           = "ignore"
-	FixActionAbortOperation   = "abort-operation"
-	FixActionCreateProject    = "create-project"
-	FixActionForkAndRetarget  = "fork-and-retarget"
-	FixActionSyncWithUpstream = "sync-with-upstream"
-	FixActionPush             = "push"
-	FixActionStageCommitPush  = "stage-commit-push"
-	FixActionPullFFOnly       = "pull-ff-only"
-	FixActionSetUpstreamPush  = "set-upstream-push"
-	FixActionEnableAutoPush   = "enable-auto-push"
+	FixActionIgnore             = "ignore"
+	FixActionAbortOperation     = "abort-operation"
+	FixActionCreateProject      = "create-project"
+	FixActionForkAndRetarget    = "fork-and-retarget"
+	FixActionSyncWithUpstream   = "sync-with-upstream"
+	FixActionPush               = "push"
+	FixActionStageCommitPush    = "stage-commit-push"
+	FixActionCheckpointThenSync = "checkpoint-then-sync"
+	FixActionPullFFOnly         = "pull-ff-only"
+	FixActionSetUpstreamPush    = "set-upstream-push"
+	FixActionEnableAutoPush     = "enable-auto-push"
 
 	DefaultFixCommitMessage = "bb: checkpoint local changes before sync"
 )
@@ -251,6 +252,16 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 		!(ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive) {
 		actions = append(actions, FixActionStageCommitPush)
 	}
+	if (rec.HasDirtyTracked || rec.HasUntracked) &&
+		!rec.Diverged &&
+		strings.TrimSpace(rec.OriginURL) != "" &&
+		strings.TrimSpace(rec.Upstream) != "" &&
+		rec.Behind > 0 &&
+		pushAllowed &&
+		!ctx.Risk.hasSecretLikeChanges() &&
+		!(ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive) {
+		actions = append(actions, FixActionCheckpointThenSync)
+	}
 	if rec.Upstream != "" && rec.Behind > 0 && rec.Ahead == 0 && !rec.Diverged && !rec.HasDirtyTracked && !rec.HasUntracked {
 		actions = append(actions, FixActionPullFFOnly)
 	}
@@ -308,6 +319,33 @@ func ineligibleFixReason(action string, rec domain.MachineRepoRecord, ctx fixEli
 				"sync-with-upstream is blocked: sync strategy %s is not marked clean by feasibility validation",
 				normalizeFixSyncStrategy(ctx.SyncStrategy),
 			)
+		}
+		return ""
+	}
+	if action == FixActionCheckpointThenSync {
+		if strings.TrimSpace(rec.OriginURL) == "" {
+			return "checkpoint-then-sync is blocked: origin remote is required"
+		}
+		if strings.TrimSpace(rec.Upstream) == "" {
+			return "checkpoint-then-sync is blocked: upstream is required"
+		}
+		if rec.Diverged {
+			return "checkpoint-then-sync is blocked: branch diverged from upstream; run sync-with-upstream first"
+		}
+		if rec.Behind == 0 {
+			return "checkpoint-then-sync is blocked: branch is not behind upstream"
+		}
+		if !rec.HasDirtyTracked && !rec.HasUntracked {
+			return "checkpoint-then-sync is blocked: no local uncommitted changes to checkpoint"
+		}
+		if ctx.Risk.hasSecretLikeChanges() {
+			return fmt.Sprintf(
+				"checkpoint-then-sync is blocked: secret-like uncommitted files detected (%s)",
+				strings.Join(ctx.Risk.SecretLikeChangedPaths, ", "),
+			)
+		}
+		if ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive {
+			return "checkpoint-then-sync is blocked: root .gitignore is missing and noisy uncommitted paths were detected; run interactive `bb fix` to review/generate .gitignore or add it manually"
 		}
 		return ""
 	}
@@ -487,6 +525,129 @@ func mapSyncProbeOutcome(in gitx.SyncProbeOutcome) fixSyncProbeOutcome {
 	default:
 		return fixSyncProbeUnknown
 	}
+}
+
+type fixStepRunner func(id string, fallback fixActionPlanEntry, fn func() error) error
+type fixStepSkipper func(id string, fallback fixActionPlanEntry)
+
+func (a *App) runFixStageCommitSteps(path string, target fixRepoState, opts fixApplyOptions, runStep fixStepRunner) error {
+	if opts.GenerateGitignore && len(opts.GitignorePatterns) > 0 {
+		stepID := "stage-gitignore-append"
+		summary := fmt.Sprintf("Append %d selected pattern(s) to root .gitignore.", len(opts.GitignorePatterns))
+		if target.Risk.MissingRootGitignore {
+			stepID = "stage-gitignore-generate"
+			summary = fmt.Sprintf("Generate root .gitignore with %d selected pattern(s).", len(opts.GitignorePatterns))
+		}
+		if err := runStep(stepID, fixActionPlanEntry{
+			ID:      stepID,
+			Command: false,
+			Summary: summary,
+		}, func() error {
+			return writeOrAppendGitignore(path, opts.GitignorePatterns)
+		}); err != nil {
+			return err
+		}
+	}
+
+	msg := strings.TrimSpace(opts.CommitMessage)
+	if msg == "" || msg == "auto" {
+		msg = DefaultFixCommitMessage
+	}
+	if err := runStep("stage-git-add", fixActionPlanEntry{ID: "stage-git-add", Command: true, Summary: "git add -A"}, func() error {
+		return a.Git.AddAll(path)
+	}); err != nil {
+		return err
+	}
+	return runStep("stage-git-commit", fixActionPlanEntry{
+		ID:      "stage-git-commit",
+		Command: true,
+		Summary: fmt.Sprintf("git commit -m %q", msg),
+	}, func() error {
+		return a.Git.Commit(path, msg)
+	})
+}
+
+func validateSyncWithUpstreamEligibility(action string, target fixRepoState, syncStrategy FixSyncStrategy) error {
+	blocked := func(reason string) *fixIneligibleError {
+		return &fixIneligibleError{
+			Action: action,
+			Reason: reason,
+		}
+	}
+	actionLabel := strings.TrimSpace(action)
+	if actionLabel == "" {
+		actionLabel = FixActionSyncWithUpstream
+	}
+	if strings.TrimSpace(target.Record.Upstream) == "" {
+		return blocked(fmt.Sprintf("%s is blocked: upstream is required", actionLabel))
+	}
+	if target.SyncFeasibility.conflictFor(syncStrategy) {
+		return blocked(fmt.Sprintf(
+			"%s is blocked: %s (selected strategy: %s)",
+			actionLabel,
+			domain.ReasonSyncConflict,
+			syncStrategy,
+		))
+	}
+	if target.SyncFeasibility.probeFailedFor(syncStrategy) {
+		return blocked(fmt.Sprintf(
+			"%s is blocked: %s (selected strategy: %s)",
+			actionLabel,
+			domain.ReasonSyncProbeFailed,
+			syncStrategy,
+		))
+	}
+	if !target.SyncFeasibility.cleanFor(syncStrategy) {
+		return blocked(fmt.Sprintf(
+			"%s is blocked: sync strategy %s is not marked clean by feasibility validation",
+			actionLabel,
+			syncStrategy,
+		))
+	}
+	return nil
+}
+
+func (a *App) runFixSyncWithUpstreamSteps(
+	cfg domain.ConfigFile,
+	path string,
+	target fixRepoState,
+	syncStrategy FixSyncStrategy,
+	runStep fixStepRunner,
+	markSkipped fixStepSkipper,
+) error {
+	if cfg.Sync.FetchPrune {
+		if err := runStep("sync-fetch-prune", fixActionPlanEntry{
+			ID:      "sync-fetch-prune",
+			Command: true,
+			Summary: "git fetch --prune",
+		}, func() error {
+			return a.Git.FetchPrune(path)
+		}); err != nil {
+			return err
+		}
+	} else {
+		markSkipped("sync-fetch-prune", fixActionPlanEntry{
+			ID:      "sync-fetch-prune",
+			Command: true,
+			Summary: "git fetch --prune",
+		})
+	}
+	if syncStrategy == FixSyncStrategyMerge {
+		return runStep("sync-merge", fixActionPlanEntry{
+			ID:      "sync-merge",
+			Command: true,
+			Summary: fmt.Sprintf("git merge --no-edit %s", target.Record.Upstream),
+		}, func() error {
+			return a.Git.MergeNoEdit(path, target.Record.Upstream)
+		})
+	}
+	return runStep("sync-rebase", fixActionPlanEntry{
+		ID:      "sync-rebase",
+		Command: true,
+		Summary: fmt.Sprintf("git rebase %s", target.Record.Upstream),
+	}, func() error {
+		return a.Git.Rebase(path, target.Record.Upstream)
+	})
 }
 
 func (a *App) applyFixAction(includeCatalogs []string, repoPath string, action string, opts fixApplyOptions) (fixRepoState, error) {
@@ -733,71 +894,10 @@ func (a *App) executeFixAction(
 			return a.Git.Push(path)
 		})
 	case FixActionSyncWithUpstream:
-		if strings.TrimSpace(target.Record.Upstream) == "" {
-			return errors.New("upstream is required for sync-with-upstream")
+		if err := validateSyncWithUpstreamEligibility(action, target, syncStrategy); err != nil {
+			return err
 		}
-		if target.SyncFeasibility.conflictFor(syncStrategy) {
-			return &fixIneligibleError{
-				Action: action,
-				Reason: fmt.Sprintf(
-					"sync-with-upstream is blocked: %s (selected strategy: %s)",
-					domain.ReasonSyncConflict,
-					syncStrategy,
-				),
-			}
-		}
-		if target.SyncFeasibility.probeFailedFor(syncStrategy) {
-			return &fixIneligibleError{
-				Action: action,
-				Reason: fmt.Sprintf(
-					"sync-with-upstream is blocked: %s (selected strategy: %s)",
-					domain.ReasonSyncProbeFailed,
-					syncStrategy,
-				),
-			}
-		}
-		if !target.SyncFeasibility.cleanFor(syncStrategy) {
-			return &fixIneligibleError{
-				Action: action,
-				Reason: fmt.Sprintf(
-					"sync-with-upstream is blocked: sync strategy %s is not marked clean by feasibility validation",
-					syncStrategy,
-				),
-			}
-		}
-		if cfg.Sync.FetchPrune {
-			if err := runStep("sync-fetch-prune", fixActionPlanEntry{
-				ID:      "sync-fetch-prune",
-				Command: true,
-				Summary: "git fetch --prune",
-			}, func() error {
-				return a.Git.FetchPrune(path)
-			}); err != nil {
-				return err
-			}
-		} else {
-			markSkipped("sync-fetch-prune", fixActionPlanEntry{
-				ID:      "sync-fetch-prune",
-				Command: true,
-				Summary: "git fetch --prune",
-			})
-		}
-		if syncStrategy == FixSyncStrategyMerge {
-			return runStep("sync-merge", fixActionPlanEntry{
-				ID:      "sync-merge",
-				Command: true,
-				Summary: fmt.Sprintf("git merge --no-edit %s", target.Record.Upstream),
-			}, func() error {
-				return a.Git.MergeNoEdit(path, target.Record.Upstream)
-			})
-		}
-		return runStep("sync-rebase", fixActionPlanEntry{
-			ID:      "sync-rebase",
-			Command: true,
-			Summary: fmt.Sprintf("git rebase %s", target.Record.Upstream),
-		}, func() error {
-			return a.Git.Rebase(path, target.Record.Upstream)
-		})
+		return a.runFixSyncWithUpstreamSteps(cfg, path, target, syncStrategy, runStep, markSkipped)
 	case FixActionCreateProject:
 		return a.createProjectFromFix(
 			cfg,
@@ -818,39 +918,7 @@ func (a *App) executeFixAction(
 				Reason: "stage-commit-push is blocked: branch is behind upstream, so push would be rejected; run sync-with-upstream first",
 			}
 		}
-		if opts.GenerateGitignore && len(opts.GitignorePatterns) > 0 {
-			stepID := "stage-gitignore-append"
-			summary := fmt.Sprintf("Append %d selected pattern(s) to root .gitignore.", len(opts.GitignorePatterns))
-			if target.Risk.MissingRootGitignore {
-				stepID = "stage-gitignore-generate"
-				summary = fmt.Sprintf("Generate root .gitignore with %d selected pattern(s).", len(opts.GitignorePatterns))
-			}
-			if err := runStep(stepID, fixActionPlanEntry{
-				ID:      stepID,
-				Command: false,
-				Summary: summary,
-			}, func() error {
-				return writeOrAppendGitignore(path, opts.GitignorePatterns)
-			}); err != nil {
-				return err
-			}
-		}
-		msg := strings.TrimSpace(opts.CommitMessage)
-		if msg == "" || msg == "auto" {
-			msg = DefaultFixCommitMessage
-		}
-		if err := runStep("stage-git-add", fixActionPlanEntry{ID: "stage-git-add", Command: true, Summary: "git add -A"}, func() error {
-			return a.Git.AddAll(path)
-		}); err != nil {
-			return err
-		}
-		if err := runStep("stage-git-commit", fixActionPlanEntry{
-			ID:      "stage-git-commit",
-			Command: true,
-			Summary: fmt.Sprintf("git commit -m %q", msg),
-		}, func() error {
-			return a.Git.Commit(path, msg)
-		}); err != nil {
+		if err := a.runFixStageCommitSteps(path, target, opts, runStep); err != nil {
 			return err
 		}
 		if strings.TrimSpace(target.Record.OriginURL) == "" {
@@ -878,6 +946,81 @@ func (a *App) executeFixAction(
 			})
 		}
 		return runStep("stage-push", fixActionPlanEntry{ID: "stage-push", Command: true, Summary: "git push"}, func() error {
+			return a.Git.Push(path)
+		})
+	case FixActionCheckpointThenSync:
+		if strings.TrimSpace(target.Record.OriginURL) == "" {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "checkpoint-then-sync is blocked: origin remote is required",
+			}
+		}
+		if strings.TrimSpace(target.Record.Upstream) == "" {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "checkpoint-then-sync is blocked: upstream is required",
+			}
+		}
+		if target.Record.Diverged {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "checkpoint-then-sync is blocked: branch diverged from upstream; run sync-with-upstream first",
+			}
+		}
+		if target.Record.Behind == 0 {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "checkpoint-then-sync is blocked: branch is not behind upstream",
+			}
+		}
+		if !target.Record.HasDirtyTracked && !target.Record.HasUntracked {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "checkpoint-then-sync is blocked: no local uncommitted changes to checkpoint",
+			}
+		}
+		if err := a.runFixStageCommitSteps(path, target, opts, runStep); err != nil {
+			return err
+		}
+		probeOutcome, probeErr := a.Git.ProbeSyncWithUpstream(path, target.Record.Upstream, string(syncStrategy))
+		if probeErr != nil {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: fmt.Sprintf(
+					"checkpoint-then-sync is blocked: %s (selected strategy: %s)",
+					domain.ReasonSyncProbeFailed,
+					syncStrategy,
+				),
+			}
+		}
+		switch mapSyncProbeOutcome(probeOutcome) {
+		case fixSyncProbeConflict:
+			return &fixIneligibleError{
+				Action: action,
+				Reason: fmt.Sprintf(
+					"checkpoint-then-sync is blocked: %s (selected strategy: %s)",
+					domain.ReasonSyncConflict,
+					syncStrategy,
+				),
+			}
+		case fixSyncProbeFailed, fixSyncProbeUnknown:
+			return &fixIneligibleError{
+				Action: action,
+				Reason: fmt.Sprintf(
+					"checkpoint-then-sync is blocked: %s (selected strategy: %s)",
+					domain.ReasonSyncProbeFailed,
+					syncStrategy,
+				),
+			}
+		}
+		if err := a.runFixSyncWithUpstreamSteps(cfg, path, target, syncStrategy, runStep, markSkipped); err != nil {
+			return err
+		}
+		return runStep("checkpoint-push", fixActionPlanEntry{
+			ID:      "checkpoint-push",
+			Command: true,
+			Summary: "git push",
+		}, func() error {
 			return a.Git.Push(path)
 		})
 	case FixActionPullFFOnly:

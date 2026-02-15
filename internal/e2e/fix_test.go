@@ -135,6 +135,47 @@ func TestFixCases(t *testing.T) {
 		}
 	})
 
+	t.Run("checkpoint then sync resolves dirty behind branch", func(t *testing.T) {
+		t.Parallel()
+		h, m, catalogRoot := setupSingleMachine(t)
+		repoPath, remotePath := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+
+		remoteClone := filepath.Join(h.Root, "remote-clones", "demo-checkpoint-then-sync")
+		m.MustRunGit(now, catalogRoot, "clone", remotePath, remoteClone)
+		m.MustRunGit(now, remoteClone, "checkout", "-B", "main", "--track", "origin/main")
+		m.MustWriteFile(filepath.Join(remoteClone, "remote-ahead.txt"), "remote ahead\n")
+		m.MustRunGit(now, remoteClone, "add", "remote-ahead.txt")
+		m.MustRunGit(now, remoteClone, "commit", "-m", "remote ahead commit")
+		m.MustRunGit(now, remoteClone, "push", "origin", "main")
+
+		m.MustRunGit(now, repoPath, "fetch", "origin")
+		m.MustWriteFile(filepath.Join(repoPath, "dirty.txt"), "local dirty tracked\n")
+		m.MustRunGit(now, repoPath, "add", "dirty.txt")
+		m.MustWriteFile(filepath.Join(repoPath, "scratch.txt"), "local dirty untracked\n")
+
+		out, err := m.RunBB(now.Add(1*time.Minute), "fix", "demo")
+		if err == nil {
+			t.Fatalf("expected list mode exit 1 for unsyncable dirty-behind state, output=%s", out)
+		}
+		if !strings.Contains(out, "checkpoint-then-sync") {
+			t.Fatalf("expected checkpoint-then-sync action in output, got: %s", out)
+		}
+
+		out, err = m.RunBB(now.Add(2*time.Minute), "fix", "demo", "checkpoint-then-sync", "--message=auto")
+		if err != nil {
+			t.Fatalf("checkpoint-then-sync failed: %v\n%s", err, out)
+		}
+
+		counts := strings.TrimSpace(m.MustRunGit(now, repoPath, "rev-list", "--left-right", "--count", "@{u}...HEAD"))
+		if counts != "0\t0" {
+			t.Fatalf("ahead/behind after checkpoint-then-sync = %q, want 0\\t0", counts)
+		}
+		status := m.MustRunGit(now, repoPath, "status", "--porcelain", "--branch")
+		if strings.Contains(status, "??") || strings.Contains(status, " M ") || strings.Contains(status, "M ") {
+			t.Fatalf("expected clean worktree after checkpoint-then-sync, status=%s", status)
+		}
+	})
+
 	t.Run("sync with upstream action resolves clean diverged branches", func(t *testing.T) {
 		t.Parallel()
 		h, m, catalogRoot := setupSingleMachine(t)
