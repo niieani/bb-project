@@ -9,77 +9,50 @@ import (
 func TestEffectiveAutoPushForObservedBranch(t *testing.T) {
 	t.Parallel()
 
-	trueValue := true
-	falseValue := false
-
 	tests := []struct {
 		name          string
-		autoPush      bool
-		catalog       domain.Catalog
-		visibility    domain.Visibility
+		mode          domain.AutoPushMode
 		branch        string
 		defaultBranch string
 		want          bool
 	}{
 		{
-			name:       "auto push disabled in metadata",
-			autoPush:   false,
-			visibility: domain.VisibilityPrivate,
-			branch:     "main",
-			want:       false,
+			name:   "auto push disabled in metadata",
+			mode:   domain.AutoPushModeDisabled,
+			branch: "main",
+			want:   false,
 		},
 		{
-			name:       "non-default branch keeps auto push enabled",
-			autoPush:   true,
-			visibility: domain.VisibilityPublic,
-			branch:     "feature/x",
-			want:       true,
+			name:   "non-default branch keeps auto push enabled",
+			mode:   domain.AutoPushModeEnabled,
+			branch: "feature/x",
+			want:   true,
 		},
 		{
-			name:       "private default branch defaults to allowed",
-			autoPush:   true,
-			visibility: domain.VisibilityPrivate,
-			branch:     "main",
-			want:       true,
+			name:   "default branch blocked for non-default mode",
+			mode:   domain.AutoPushModeEnabled,
+			branch: "main",
+			want:   false,
 		},
 		{
-			name:       "public default branch defaults to blocked",
-			autoPush:   true,
-			visibility: domain.VisibilityPublic,
-			branch:     "main",
-			want:       false,
-		},
-		{
-			name:       "private override blocks",
-			autoPush:   true,
-			catalog:    domain.Catalog{AllowAutoPushDefaultBranchPrivate: &falseValue},
-			visibility: domain.VisibilityPrivate,
-			branch:     "main",
-			want:       false,
-		},
-		{
-			name:       "public override allows",
-			autoPush:   true,
-			catalog:    domain.Catalog{AllowAutoPushDefaultBranchPublic: &trueValue},
-			visibility: domain.VisibilityPublic,
-			branch:     "main",
-			want:       true,
+			name:   "default branch allowed for include-default mode",
+			mode:   domain.AutoPushModeIncludeDefaultBranch,
+			branch: "main",
+			want:   true,
 		},
 		{
 			name:          "detected default branch name is honored",
-			autoPush:      true,
-			visibility:    domain.VisibilityPrivate,
-			branch:        "trunk",
-			defaultBranch: "trunk",
-			want:          true,
-		},
-		{
-			name:          "detected default branch can block public",
-			autoPush:      true,
-			visibility:    domain.VisibilityPublic,
+			mode:          domain.AutoPushModeEnabled,
 			branch:        "trunk",
 			defaultBranch: "trunk",
 			want:          false,
+		},
+		{
+			name:          "detected default branch allows include-default mode",
+			mode:          domain.AutoPushModeIncludeDefaultBranch,
+			branch:        "trunk",
+			defaultBranch: "trunk",
+			want:          true,
 		},
 	}
 
@@ -87,7 +60,7 @@ func TestEffectiveAutoPushForObservedBranch(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := effectiveAutoPushForObservedBranch(tt.autoPush, tt.catalog, tt.visibility, tt.branch, tt.defaultBranch)
+			got := effectiveAutoPushForObservedBranch(tt.mode, tt.branch, tt.defaultBranch)
 			if got != tt.want {
 				t.Fatalf("effectiveAutoPushForObservedBranch() = %v, want %v", got, tt.want)
 			}

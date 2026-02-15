@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"bb-project/internal/app"
+	"bb-project/internal/domain"
 	"bb-project/internal/state"
 )
 
@@ -25,7 +26,7 @@ type fakeApp struct {
 	ensureIncl []string
 
 	repoPolicySelector  string
-	repoPolicyAutoPush  bool
+	repoPolicyAutoPush  domain.AutoPushMode
 	repoRemoteSelector  string
 	repoPreferredRemote string
 	repoAccessSelector  string
@@ -109,9 +110,9 @@ func (f *fakeApp) RunEnsure(include []string) (int, error) {
 	return f.ensureCode, f.ensureErr
 }
 
-func (f *fakeApp) RunRepoPolicy(repoSelector string, autoPush bool) (int, error) {
+func (f *fakeApp) RunRepoPolicy(repoSelector string, autoPushMode domain.AutoPushMode) (int, error) {
 	f.repoPolicySelector = repoSelector
-	f.repoPolicyAutoPush = autoPush
+	f.repoPolicyAutoPush = autoPushMode
 	return f.repoPolicyCode, f.repoPolicyErr
 }
 
@@ -456,7 +457,7 @@ func TestRunRepoPolicyValidationAndForwarding(t *testing.T) {
 		mustContain(t, stderr, "auto-push")
 	})
 
-	t.Run("invalid bool", func(t *testing.T) {
+	t.Run("invalid mode", func(t *testing.T) {
 		fake := &fakeApp{}
 		code, _, stderr, calls, _ := runCLI(t, fake, []string{"repo", "policy", "demo", "--auto-push=not-bool"})
 		if code != 2 {
@@ -477,8 +478,22 @@ func TestRunRepoPolicyValidationAndForwarding(t *testing.T) {
 		if stderr != "" {
 			t.Fatalf("stderr = %q, want empty", stderr)
 		}
-		if fake.repoPolicySelector != "demo" || fake.repoPolicyAutoPush {
-			t.Fatalf("repo policy forwarding mismatch: selector=%q autoPush=%v", fake.repoPolicySelector, fake.repoPolicyAutoPush)
+		if fake.repoPolicySelector != "demo" || fake.repoPolicyAutoPush != domain.AutoPushModeDisabled {
+			t.Fatalf("repo policy forwarding mismatch: selector=%q autoPush=%q", fake.repoPolicySelector, fake.repoPolicyAutoPush)
+		}
+	})
+
+	t.Run("forwards include-default mode", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"repo", "policy", "demo", "--auto-push=include-default-branch"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.repoPolicySelector != "demo" || fake.repoPolicyAutoPush != domain.AutoPushModeIncludeDefaultBranch {
+			t.Fatalf("repo policy forwarding mismatch: selector=%q autoPush=%q", fake.repoPolicySelector, fake.repoPolicyAutoPush)
 		}
 	})
 

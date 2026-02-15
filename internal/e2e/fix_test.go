@@ -393,8 +393,8 @@ func TestFixCases(t *testing.T) {
 		}
 
 		meta := m.MustReadFile(firstRepoMetadataPath(t, m))
-		if !strings.Contains(meta, "auto_push: true") {
-			t.Fatalf("expected auto_push=true in repo metadata, got:\n%s", meta)
+		if !strings.Contains(meta, "auto_push: include-default-branch") {
+			t.Fatalf("expected auto_push=include-default-branch in repo metadata, got:\n%s", meta)
 		}
 	})
 

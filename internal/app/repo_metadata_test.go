@@ -63,7 +63,7 @@ func TestEnsureRepoMetadataWritesWhenBackfillNeeded(t *testing.T) {
 
 	repoKey := "references/netclode"
 	metaPath := state.RepoMetaPath(paths, repoKey)
-	raw := "version: 1\nrepo_key: references/netclode\nauto_push: false\nbranch_follow_enabled: false\n"
+	raw := "version: 1\nrepo_key: references/netclode\nauto_push: 'false'\nbranch_follow_enabled: false\n"
 	if err := os.MkdirAll(paths.RepoDir(), 0o755); err != nil {
 		t.Fatalf("mkdir repo dir: %v", err)
 	}
@@ -151,14 +151,14 @@ func TestRunRepoPolicyBlocksReadOnlyAutoPush(t *testing.T) {
 	meta := domain.RepoMetadataFile{
 		RepoKey:    "software/demo",
 		Name:       "demo",
-		AutoPush:   false,
+		AutoPush:   domain.AutoPushModeDisabled,
 		PushAccess: domain.PushAccessReadOnly,
 	}
 	if err := state.SaveRepoMetadata(paths, meta); err != nil {
 		t.Fatalf("save metadata: %v", err)
 	}
 
-	code, err := a.RunRepoPolicy("software/demo", true)
+	code, err := a.RunRepoPolicy("software/demo", domain.AutoPushModeEnabled)
 	if err == nil {
 		t.Fatal("expected error when enabling auto-push for read-only remote")
 	}
@@ -178,7 +178,7 @@ func TestRunRepoPushAccessSet(t *testing.T) {
 	meta := domain.RepoMetadataFile{
 		RepoKey:    "software/demo",
 		Name:       "demo",
-		AutoPush:   true,
+		AutoPush:   domain.AutoPushModeEnabled,
 		PushAccess: domain.PushAccessUnknown,
 	}
 	if err := state.SaveRepoMetadata(paths, meta); err != nil {
@@ -203,7 +203,7 @@ func TestRunRepoPushAccessSet(t *testing.T) {
 	if !updated.PushAccessManualOverride {
 		t.Fatal("expected manual override to be enabled")
 	}
-	if updated.AutoPush {
+	if updated.AutoPush != domain.AutoPushModeDisabled {
 		t.Fatal("expected auto_push to be disabled for read-only push access")
 	}
 	if !updated.PushAccessCheckedAt.Equal(now) {

@@ -200,9 +200,13 @@ Safety gating:
 - In non-interactive flow, `stage-commit-push` is also blocked when root `.gitignore` is missing and noisy uncommitted paths are detected (for example `node_modules`).
 - `stage-commit-push` is blocked when branch is behind upstream (run `sync-with-upstream` first).
 
-### `bb repo policy <repo> --auto-push=<true|false>`
+### `bb repo policy <repo> --auto-push=<false|true|include-default-branch>`
 
-Updates `auto_push` policy in repo metadata.
+Updates `auto_push` mode in repo metadata:
+
+- `false`: disable auto-push
+- `true`: allow auto-push on non-default branches
+- `include-default-branch`: allow auto-push on any branch, including default branch
 
 `<repo>` selector can be either:
 
@@ -317,9 +321,6 @@ A repo is syncable only if all are true:
 - current branch has upstream
 - branch is not diverged
 - if ahead commits exist, push is allowed by policy or `--push`
-- on a repo's default branch, auto-push is additionally gated by the catalog policy for repo visibility:
-  - `allow_auto_push_default_branch_private` (defaults to `true` when unset)
-  - `allow_auto_push_default_branch_public` (defaults to `false` when unset)
 
 Unsyncable reasons include:
 

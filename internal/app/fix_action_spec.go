@@ -308,7 +308,7 @@ func planFixActionEnableAutoPush(_ fixActionPlanContext) []fixActionPlanEntry {
 		{
 			ID:      "enable-auto-push",
 			Command: false,
-			Summary: "Write repo metadata: set auto_push=true.",
+			Summary: "Write repo metadata: set auto_push to the enabled mode for this branch.",
 		},
 	}
 }

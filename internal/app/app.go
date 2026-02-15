@@ -290,7 +290,8 @@ func (a *App) RunInit(opts InitOptions) error {
 	headSHA, _ := a.Git.HeadSHA(targetPath)
 	upstream, _ := a.Git.Upstream(targetPath)
 	if headSHA != "" && upstream == "" {
-		if repoMeta.AutoPush || opts.Push {
+		defaultBranch, _ := a.Git.DefaultBranch(targetPath, repoMeta.PreferredRemote)
+		if effectiveAutoPushForObservedBranch(repoMeta.AutoPush, branch, defaultBranch) || opts.Push {
 			if branch == "" {
 				branch = "main"
 			}
@@ -569,11 +570,11 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, name, origin st
 		}
 		switch visibility {
 		case domain.VisibilityPrivate:
-			meta.AutoPush = cfg.Sync.DefaultAutoPushPrivate
+			meta.AutoPush = domain.AutoPushModeFromEnabled(cfg.Sync.DefaultAutoPushPrivate)
 		case domain.VisibilityPublic:
-			meta.AutoPush = cfg.Sync.DefaultAutoPushPublic
+			meta.AutoPush = domain.AutoPushModeFromEnabled(cfg.Sync.DefaultAutoPushPublic)
 		default:
-			meta.AutoPush = false
+			meta.AutoPush = domain.AutoPushModeDisabled
 		}
 		created = true
 	} else {
@@ -615,6 +616,7 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, name, origin st
 func normalizedRepoMetadata(meta domain.RepoMetadataFile) domain.RepoMetadataFile {
 	meta.Version = domain.Version
 	meta.PushAccess = domain.NormalizePushAccess(meta.PushAccess)
+	meta.AutoPush = domain.NormalizeAutoPushMode(meta.AutoPush)
 	return meta
 }
 
@@ -964,8 +966,7 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	dirtyTracked, dirtyUntracked, _ := a.Git.Dirty(repo.Path)
 	op := a.Git.Operation(repo.Path)
 
-	autoPush := false
-	visibility := domain.VisibilityUnknown
+	autoPush := domain.AutoPushModeDisabled
 	preferredRemote := ""
 	pushAccess := domain.PushAccessUnknown
 	if strings.TrimSpace(repo.RepoKey) != "" {
@@ -974,16 +975,15 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 			return domain.MachineRepoRecord{}, err
 		} else if hasMeta {
 			autoPush = meta.AutoPush
-			visibility = meta.Visibility
 			preferredRemote = meta.PreferredRemote
 			pushAccess = domain.NormalizePushAccess(meta.PushAccess)
 		}
 	}
 	if !pushAccessAllowsAutoPush(pushAccess) {
-		autoPush = false
+		autoPush = domain.AutoPushModeDisabled
 	}
 	defaultBranch, _ := a.Git.DefaultBranch(repo.Path, preferredRemote)
-	autoPush = effectiveAutoPushForObservedBranch(autoPush, repo.Catalog, visibility, branch, defaultBranch)
+	autoPushAllowed := effectiveAutoPushForObservedBranch(autoPush, branch, defaultBranch)
 
 	syncable, reasons := domain.EvaluateSyncability(domain.ObservedRepoState{
 		OriginURL:            origin,
@@ -999,7 +999,7 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 		HasUntracked:         dirtyUntracked,
 		OperationInProgress:  op,
 		IncludeUntrackedRule: cfg.Sync.IncludeUntrackedAsDirty,
-	}, autoPush, allowPush)
+	}, autoPushAllowed, allowPush)
 
 	rec := domain.MachineRepoRecord{
 		RepoKey:             repo.RepoKey,
@@ -1026,19 +1026,18 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 }
 
 func effectiveAutoPushForObservedBranch(
-	autoPush bool,
-	catalog domain.Catalog,
-	visibility domain.Visibility,
+	mode domain.AutoPushMode,
 	branch string,
 	defaultBranch string,
 ) bool {
-	if !autoPush {
+	mode = domain.NormalizeAutoPushMode(mode)
+	if mode == domain.AutoPushModeDisabled {
 		return false
 	}
 	if !isDefaultBranch(branch, defaultBranch) {
 		return true
 	}
-	return catalog.AllowsDefaultBranchAutoPush(visibility)
+	return mode == domain.AutoPushModeIncludeDefaultBranch
 }
 
 func isDefaultBranch(branch string, defaultBranch string) bool {
@@ -1363,7 +1362,7 @@ func (a *App) RunCatalogList() (int, error) {
 	return 0, nil
 }
 
-func (a *App) RunRepoPolicy(repoSelector string, autoPush bool) (int, error) {
+func (a *App) RunRepoPolicy(repoSelector string, autoPushMode domain.AutoPushMode) (int, error) {
 	a.logf("repo policy: acquiring global lock")
 	lock, err := state.AcquireLock(a.Paths)
 	if err != nil {
@@ -1385,14 +1384,15 @@ func (a *App) RunRepoPolicy(repoSelector string, autoPush bool) (int, error) {
 	if idx == -1 {
 		return 2, fmt.Errorf("repo %q not found", repoSelector)
 	}
-	if autoPush && !pushAccessAllowsAutoPush(repos[idx].PushAccess) {
+	autoPushMode = domain.NormalizeAutoPushMode(autoPushMode)
+	if autoPushMode != domain.AutoPushModeDisabled && !pushAccessAllowsAutoPush(repos[idx].PushAccess) {
 		return 2, fmt.Errorf("repo %q is read-only on remote; auto-push is n/a", repos[idx].RepoKey)
 	}
-	repos[idx].AutoPush = autoPush
+	repos[idx].AutoPush = autoPushMode
 	if err := state.SaveRepoMetadata(a.Paths, repos[idx]); err != nil {
 		return 2, err
 	}
-	a.logf("repo policy: set auto_push=%t for %s", autoPush, repos[idx].RepoKey)
+	a.logf("repo policy: set auto_push=%q for %s", repos[idx].AutoPush, repos[idx].RepoKey)
 	return 0, nil
 }
 
@@ -1467,7 +1467,7 @@ func (a *App) RunRepoPushAccessSet(repoSelector string, pushAccessRaw string) (i
 	repo.PushAccessCheckedAt = a.Now()
 	repo.PushAccessManualOverride = true
 	if repo.PushAccess == domain.PushAccessReadOnly {
-		repo.AutoPush = false
+		repo.AutoPush = domain.AutoPushModeDisabled
 	}
 	if err := state.SaveRepoMetadata(a.Paths, repo); err != nil {
 		return 2, err
@@ -1516,7 +1516,7 @@ func (a *App) RunRepoPushAccessRefresh(repoSelector string) (int, error) {
 		return 2, err
 	}
 	if updated.PushAccess == domain.PushAccessReadOnly {
-		updated.AutoPush = false
+		updated.AutoPush = domain.AutoPushModeDisabled
 	}
 	if changed {
 		if err := state.SaveRepoMetadata(a.Paths, updated); err != nil {

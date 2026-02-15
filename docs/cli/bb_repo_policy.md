@@ -9,7 +9,7 @@ bb repo policy <repo> [flags]
 ### Options
 
 ```
-      --auto-push string   Set auto-push policy (true|false).
+      --auto-push string   Set auto-push mode (false|true|include-default-branch).
   -h, --help               help for policy
 ```
 
@@ -22,4 +22,3 @@ bb repo policy <repo> [flags]
 ### SEE ALSO
 
 * [bb repo](bb_repo.md)	 - Manage repository metadata and policy settings.
-

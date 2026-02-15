@@ -210,6 +210,15 @@ func containsAction(actions []string, action string) bool {
 	return false
 }
 
+func containsUnsyncableReason(reasons []domain.UnsyncableReason, reason domain.UnsyncableReason) bool {
+	for _, candidate := range reasons {
+		if candidate == reason {
+			return true
+		}
+	}
+	return false
+}
+
 func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataFile, ctx fixEligibilityContext) []string {
 	if rec.OperationInProgress != domain.OperationNone && rec.OperationInProgress != "" {
 		return []string{FixActionAbortOperation}
@@ -251,8 +260,11 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	if rec.OriginURL != "" && !pushAllowed && strings.TrimSpace(rec.RepoKey) != "" {
 		actions = append(actions, FixActionForkAndRetarget)
 	}
-	if meta != nil && !meta.AutoPush && strings.TrimSpace(rec.RepoKey) != "" && pushAccessAllowsAutoPush(meta.PushAccess) {
-		actions = append(actions, FixActionEnableAutoPush)
+	if meta != nil && strings.TrimSpace(rec.RepoKey) != "" && pushAccessAllowsAutoPush(meta.PushAccess) {
+		mode := domain.NormalizeAutoPushMode(meta.AutoPush)
+		if mode == domain.AutoPushModeDisabled || (mode == domain.AutoPushModeEnabled && containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonPushPolicyBlocked)) {
+			actions = append(actions, FixActionEnableAutoPush)
+		}
 	}
 	return actions
 }
@@ -926,16 +938,25 @@ func (a *App) executeFixAction(
 		if strings.TrimSpace(target.Record.RepoKey) == "" {
 			return errors.New("repo_key is required for enable-auto-push")
 		}
+		branch := strings.TrimSpace(target.Record.Branch)
+		defaultBranch := ""
+		if strings.TrimSpace(target.Record.Path) != "" {
+			defaultBranch, _ = a.Git.DefaultBranch(target.Record.Path, preferredRemote)
+		}
+		targetMode := domain.AutoPushModeEnabled
+		if isDefaultBranch(branch, defaultBranch) {
+			targetMode = domain.AutoPushModeIncludeDefaultBranch
+		}
 		return runStep("enable-auto-push", fixActionPlanEntry{
 			ID:      "enable-auto-push",
 			Command: false,
-			Summary: "Write repo metadata: set auto_push=true.",
+			Summary: fmt.Sprintf("Write repo metadata: set auto_push=%q.", targetMode),
 		}, func() error {
 			meta, err := state.LoadRepoMetadata(a.Paths, target.Record.RepoKey)
 			if err != nil {
 				return err
 			}
-			meta.AutoPush = true
+			meta.AutoPush = targetMode
 			return state.SaveRepoMetadata(a.Paths, meta)
 		})
 	default:

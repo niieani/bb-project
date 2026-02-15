@@ -150,7 +150,7 @@ func TestEligibleFixActions(t *testing.T) {
 		{
 			name:    "auto push disabled allows enable action",
 			rec:     base,
-			meta:    &domain.RepoMetadataFile{RepoKey: "software/api", AutoPush: false},
+			meta:    &domain.RepoMetadataFile{RepoKey: "software/api", AutoPush: domain.AutoPushModeDisabled},
 			ctx:     fixEligibilityContext{},
 			actions: []string{FixActionEnableAutoPush},
 		},
@@ -159,7 +159,7 @@ func TestEligibleFixActions(t *testing.T) {
 			rec:  base,
 			meta: &domain.RepoMetadataFile{
 				RepoKey:    "software/api",
-				AutoPush:   false,
+				AutoPush:   domain.AutoPushModeDisabled,
 				PushAccess: domain.PushAccessReadOnly,
 			},
 			ctx:     fixEligibilityContext{},
@@ -176,11 +176,27 @@ func TestEligibleFixActions(t *testing.T) {
 			}(),
 			meta: &domain.RepoMetadataFile{
 				RepoKey:    "software/api",
-				AutoPush:   false,
+				AutoPush:   domain.AutoPushModeDisabled,
 				PushAccess: domain.PushAccessReadOnly,
 			},
 			ctx:     fixEligibilityContext{},
 			actions: []string{FixActionForkAndRetarget},
+		},
+		{
+			name: "default-branch push-policy-blocked with true mode offers enable auto push",
+			rec: func() domain.MachineRepoRecord {
+				r := base
+				r.Ahead = 2
+				r.UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonPushPolicyBlocked}
+				return r
+			}(),
+			meta: &domain.RepoMetadataFile{
+				RepoKey:    "software/api",
+				AutoPush:   domain.AutoPushModeEnabled,
+				PushAccess: domain.PushAccessReadWrite,
+			},
+			ctx:     fixEligibilityContext{},
+			actions: []string{FixActionPush, FixActionEnableAutoPush},
 		},
 		{
 			name: "secret-like uncommitted files block stage commit push",

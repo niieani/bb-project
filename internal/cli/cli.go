@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 
 	"bb-project/internal/app"
+	"bb-project/internal/domain"
 	"bb-project/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -21,7 +21,7 @@ type appRunner interface {
 	RunStatus(jsonOut bool, include []string) (int, error)
 	RunDoctor(include []string) (int, error)
 	RunEnsure(include []string) (int, error)
-	RunRepoPolicy(repoSelector string, autoPush bool) (int, error)
+	RunRepoPolicy(repoSelector string, autoPushMode domain.AutoPushMode) (int, error)
 	RunRepoPreferredRemote(repoSelector string, preferredRemote string) (int, error)
 	RunRepoPushAccessSet(repoSelector string, pushAccess string) (int, error)
 	RunRepoPushAccessRefresh(repoSelector string) (int, error)
@@ -417,17 +417,17 @@ func newRepoCommand(runtime *runtimeState) *cobra.Command {
 				return withExitCode(2, err)
 			}
 
-			autoPush, err := strconv.ParseBool(autoPushRaw)
+			autoPushMode, err := domain.ParseAutoPushMode(autoPushRaw)
 			if err != nil {
 				return withExitCode(2, fmt.Errorf("invalid --auto-push value %q", autoPushRaw))
 			}
 
-			code, err := runner.RunRepoPolicy(args[0], autoPush)
+			code, err := runner.RunRepoPolicy(args[0], autoPushMode)
 			return withExitCode(code, err)
 		},
 	}
 
-	policyCmd.Flags().StringVar(&autoPushRaw, "auto-push", "", "Set auto-push policy (true|false).")
+	policyCmd.Flags().StringVar(&autoPushRaw, "auto-push", "", "Set auto-push mode (false|true|include-default-branch).")
 	_ = policyCmd.MarkFlagRequired("auto-push")
 
 	var preferredRemote string

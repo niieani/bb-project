@@ -1,5 +1,6 @@
-Build fully TDD: run tests as you keep implementing until you have completed the improvement.
-Use latest features of Go wherever it makes sense and best practices + latest dependencies (feel free to check versions). We're on Go 1.26.0 right now.
+Build fully TDD: write red tests first, then implement. Run tests as you keep implementing until you have completed the improvement. When I tell you to "implement" or "proceed" that's a shorthand for test-driven development (unless it doesn't make sense in the context - like if I'm refering to writing a document).
+
+Use latest features of Go wherever it makes sense; apply best practices, use latest dependencies (feel free to check versions). We're on Go 1.26.0 right now.
 Feel free to update the test harness if its missing features.
 
 When making changes, NEVER make them backwards compatibile, always clean-up the legacy code.

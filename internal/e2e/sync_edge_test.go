@@ -180,6 +180,9 @@ func TestSyncEdgeCases(t *testing.T) {
 			mB.MustWriteFile(filepath.Join(repoB, "push-fail.txt"), "x\n")
 			mB.MustRunGit(now, repoB, "add", "push-fail.txt")
 			mB.MustRunGit(now, repoB, "commit", "-m", "push fail")
+			if out, err := mB.RunBB(now.Add(90*time.Second), "repo", "policy", "api", "--auto-push=include-default-branch"); err != nil {
+				t.Fatalf("repo policy include-default-branch failed: %v\n%s", err, out)
+			}
 
 			if _, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err == nil {
 				t.Fatal("expected sync failure")

@@ -27,7 +27,7 @@ Migrate `/Volumes/Projects/Software/bb-project/internal/cli` from manual argumen
 - `bb status` with `--json`, repeatable `--include-catalog`.
 - `bb doctor` with repeatable `--include-catalog`.
 - `bb ensure` with repeatable `--include-catalog`.
-- `bb repo policy <repo> --auto-push=<true|false>` with explicit boolean value required.
+- `bb repo policy <repo> --auto-push=<false|true|include-default-branch>` with explicit mode value required.
 - `bb catalog add <name> <root>`, `bb catalog rm <name>`, `bb catalog default <name>`, `bb catalog list`.
 - `bb config` with no args.
 - `bb completion [bash|zsh|fish|powershell]` outputs completion script to stdout.
@@ -115,7 +115,7 @@ Migrate `/Volumes/Projects/Software/bb-project/internal/cli` from manual argumen
 - Unknown flag/invalid args exit `2`.
 - `--quiet` toggles verbosity on app stub.
 - `scan/sync/doctor/ensure` propagate app return code `1`.
-- `repo policy` requires `<repo>` and explicit `--auto-push=<bool>`.
+- `repo policy` requires `<repo>` and explicit `--auto-push=<mode>`.
 - `config` rejects unexpected args.
 
 2. E2E regression tests:

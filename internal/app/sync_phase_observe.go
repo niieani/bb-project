@@ -72,13 +72,13 @@ func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRep
 	}
 
 	if rec.Ahead > 0 {
-		autoPush := false
+		autoPushMode := domain.AutoPushModeDisabled
 		if strings.TrimSpace(rec.RepoKey) != "" {
 			if meta, err := state.LoadRepoMetadata(a.Paths, rec.RepoKey); err == nil {
-				autoPush = meta.AutoPush
+				autoPushMode = domain.NormalizeAutoPushMode(meta.AutoPush)
 			}
 		}
-		if autoPush || opts.Push {
+		if autoPushMode != domain.AutoPushModeDisabled || opts.Push {
 			a.logf("sync: pushing ahead commits for %s", repo.Path)
 			if err := a.Git.Push(repo.Path); err != nil {
 				rec.Syncable = false

@@ -222,31 +222,35 @@ func TestSyncBasicCases(t *testing.T) {
 		mB.MustRunGit(now, repoB, "add", "ahead.txt")
 		mB.MustRunGit(now, repoB, "commit", "-m", "ahead")
 
-		if out, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err != nil {
-			t.Fatalf("sync failed: %v\n%s", err, out)
+		if _, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err == nil {
+			t.Fatal("expected sync unsyncable on default branch when auto_push=true (non-default branch mode)")
 		}
 		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-		if rec.Ahead != 0 {
-			t.Fatalf("expected ahead=0 after auto-push, got %d", rec.Ahead)
+		if !containsReason(rec.UnsyncableReasons, domain.ReasonPushPolicyBlocked) {
+			t.Fatalf("expected push_policy_blocked reason, got %v", rec.UnsyncableReasons)
 		}
 	})
 
 	t.Run("TC-SYNC-013A", func(t *testing.T) {
 		t.Parallel()
 		_, _, mB, _, repoB, now := bootstrapRepoAcrossTwoMachines(t)
-		privateBlocked := false
-		setCatalogDefaultBranchAutoPushPolicy(t, mB, "software", &privateBlocked, nil)
 
 		mB.MustWriteFile(filepath.Join(repoB, "ahead.txt"), "ahead\n")
 		mB.MustRunGit(now, repoB, "add", "ahead.txt")
 		mB.MustRunGit(now, repoB, "commit", "-m", "ahead")
 
 		if _, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err == nil {
-			t.Fatal("expected sync unsyncable when default-branch auto-push is disabled for private repos")
+			t.Fatal("expected sync unsyncable on default branch before include-default-branch mode is set")
+		}
+		if out, err := mB.RunBB(now.Add(3*time.Minute), "repo", "policy", "api", "--auto-push=include-default-branch"); err != nil {
+			t.Fatalf("repo policy include-default-branch failed: %v\n%s", err, out)
+		}
+		if out, err := mB.RunBB(now.Add(4*time.Minute), "sync"); err != nil {
+			t.Fatalf("sync failed after include-default-branch policy: %v\n%s", err, out)
 		}
 		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-		if !containsReason(rec.UnsyncableReasons, domain.ReasonPushPolicyBlocked) {
-			t.Fatalf("expected push_policy_blocked reason, got %v", rec.UnsyncableReasons)
+		if rec.Ahead != 0 {
+			t.Fatalf("expected ahead=0 after include-default-branch policy, got %d", rec.Ahead)
 		}
 	})
 

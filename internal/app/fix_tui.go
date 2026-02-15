@@ -65,7 +65,7 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 		),
 		Setting: key.NewBinding(
 			key.WithKeys("s"),
-			key.WithHelp("s", "toggle auto-push"),
+			key.WithHelp("s", "cycle auto-push"),
 		),
 		Skip: key.NewBinding(
 			key.WithKeys("ctrl+x"),
@@ -196,7 +196,7 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 		primary = append(primary, b)
 	}
 	if canToggleAutoPush {
-		b := newHelpBinding([]string{"s"}, "s", "toggle auto-push")
+		b := newHelpBinding([]string{"s"}, "s", "cycle auto-push")
 		short = append(short, b)
 		secondary = append(secondary, b)
 	}
@@ -461,7 +461,7 @@ type fixListItem struct {
 	Name              string
 	Branch            string
 	State             string
-	AutoPush          bool
+	AutoPushMode      domain.AutoPushMode
 	AutoPushAvailable bool
 	Reasons           string
 	Action            string
@@ -560,12 +560,14 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	repoCell := renderFixColumnCell(row.Name, layout.Repo, repoStyle)
 	branchCell := renderFixColumnCell(row.Branch, layout.Branch, branchStyle)
 	stateCell := renderFixColumnCell(row.State, layout.State, stateStyle)
-	autoPushText := onOffLabel(row.AutoPush)
+	autoPushText := autoPushModeDisplayLabel(row.AutoPushMode)
 	autoPushStyle := fixAutoPushOffStyle
 	if !row.AutoPushAvailable {
 		autoPushText = "n/a"
 		autoPushStyle = fixNoActionStyle
-	} else if row.AutoPush {
+	} else if row.AutoPushMode == domain.AutoPushModeIncludeDefaultBranch {
+		autoPushStyle = fixAutoPushIncludeDefaultStyle
+	} else if row.AutoPushMode == domain.AutoPushModeEnabled {
 		autoPushStyle = fixAutoPushOnStyle
 	}
 	if row.Ignored {
@@ -708,6 +710,9 @@ var (
 
 	fixAutoPushOffStyle = lipgloss.NewStyle().
 				Foreground(mutedTextColor)
+
+	fixAutoPushIncludeDefaultStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("81"))
 
 	fixPageStyle = lipgloss.NewStyle().Padding(0, 2)
 )
@@ -1258,12 +1263,14 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	autoPushLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Auto-push:")
 	actionLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Action:")
 	branchLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Branch:")
-	autoPushValue := onOffLabel(repoMetaAutoPush(repo.Meta))
+	autoPushValue := autoPushModeDisplayLabel(repoMetaAutoPushMode(repo.Meta))
 	autoPushValueStyle := fixAutoPushOffStyle
 	if !repoMetaAllowsAutoPush(repo.Meta) {
 		autoPushValue = "n/a"
 		autoPushValueStyle = fixNoActionStyle
-	} else if repoMetaAutoPush(repo.Meta) {
+	} else if repoMetaAutoPushMode(repo.Meta) == domain.AutoPushModeIncludeDefaultBranch {
+		autoPushValueStyle = fixAutoPushIncludeDefaultStyle
+	} else if repoMetaAutoPushMode(repo.Meta) == domain.AutoPushModeEnabled {
 		autoPushValueStyle = fixAutoPushOnStyle
 	}
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top,
@@ -1553,7 +1560,7 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			Name:              formatRepoDisplayName(repo),
 			Branch:            repo.Record.Branch,
 			State:             state,
-			AutoPush:          repoMetaAutoPush(repo.Meta),
+			AutoPushMode:      repoMetaAutoPushMode(repo.Meta),
 			AutoPushAvailable: repoMetaAllowsAutoPush(repo.Meta),
 			Reasons:           reasons,
 			Action:            fixActionLabel(selected),
@@ -1863,6 +1870,28 @@ func (m *fixTUIModel) applyImmediateAction(repo fixRepoState, action string) err
 	return err
 }
 
+func nextAutoPushMode(mode domain.AutoPushMode) domain.AutoPushMode {
+	switch domain.NormalizeAutoPushMode(mode) {
+	case domain.AutoPushModeDisabled:
+		return domain.AutoPushModeEnabled
+	case domain.AutoPushModeEnabled:
+		return domain.AutoPushModeIncludeDefaultBranch
+	default:
+		return domain.AutoPushModeDisabled
+	}
+}
+
+func autoPushModeDisplayLabel(mode domain.AutoPushMode) string {
+	switch domain.NormalizeAutoPushMode(mode) {
+	case domain.AutoPushModeEnabled:
+		return "true"
+	case domain.AutoPushModeIncludeDefaultBranch:
+		return "include-default-branch"
+	default:
+		return "false"
+	}
+}
+
 func (m *fixTUIModel) toggleCurrentRepoAutoPush() {
 	repo, ok := m.currentRepo()
 	if !ok {
@@ -1882,7 +1911,7 @@ func (m *fixTUIModel) toggleCurrentRepoAutoPush() {
 		m.errText = fmt.Sprintf("auto-push is n/a for %s (read-only remote)", repo.Record.Name)
 		return
 	}
-	next := !repoMetaAutoPush(repo.Meta)
+	next := nextAutoPushMode(repoMetaAutoPushMode(repo.Meta))
 
 	if m.app != nil {
 		code, err := m.app.RunRepoPolicy(repoKey, next)
@@ -1895,13 +1924,13 @@ func (m *fixTUIModel) toggleCurrentRepoAutoPush() {
 			return
 		}
 	}
-	m.setLocalRepoAutoPush(repo.Record.Path, next)
+	m.setLocalRepoAutoPushMode(repo.Record.Path, next)
 
 	m.errText = ""
-	m.status = fmt.Sprintf("auto-push %s for %s", onOffLabel(next), repo.Record.Name)
+	m.status = fmt.Sprintf("auto-push %s for %s", autoPushModeDisplayLabel(next), repo.Record.Name)
 }
 
-func (m *fixTUIModel) setLocalRepoAutoPush(path string, autoPush bool) {
+func (m *fixTUIModel) setLocalRepoAutoPushMode(path string, mode domain.AutoPushMode) {
 	for i := range m.repos {
 		if m.repos[i].Record.Path != path {
 			continue
@@ -1909,7 +1938,7 @@ func (m *fixTUIModel) setLocalRepoAutoPush(path string, autoPush bool) {
 		if m.repos[i].Meta == nil {
 			m.repos[i].Meta = &domain.RepoMetadataFile{RepoKey: m.repos[i].Record.RepoKey}
 		}
-		m.repos[i].Meta.AutoPush = autoPush
+		m.repos[i].Meta.AutoPush = domain.NormalizeAutoPushMode(mode)
 	}
 	m.rebuildList(path)
 }
@@ -2208,11 +2237,11 @@ func filepathBaseFallback(path string) string {
 	return last
 }
 
-func repoMetaAutoPush(meta *domain.RepoMetadataFile) bool {
+func repoMetaAutoPushMode(meta *domain.RepoMetadataFile) domain.AutoPushMode {
 	if meta == nil {
-		return false
+		return domain.AutoPushModeDisabled
 	}
-	return meta.AutoPush
+	return domain.NormalizeAutoPushMode(meta.AutoPush)
 }
 
 func repoMetaAllowsAutoPush(meta *domain.RepoMetadataFile) bool {

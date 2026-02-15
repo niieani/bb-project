@@ -116,7 +116,7 @@ func TestInitCases(t *testing.T) {
 			t.Fatalf("init failed: %v\n%s", err, out)
 		}
 		meta := m.MustReadFile(firstRepoMetadataPath(t, m))
-		if !strings.Contains(meta, "visibility: public") || !strings.Contains(meta, "auto_push: false") {
+		if !strings.Contains(meta, "visibility: public") || !strings.Contains(meta, `auto_push: "false"`) {
 			t.Fatalf("expected public auto_push=false, got:\n%s", meta)
 		}
 	})
@@ -128,7 +128,7 @@ func TestInitCases(t *testing.T) {
 			t.Fatalf("init failed: %v\n%s", err, out)
 		}
 		meta := m.MustReadFile(firstRepoMetadataPath(t, m))
-		if !strings.Contains(meta, "visibility: private") || !strings.Contains(meta, "auto_push: true") {
+		if !strings.Contains(meta, "visibility: private") || !strings.Contains(meta, `auto_push: "true"`) {
 			t.Fatalf("expected private auto_push=true, got:\n%s", meta)
 		}
 	})
@@ -146,8 +146,8 @@ func TestInitCases(t *testing.T) {
 			t.Fatalf("init failed: %v\n%s", err, out)
 		}
 
-		if _, err := m.RunGit(fixedNow, repoPath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"); err != nil {
-			t.Fatalf("expected upstream to be set: %v", err)
+		if _, err := m.RunGit(fixedNow, repoPath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"); err == nil {
+			t.Fatal("expected no upstream on default branch when auto_push=true mode is non-default-only")
 		}
 	})
 

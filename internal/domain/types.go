@@ -20,6 +20,14 @@ const (
 	PushAccessReadOnly  PushAccess = "read_only"
 )
 
+type AutoPushMode string
+
+const (
+	AutoPushModeDisabled             AutoPushMode = "false"
+	AutoPushModeEnabled              AutoPushMode = "true"
+	AutoPushModeIncludeDefaultBranch AutoPushMode = "include-default-branch"
+)
+
 type Operation string
 
 const (
@@ -93,19 +101,19 @@ type NotifyConfig struct {
 }
 
 type RepoMetadataFile struct {
-	Version                  int        `yaml:"version"`
-	RepoKey                  string     `yaml:"repo_key"`
-	Name                     string     `yaml:"name"`
-	OriginURL                string     `yaml:"origin_url"`
-	Visibility               Visibility `yaml:"visibility"`
-	PreferredCatalog         string     `yaml:"preferred_catalog"`
-	PreferredRemote          string     `yaml:"preferred_remote"`
-	AutoPush                 bool       `yaml:"auto_push"`
-	PushAccess               PushAccess `yaml:"push_access,omitempty"`
-	PushAccessCheckedRemote  string     `yaml:"push_access_checked_remote,omitempty"`
-	PushAccessCheckedAt      time.Time  `yaml:"push_access_checked_at,omitempty"`
-	PushAccessManualOverride bool       `yaml:"push_access_manual_override,omitempty"`
-	BranchFollowEnabled      bool       `yaml:"branch_follow_enabled"`
+	Version                  int          `yaml:"version"`
+	RepoKey                  string       `yaml:"repo_key"`
+	Name                     string       `yaml:"name"`
+	OriginURL                string       `yaml:"origin_url"`
+	Visibility               Visibility   `yaml:"visibility"`
+	PreferredCatalog         string       `yaml:"preferred_catalog"`
+	PreferredRemote          string       `yaml:"preferred_remote"`
+	AutoPush                 AutoPushMode `yaml:"auto_push"`
+	PushAccess               PushAccess   `yaml:"push_access,omitempty"`
+	PushAccessCheckedRemote  string       `yaml:"push_access_checked_remote,omitempty"`
+	PushAccessCheckedAt      time.Time    `yaml:"push_access_checked_at,omitempty"`
+	PushAccessManualOverride bool         `yaml:"push_access_manual_override,omitempty"`
+	BranchFollowEnabled      bool         `yaml:"branch_follow_enabled"`
 }
 
 type MachineFile struct {

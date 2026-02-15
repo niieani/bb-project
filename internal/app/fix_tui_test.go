@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"bb-project/internal/domain"
+	"bb-project/internal/state"
 )
 
 func TestFixTUICycleSelectionPerRow(t *testing.T) {
@@ -28,7 +29,7 @@ func TestFixTUICycleSelectionPerRow(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 		{
 			Record: domain.MachineRepoRecord{
@@ -39,7 +40,7 @@ func TestFixTUICycleSelectionPerRow(t *testing.T) {
 				Upstream:  "origin/main",
 				Behind:    1,
 			},
-			Meta: &domain.RepoMetadataFile{RepoKey: "software/web", OriginURL: "https://github.com/you/web.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{RepoKey: "software/web", OriginURL: "https://github.com/you/web.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 
@@ -76,7 +77,7 @@ func TestFixTUISelectionFallbackAfterEligibilityChange(t *testing.T) {
 				Ahead:           1,
 				HasDirtyTracked: true,
 			},
-			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 
@@ -104,7 +105,7 @@ func TestFixTUISelectionFallbackAfterEligibilityChange(t *testing.T) {
 		Upstream:  "origin/main",
 		Ahead:     1,
 	}
-	m.repos[0].Meta = &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: true}
+	m.repos[0].Meta = &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled}
 	m.rebuildList("/repos/api")
 
 	if got := actionForVisibleRepo(m, 0); !strings.Contains(got, fixNoAction) {
@@ -275,7 +276,7 @@ func TestFixTUIViewUsesCanonicalChromeWithoutInlineKeyLegend(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
@@ -330,7 +331,7 @@ func TestFixTUIBootLoadCmdCapturesAppLogProgress(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	})
 
@@ -371,7 +372,7 @@ func TestFixTUIBootTransfersWindowSizeToLoadedModel(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	})
 
@@ -413,7 +414,7 @@ func TestFixTUIDefaultSelectionIsNoAction(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -435,7 +436,7 @@ func TestFixTUIActionCycleIncludesNoAction(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -465,7 +466,7 @@ func TestFixTUIActionCycleExcludesAutoPushSetting(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 
@@ -494,7 +495,7 @@ func TestFixTUIIgnoreKeepsRepoVisibleAndMarksIgnoredState(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -545,7 +546,7 @@ func TestFixTUIIgnoredRepoIsExcludedFromApplyAllSelection(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -575,7 +576,7 @@ func TestFixTUIUnignoreDoesNotClearOtherIgnoredRepos(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 		{
 			Record: domain.MachineRepoRecord{
@@ -585,7 +586,7 @@ func TestFixTUIUnignoreDoesNotClearOtherIgnoredRepos(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/web.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/web.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -614,7 +615,7 @@ func TestFixTUIHelpDoesNotExposeClearIgnoredShortcut(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 		{
 			Record: domain.MachineRepoRecord{
@@ -624,7 +625,7 @@ func TestFixTUIHelpDoesNotExposeClearIgnoredShortcut(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/web.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/web.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -650,7 +651,7 @@ func TestFixTUIRevalidateShortcutEntersBusyState(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -682,7 +683,7 @@ func TestFixTUIRevalidateCommandUsesFullRefreshAndCompletionClearsBusyState(t *t
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 	updated := []fixRepoState{
@@ -694,7 +695,7 @@ func TestFixTUIRevalidateCommandUsesFullRefreshAndCompletionClearsBusyState(t *t
 				Upstream:  "origin/main",
 				Syncable:  true,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 
@@ -743,7 +744,7 @@ func TestFixTUISettingToggleKeyUpdatesAutoPush(t *testing.T) {
 					domain.ReasonPushPolicyBlocked,
 				},
 			},
-			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 
@@ -751,11 +752,11 @@ func TestFixTUISettingToggleKeyUpdatesAutoPush(t *testing.T) {
 	m.setCursor(0)
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
 
-	if !repoMetaAutoPush(m.visible[0].Meta) {
+	if repoMetaAutoPushMode(m.visible[0].Meta) != domain.AutoPushModeEnabled {
 		t.Fatal("expected auto-push to be enabled after pressing s")
 	}
-	if !strings.Contains(m.status, "auto-push on") {
-		t.Fatalf("status = %q, want auto-push on message", m.status)
+	if !strings.Contains(m.status, "auto-push true") {
+		t.Fatalf("status = %q, want auto-push true message", m.status)
 	}
 
 	rowItems := m.repoList.Items()
@@ -764,9 +765,118 @@ func TestFixTUISettingToggleKeyUpdatesAutoPush(t *testing.T) {
 		if !ok || row.Kind != fixListItemRepo {
 			continue
 		}
-		if row.Path == "/repos/api" && !row.AutoPush {
+		if row.Path == "/repos/api" && row.AutoPushMode != domain.AutoPushModeEnabled {
 			t.Fatal("expected list row auto-push column to be on")
 		}
+	}
+}
+
+func TestFixTUISettingToggleKeyCyclesAutoPushModes(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				RepoKey:   "software/api",
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Syncable:  false,
+				Ahead:     1,
+				UnsyncableReasons: []domain.UnsyncableReason{
+					domain.ReasonPushPolicyBlocked,
+				},
+			},
+			Meta: &domain.RepoMetadataFile{
+				RepoKey:   "software/api",
+				OriginURL: "https://github.com/you/api.git",
+				AutoPush:  domain.AutoPushModeDisabled,
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if got := repoMetaAutoPushMode(m.visible[0].Meta); got != domain.AutoPushModeEnabled {
+		t.Fatalf("mode after first toggle = %q, want %q", got, domain.AutoPushModeEnabled)
+	}
+	if !strings.Contains(m.status, "auto-push true") {
+		t.Fatalf("status after first toggle = %q, want true mode status", m.status)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if got := repoMetaAutoPushMode(m.visible[0].Meta); got != domain.AutoPushModeIncludeDefaultBranch {
+		t.Fatalf("mode after second toggle = %q, want %q", got, domain.AutoPushModeIncludeDefaultBranch)
+	}
+	if !strings.Contains(m.status, "auto-push include-default-branch") {
+		t.Fatalf("status after second toggle = %q, want include-default-branch mode status", m.status)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if got := repoMetaAutoPushMode(m.visible[0].Meta); got != domain.AutoPushModeDisabled {
+		t.Fatalf("mode after third toggle = %q, want %q", got, domain.AutoPushModeDisabled)
+	}
+	if !strings.Contains(m.status, "auto-push false") {
+		t.Fatalf("status after third toggle = %q, want false mode status", m.status)
+	}
+}
+
+func TestFixTUISettingToggleKeyPersistsAutoPushModeViaRepoPolicy(t *testing.T) {
+	t.Parallel()
+
+	paths := state.NewPaths(t.TempDir())
+	a := New(paths, io.Discard, io.Discard)
+	seed := domain.RepoMetadataFile{
+		RepoKey:    "software/api",
+		Name:       "api",
+		OriginURL:  "https://github.com/you/api.git",
+		AutoPush:   domain.AutoPushModeDisabled,
+		PushAccess: domain.PushAccessReadWrite,
+	}
+	if err := state.SaveRepoMetadata(paths, seed); err != nil {
+		t.Fatalf("save metadata: %v", err)
+	}
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				RepoKey:   "software/api",
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Branch:    "main",
+				Upstream:  "origin/main",
+				Syncable:  false,
+				Ahead:     1,
+				UnsyncableReasons: []domain.UnsyncableReason{
+					domain.ReasonPushPolicyBlocked,
+				},
+			},
+			Meta: &domain.RepoMetadataFile{
+				RepoKey:    "software/api",
+				OriginURL:  "https://github.com/you/api.git",
+				AutoPush:   domain.AutoPushModeDisabled,
+				PushAccess: domain.PushAccessReadWrite,
+			},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.app = a
+	m.setCursor(0)
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+
+	updated, err := state.LoadRepoMetadata(paths, "software/api")
+	if err != nil {
+		t.Fatalf("load metadata: %v", err)
+	}
+	if got := domain.NormalizeAutoPushMode(updated.AutoPush); got != domain.AutoPushModeIncludeDefaultBranch {
+		t.Fatalf("persisted auto_push mode = %q, want %q", got, domain.AutoPushModeIncludeDefaultBranch)
 	}
 }
 
@@ -790,7 +900,7 @@ func TestFixTUISettingToggleKeyBlockedForReadOnlyRemote(t *testing.T) {
 			Meta: &domain.RepoMetadataFile{
 				RepoKey:    "software/api",
 				OriginURL:  "https://github.com/you/api.git",
-				AutoPush:   false,
+				AutoPush:   domain.AutoPushModeDisabled,
 				PushAccess: domain.PushAccessReadOnly,
 			},
 		},
@@ -800,7 +910,7 @@ func TestFixTUISettingToggleKeyBlockedForReadOnlyRemote(t *testing.T) {
 	m.setCursor(0)
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
 
-	if repoMetaAutoPush(m.visible[0].Meta) {
+	if repoMetaAutoPushMode(m.visible[0].Meta) != domain.AutoPushModeDisabled {
 		t.Fatal("expected auto-push to remain disabled for read-only remote")
 	}
 	if !strings.Contains(m.errText, "n/a") {
@@ -837,7 +947,7 @@ func TestFixTUIViewportTracksCursor(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: fmt.Sprintf("https://github.com/you/repo-%02d.git", i), AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: fmt.Sprintf("https://github.com/you/repo-%02d.git", i), AutoPush: domain.AutoPushModeDisabled},
 		})
 	}
 	m := newFixTUIModelForTest(repos)
@@ -862,7 +972,7 @@ func TestFixTUIApplyAllSkipsNoOpSelections(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -885,7 +995,7 @@ func TestFixTUIRiskySelectionOpensConfirmationWizard(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -913,7 +1023,7 @@ func TestFixTUIAbortSelectionOpensConfirmationWizard(t *testing.T) {
 				OriginURL:           "git@github.com:you/api.git",
 				OperationInProgress: domain.OperationRebase,
 			},
-			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 
@@ -945,7 +1055,7 @@ func TestFixTUIWizardSkipShowsSummary(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -975,7 +1085,7 @@ func TestFixTUIWizardSummaryViewShowsSinglePreciseHeadingAndTotals(t *testing.T)
 				Upstream:  "origin/main",
 				Syncable:  true,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1040,7 +1150,7 @@ func TestFixTUIWizardSummaryViewReportsWhenMoreFixesAreStillNeeded(t *testing.T)
 				RebaseOutcome: fixSyncProbeClean,
 				MergeOutcome:  fixSyncProbeClean,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1087,7 +1197,7 @@ func TestFixTUIWizardSummaryViewFlagsManualInterventionWhenNoAutomatedFixesRemai
 				RebaseOutcome: fixSyncProbeConflict,
 				MergeOutcome:  fixSyncProbeConflict,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1127,7 +1237,7 @@ func TestFixTUISummaryFollowUpSelectionCanQueueAndRunFixes(t *testing.T) {
 				Syncable:          false,
 				UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1173,7 +1283,7 @@ func TestFixTUIWizardCommitInputStartsEmptyWithPlaceholder(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1199,7 +1309,7 @@ func TestFixTUIWizardViewShowsActionButtons(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1223,7 +1333,7 @@ func TestFixTUIWizardViewIncludesApplyingPlanBlock(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1257,7 +1367,7 @@ func TestFixTUIWizardApplyingPlanShowsCommandsAndNonCommandActions(t *testing.T)
 			},
 			Meta: &domain.RepoMetadataFile{
 				OriginURL:        "https://github.com/you/api.git",
-				AutoPush:         true,
+				AutoPush:         domain.AutoPushModeEnabled,
 				PreferredRemote:  "origin",
 				PushAccess:       domain.PushAccessReadWrite,
 				PreferredCatalog: "software",
@@ -1303,7 +1413,7 @@ func TestFixTUIWizardApplyingPlanShowsRuntimeStepMarkers(t *testing.T) {
 			},
 			Meta: &domain.RepoMetadataFile{
 				OriginURL:       "https://github.com/you/api.git",
-				AutoPush:        true,
+				AutoPush:        domain.AutoPushModeEnabled,
 				PreferredRemote: "origin",
 			},
 			Risk: fixRiskSnapshot{
@@ -1346,7 +1456,7 @@ func TestFixTUIWizardApplyingStatusLineShowsGlobalPhaseAndLockedState(t *testing
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1371,7 +1481,7 @@ func TestFixTUIWizardApplyProgressUpdatesGlobalPhase(t *testing.T) {
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1410,7 +1520,7 @@ func TestFixTUIWizardApplyFailureStopsQueueOnCurrentItem(t *testing.T) {
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 		{
 			Record: domain.MachineRepoRecord{
@@ -1419,7 +1529,7 @@ func TestFixTUIWizardApplyFailureStopsQueueOnCurrentItem(t *testing.T) {
 				OriginURL: "git@github.com:you/web.git",
 				Upstream:  "origin/main",
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/web.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/web.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1464,7 +1574,7 @@ func TestFixTUIWizardApplyCompletionUpdatesCurrentRepoState(t *testing.T) {
 				Upstream:  "origin/main",
 				Syncable:  false,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1479,7 +1589,7 @@ func TestFixTUIWizardApplyCompletionUpdatesCurrentRepoState(t *testing.T) {
 			Upstream:  "origin/main",
 			Syncable:  true,
 		},
-		Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 	}
 
 	m.handleWizardApplyCompleted(fixWizardApplyCompletedMsg{Updated: updated})
@@ -1505,7 +1615,7 @@ func TestFixTUIWizardApplyPlanBlockRendersAfterRiskContext(t *testing.T) {
 			},
 			Meta: &domain.RepoMetadataFile{
 				OriginURL: "https://github.com/you/api.git",
-				AutoPush:  true,
+				AutoPush:  domain.AutoPushModeEnabled,
 			},
 			Risk: fixRiskSnapshot{
 				MissingRootGitignore:       true,
@@ -1577,7 +1687,7 @@ func TestFixTUIWizardHidesNoOpChangedFilesSection(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 			Risk: fixRiskSnapshot{
 				ChangedFiles: nil,
 			},
@@ -1608,7 +1718,7 @@ func TestFixTUIWizardDefaultsActionFocusToCancel(t *testing.T) {
 					Upstream:  "origin/main",
 					Ahead:     1,
 				},
-				Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+				Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 			},
 		}
 	}
@@ -1645,7 +1755,7 @@ func TestFixTUIWizardButtonsRenderCancelFirst(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1694,7 +1804,7 @@ func TestFixTUIWizardEnterOnDefaultCancelReturnsToList(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1721,7 +1831,7 @@ func TestFixTUIWizardViewUsesSingleTopLineWithoutExtraWizardHeaders(t *testing.T
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1751,7 +1861,7 @@ func TestFixTUIWizardTopLineUsesSingleLineProgress(t *testing.T) {
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -1854,7 +1964,7 @@ func TestFixTUIListGlobalFooterHelpShowsOnlyAvailableActions(t *testing.T) {
 			Meta: &domain.RepoMetadataFile{
 				RepoKey:    "software/api",
 				OriginURL:  "https://github.com/you/api.git",
-				AutoPush:   false,
+				AutoPush:   domain.AutoPushModeDisabled,
 				PushAccess: domain.PushAccessReadWrite,
 			},
 		},
@@ -1873,7 +1983,7 @@ func TestFixTUIListGlobalFooterHelpShowsOnlyAvailableActions(t *testing.T) {
 	if len(selected) == 0 || selected[0] != "enter apply selected" {
 		t.Fatalf("expected most important shortcut first (enter apply selected), got %v", selected)
 	}
-	if !helpContains(selected, "ctrl+a apply all selected") || !helpContains(selected, "s toggle auto-push") {
+	if !helpContains(selected, "ctrl+a apply all selected") || !helpContains(selected, "s cycle auto-push") {
 		t.Fatalf("expected selected-action footer help to include apply-all and auto-push, got %v", selected)
 	}
 	if strings.Contains(strings.Join(selected, " • "), "Left") || strings.Contains(strings.Join(selected, " • "), "Right") {
@@ -1883,7 +1993,7 @@ func TestFixTUIListGlobalFooterHelpShowsOnlyAvailableActions(t *testing.T) {
 	m.repos[0].Meta.PushAccess = domain.PushAccessReadOnly
 	m.rebuildList("/repos/api")
 	withoutAutoPush := shortHelpEntries(m.contextualHelpMap().ShortHelp())
-	if helpContains(withoutAutoPush, "s toggle auto-push") {
+	if helpContains(withoutAutoPush, "s cycle auto-push") {
 		t.Fatalf("expected auto-push shortcut hidden when n/a, got %v", withoutAutoPush)
 	}
 
@@ -1985,7 +2095,7 @@ func TestFixTUIWizardInputAcceptsMappedLetters(t *testing.T) {
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -2013,7 +2123,7 @@ func TestFixTUIWizardChangedFilesRenderAsListWithStats(t *testing.T) {
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 			Risk: fixRiskSnapshot{
 				ChangedFiles: []fixChangedFile{
 					{Path: "src/main.go", Added: 12, Deleted: 5},
@@ -2048,7 +2158,7 @@ func TestFixTUIWizardChangedFilesTrimIndicator(t *testing.T) {
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 			Risk: fixRiskSnapshot{
 				ChangedFiles: files,
 			},
@@ -2074,7 +2184,7 @@ func TestFixTUIWizardChangedFilesShowsAutoIgnoreBadgeForSuggestedPaths(t *testin
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 			Risk: fixRiskSnapshot{
 				MissingRootGitignore:       true,
 				SuggestedGitignorePatterns: []string{"node_modules/"},
@@ -2112,7 +2222,7 @@ func TestFixTUIWizardDoesNotShowGitignoreToggleWhenNoisyPatternsAlreadyCovered(t
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 			Risk: fixRiskSnapshot{
 				MissingRootGitignore:       false,
 				NoisyChangedPaths:          []string{"node_modules/pkg/index.js"},
@@ -2142,7 +2252,7 @@ func TestFixTUIWizardShowsAppendGitignoreToggleWhenEntriesMissing(t *testing.T) 
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 			Risk: fixRiskSnapshot{
 				MissingRootGitignore:     false,
 				NoisyChangedPaths:        []string{"node_modules/pkg/index.js"},
@@ -2600,7 +2710,7 @@ func TestFixTUIWizardMissingGitignoreExplainsGenerationForStageCommit(t *testing
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 			Risk: fixRiskSnapshot{
 				MissingRootGitignore:       true,
 				NoisyChangedPaths:          []string{"node_modules/pkg/index.js"},
@@ -2666,7 +2776,7 @@ func TestFixTUIWizardGitignoreToggleIsFocusableAndSelectable(t *testing.T) {
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 			Risk: fixRiskSnapshot{
 				MissingRootGitignore:       true,
 				NoisyChangedPaths:          []string{"node_modules/pkg/index.js"},
@@ -2715,7 +2825,7 @@ func TestFixTUIRowsRenderWithoutReplacementRuneAndWithoutDoubleSpacing(t *testin
 				UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked, domain.ReasonMissingOrigin},
 				Ahead:             1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 		{
 			Record: domain.MachineRepoRecord{
@@ -2725,7 +2835,7 @@ func TestFixTUIRowsRenderWithoutReplacementRuneAndWithoutDoubleSpacing(t *testin
 				Upstream:  "origin/main",
 				Behind:    1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/web.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/web.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -2791,7 +2901,7 @@ func TestFixTUIOrdersReposByTier(t *testing.T) {
 				Syncable:  true,
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/zzz-sync.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/zzz-sync.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 		{
 			Record: domain.MachineRepoRecord{
@@ -2805,7 +2915,7 @@ func TestFixTUIOrdersReposByTier(t *testing.T) {
 					domain.ReasonDiverged,
 				},
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/aaa-blocked.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/aaa-blocked.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 		{
 			Record: domain.MachineRepoRecord{
@@ -2819,7 +2929,7 @@ func TestFixTUIOrdersReposByTier(t *testing.T) {
 					domain.ReasonPushPolicyBlocked,
 				},
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/mmm-auto.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/mmm-auto.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -2847,7 +2957,7 @@ func TestFixTUIViewDoesNotRenderNestedNormalBorderAroundList(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -2900,7 +3010,7 @@ func TestFixTUIFooterDoesNotLeaveExtraTrailingBlankRows(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 24})
@@ -2924,7 +3034,7 @@ func TestFixTUIWizardStatusToFooterGapIsCompact(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	})
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
@@ -2979,7 +3089,7 @@ func TestFixTUIWizardFooterDoesNotLeaveExtraTrailingBlankRows(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
 	})
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
@@ -3015,7 +3125,7 @@ func TestFixTUIViewShowsMainPanelTopBorderBeforeContent(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 26})
@@ -3044,7 +3154,7 @@ func TestFixTUISelectedDetailsRenderActionHelp(t *testing.T) {
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -3072,7 +3182,7 @@ func TestFixTUISelectedDetailsHeaderHasNoFieldBorderAndUsesSelectedLabel(t *test
 				Upstream:  "origin/main",
 				Ahead:     1,
 			},
-			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: false},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
 	}
 	m := newFixTUIModelForTest(repos)
@@ -3135,7 +3245,7 @@ func TestClassifyFixRepoMarksUnsyncableWhenReasonsAreNotCoverable(t *testing.T) 
 		},
 		Meta: &domain.RepoMetadataFile{
 			RepoKey:  "software/api",
-			AutoPush: false,
+			AutoPush: domain.AutoPushModeDisabled,
 		},
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
@@ -3200,7 +3310,7 @@ func TestClassifyFixRepoMarksReadOnlyPushAccessAsFixableWithForkAction(t *testin
 		Meta: &domain.RepoMetadataFile{
 			RepoKey:    "software/api",
 			PushAccess: domain.PushAccessReadOnly,
-			AutoPush:   false,
+			AutoPush:   domain.AutoPushModeDisabled,
 		},
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
