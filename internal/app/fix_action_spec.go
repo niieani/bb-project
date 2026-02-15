@@ -18,11 +18,13 @@ type fixActionPlanContext struct {
 	Operation               domain.Operation
 	Branch                  string
 	Upstream                string
+	HeadSHA                 string
 	OriginURL               string
 	SyncStrategy            FixSyncStrategy
 	PreferredRemote         string
 	GitHubOwner             string
 	RemoteProtocol          string
+	ForkRemoteExists        bool
 	RepoName                string
 	CommitMessage           string
 	CreateProjectName       string
@@ -152,10 +154,7 @@ func planFixActionAbortOperation(ctx fixActionPlanContext) []fixActionPlanEntry 
 		return []fixActionPlanEntry{{ID: "abort-bisect", Command: true, Summary: "git bisect reset"}}
 	default:
 		return []fixActionPlanEntry{
-			{ID: "abort-merge-conditional", Command: true, Summary: "git merge --abort (when merge is in progress)"},
-			{ID: "abort-rebase-conditional", Command: true, Summary: "git rebase --abort (when rebase is in progress)"},
-			{ID: "abort-cherry-pick-conditional", Command: true, Summary: "git cherry-pick --abort (when cherry-pick is in progress)"},
-			{ID: "abort-bisect-conditional", Command: true, Summary: "git bisect reset (when bisect is in progress)"},
+			{ID: "abort-noop", Command: false, Summary: "No merge/rebase/cherry-pick/bisect operation is currently active."},
 		}
 	}
 }
@@ -168,8 +167,15 @@ func planFixActionPush(_ fixActionPlanContext) []fixActionPlanEntry {
 
 func planFixActionSyncWithUpstream(ctx fixActionPlanContext) []fixActionPlanEntry {
 	upstream := plannedUpstream(ctx.Upstream)
-	entries := []fixActionPlanEntry{
-		{ID: "sync-fetch-prune", Command: true, Summary: "git fetch --prune (if sync.fetch_prune is enabled)"},
+	entries := make([]fixActionPlanEntry, 0, 2)
+	if ctx.FetchPrune {
+		entries = append(entries, fixActionPlanEntry{ID: "sync-fetch-prune", Command: true, Summary: "git fetch --prune"})
+	} else {
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "sync-fetch-prune",
+			Command: false,
+			Summary: "Skip fetch prune because sync.fetch_prune is disabled.",
+		})
 	}
 	if normalizeFixSyncStrategy(ctx.SyncStrategy) == FixSyncStrategyMerge {
 		entries = append(entries, fixActionPlanEntry{ID: "sync-merge", Command: true, Summary: fmt.Sprintf("git merge --no-edit %s", upstream)})
@@ -222,11 +228,19 @@ func planFixActionStageCommitPush(ctx fixActionPlanContext) []fixActionPlanEntry
 	return entries
 }
 
-func planFixActionPullFFOnly(_ fixActionPlanContext) []fixActionPlanEntry {
-	return []fixActionPlanEntry{
-		{ID: "pull-fetch-prune", Command: true, Summary: "git fetch --prune (if sync.fetch_prune is enabled)"},
-		{ID: "pull-ff-only", Command: true, Summary: "git pull --ff-only"},
+func planFixActionPullFFOnly(ctx fixActionPlanContext) []fixActionPlanEntry {
+	entries := make([]fixActionPlanEntry, 0, 2)
+	if ctx.FetchPrune {
+		entries = append(entries, fixActionPlanEntry{ID: "pull-fetch-prune", Command: true, Summary: "git fetch --prune"})
+	} else {
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "pull-fetch-prune",
+			Command: false,
+			Summary: "Skip fetch prune because sync.fetch_prune is disabled.",
+		})
 	}
+	entries = append(entries, fixActionPlanEntry{ID: "pull-ff-only", Command: true, Summary: "git pull --ff-only"})
+	return entries
 }
 
 func planFixActionSetUpstreamPush(ctx fixActionPlanContext) []fixActionPlanEntry {
@@ -242,7 +256,16 @@ func planFixActionSetUpstreamPush(ctx fixActionPlanContext) []fixActionPlanEntry
 func planFixActionCreateProject(ctx fixActionPlanContext) []fixActionPlanEntry {
 	entries := make([]fixActionPlanEntry, 0, 5)
 	projectName := plannedProjectName(ctx.CreateProjectName, ctx.RepoName)
-	owner := plannedGitHubOwner(ctx.GitHubOwner)
+	owner := strings.TrimSpace(ctx.GitHubOwner)
+	if owner == "" {
+		return []fixActionPlanEntry{
+			{
+				ID:      "create-requires-owner",
+				Command: false,
+				Summary: "Configure github.owner before creating a GitHub project.",
+			},
+		}
+	}
 	entries = append(entries, fixActionPlanEntry{
 		ID:      "create-gh-repo",
 		Command: true,
@@ -250,6 +273,13 @@ func planFixActionCreateProject(ctx fixActionPlanContext) []fixActionPlanEntry {
 	})
 	if strings.TrimSpace(ctx.OriginURL) == "" {
 		originURL := plannedOriginURL(ctx.GitHubOwner, projectName, ctx.RemoteProtocol)
+		if strings.TrimSpace(originURL) == "" {
+			return append(entries, fixActionPlanEntry{
+				ID:      "create-add-origin",
+				Command: false,
+				Summary: "Cannot derive origin URL for the configured GitHub owner/protocol.",
+			})
+		}
 		entries = append(entries, fixActionPlanEntry{
 			ID:      "create-add-origin",
 			Command: true,
@@ -268,37 +298,83 @@ func planFixActionCreateProject(ctx fixActionPlanContext) []fixActionPlanEntry {
 		Summary: "Write/update repo metadata (origin URL, visibility, default auto-push policy).",
 	})
 	if strings.TrimSpace(ctx.Upstream) == "" {
-		entries = append(entries, fixActionPlanEntry{
-			ID:      "create-initial-push",
-			Command: true,
-			Summary: fmt.Sprintf("git push -u %s %s (when HEAD has commits)", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(ctx.Branch)),
-		})
+		if strings.TrimSpace(ctx.HeadSHA) != "" {
+			entries = append(entries, fixActionPlanEntry{
+				ID:      "create-initial-push",
+				Command: true,
+				Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(ctx.Branch)),
+			})
+		} else {
+			entries = append(entries, fixActionPlanEntry{
+				ID:      "create-initial-push",
+				Command: false,
+				Summary: "Skip initial push because HEAD has no commits.",
+			})
+		}
 	}
 	return entries
 }
 
 func planFixActionForkAndRetarget(ctx fixActionPlanContext) []fixActionPlanEntry {
-	owner := plannedGitHubOwner(ctx.GitHubOwner)
+	owner := strings.TrimSpace(ctx.GitHubOwner)
+	if owner == "" {
+		return []fixActionPlanEntry{
+			{
+				ID:      "fork-requires-owner",
+				Command: false,
+				Summary: "Configure github.owner before forking and retargeting.",
+			},
+		}
+	}
+	source := plannedForkSource(ctx.OriginURL)
+	if source == "" {
+		return []fixActionPlanEntry{
+			{
+				ID:      "fork-source-invalid",
+				Command: false,
+				Summary: "Cannot derive GitHub source repository from origin URL.",
+			},
+		}
+	}
+	forkURL := plannedForkURL(ctx.OriginURL, ctx.GitHubOwner, ctx.RemoteProtocol)
+	if forkURL == "" {
+		return []fixActionPlanEntry{
+			{
+				ID:      "fork-url-invalid",
+				Command: false,
+				Summary: "Cannot derive fork remote URL from GitHub owner/protocol.",
+			},
+		}
+	}
+	setRemoteCmd := fmt.Sprintf("git remote add %s %s", owner, forkURL)
+	if ctx.ForkRemoteExists {
+		setRemoteCmd = fmt.Sprintf("git remote set-url %s %s", owner, forkURL)
+	}
 	return []fixActionPlanEntry{
 		{
 			ID:      "fork-gh-fork",
 			Command: true,
-			Summary: "gh repo fork <source-owner>/<repo> --remote=false --clone=false",
+			Summary: fmt.Sprintf("gh repo fork %s --remote=false --clone=false", source),
 		},
 		{
 			ID:      "fork-set-remote",
 			Command: true,
-			Summary: fmt.Sprintf("git remote add %s <fork-url> (or git remote set-url when that remote already exists)", owner),
-		},
-		{
-			ID:      "fork-push-upstream",
-			Command: true,
-			Summary: fmt.Sprintf("git push -u %s %s", owner, plannedBranch(ctx.Branch)),
+			Summary: setRemoteCmd,
 		},
 		{
 			ID:      "fork-write-metadata",
 			Command: false,
-			Summary: "Update repo metadata (preferred remote and push-access probe state).",
+			Summary: "Update repo metadata immediately after retargeting remote (preferred remote and push-access probe state reset).",
+		},
+		{
+			ID:      "fork-push-upstream",
+			Command: true,
+			Summary: fmt.Sprintf("git push -u --force %s %s", owner, plannedBranch(ctx.Branch)),
+		},
+		{
+			ID:      "fork-refresh-metadata",
+			Command: false,
+			Summary: "Refresh repo metadata push-access probe state after retarget push.",
 		},
 	}
 }
@@ -335,7 +411,7 @@ func plannedBranch(branch string) string {
 	if trimmed := strings.TrimSpace(branch); trimmed != "" {
 		return trimmed
 	}
-	return "<current-branch>"
+	return "HEAD"
 }
 
 func plannedUpstream(upstream string) string {
@@ -352,21 +428,14 @@ func plannedProjectName(name string, repoName string) string {
 	if fallback := sanitizeGitHubRepositoryNameInput(repoName); fallback != "" {
 		return fallback
 	}
-	return "<repository-name>"
-}
-
-func plannedGitHubOwner(owner string) string {
-	if trimmed := strings.TrimSpace(owner); trimmed != "" {
-		return trimmed
-	}
-	return "<github.owner>"
+	return "repo"
 }
 
 func plannedOriginURL(owner string, projectName string, protocol string) string {
 	owner = strings.TrimSpace(owner)
 	projectName = strings.TrimSpace(projectName)
-	if owner == "" || projectName == "" || strings.HasPrefix(owner, "<") || strings.HasPrefix(projectName, "<") {
-		return "<new-origin-url>"
+	if owner == "" || projectName == "" {
+		return ""
 	}
 	if strings.EqualFold(strings.TrimSpace(protocol), "https") {
 		return fmt.Sprintf("https://github.com/%s/%s.git", owner, projectName)
@@ -379,4 +448,27 @@ func plannedVisibilityFlag(visibility domain.Visibility) string {
 		return "--public"
 	}
 	return "--private"
+}
+
+func plannedForkSource(originURL string) string {
+	sourceOwner, repoName, err := sourceRepoForFork(originURL)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%s/%s", sourceOwner, repoName)
+}
+
+func plannedForkURL(originURL string, forkOwner string, protocol string) string {
+	forkOwner = strings.TrimSpace(forkOwner)
+	if forkOwner == "" {
+		return ""
+	}
+	_, repoName, err := sourceRepoForFork(originURL)
+	if err != nil {
+		return ""
+	}
+	if strings.EqualFold(strings.TrimSpace(protocol), "https") {
+		return fmt.Sprintf("https://github.com/%s/%s.git", forkOwner, repoName)
+	}
+	return fmt.Sprintf("git@github.com:%s/%s.git", forkOwner, repoName)
 }

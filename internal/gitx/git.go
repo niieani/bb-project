@@ -507,6 +507,18 @@ func (r Runner) PushUpstream(path, branch string) error {
 }
 
 func (r Runner) PushUpstreamWithPreferredRemote(path, branch, preferredRemote string) error {
+	return r.pushUpstream(path, branch, preferredRemote, false)
+}
+
+func (r Runner) PushUpstreamForce(path, branch string) error {
+	return r.PushUpstreamForceWithPreferredRemote(path, branch, "")
+}
+
+func (r Runner) PushUpstreamForceWithPreferredRemote(path, branch, preferredRemote string) error {
+	return r.pushUpstream(path, branch, preferredRemote, true)
+}
+
+func (r Runner) pushUpstream(path, branch, preferredRemote string, force bool) error {
 	remote, err := r.pickRemote(path, preferredRemote)
 	if err != nil {
 		return err
@@ -514,7 +526,12 @@ func (r Runner) PushUpstreamWithPreferredRemote(path, branch, preferredRemote st
 	if remote == "" {
 		remote = "origin"
 	}
-	_, err = r.RunGit(path, "push", "-u", remote, branch)
+	args := []string{"push", "-u"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, remote, branch)
+	_, err = r.RunGit(path, args...)
 	return err
 }
 

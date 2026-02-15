@@ -37,11 +37,14 @@ type fixWizardState struct {
 	RepoName        string
 	Branch          string
 	Upstream        string
+	HeadSHA         string
 	OriginURL       string
 	PreferredRemote string
 	Operation       domain.Operation
 	GitHubOwner     string
 	RemoteProtocol  string
+	FetchPrune      bool
+	ForkRemoteExists bool
 	Action          string
 	SyncStrategy    FixSyncStrategy
 	Risk            fixRiskSnapshot
@@ -160,6 +163,7 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	repoRisk := fixRiskSnapshot{}
 	branch := ""
 	upstream := ""
+	headSHA := ""
 	originURL := ""
 	preferredRemote := ""
 	operation := domain.OperationNone
@@ -169,6 +173,7 @@ func (m *fixTUIModel) loadWizardCurrent() {
 			repoRisk = repo.Risk
 			branch = strings.TrimSpace(repo.Record.Branch)
 			upstream = strings.TrimSpace(repo.Record.Upstream)
+			headSHA = strings.TrimSpace(repo.Record.HeadSHA)
 			originURL = strings.TrimSpace(repo.Record.OriginURL)
 			operation = repo.Record.OperationInProgress
 			if repo.Meta != nil {
@@ -205,6 +210,7 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	m.wizard.RepoName = repoName
 	m.wizard.Branch = branch
 	m.wizard.Upstream = upstream
+	m.wizard.HeadSHA = headSHA
 	m.wizard.OriginURL = originURL
 	m.wizard.PreferredRemote = preferredRemote
 	m.wizard.Operation = operation
@@ -218,9 +224,21 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	m.wizard.ProjectName = projectNameInput
 	m.wizard.ShowGitignoreToggle = showGitignoreToggle
 	m.wizard.GenerateGitignore = showGitignoreToggle
-	githubOwner, defaultVis, remoteProtocol := m.detectWizardDefaults()
+	githubOwner, defaultVis, remoteProtocol, fetchPrune := m.detectWizardDefaults()
 	m.wizard.GitHubOwner = githubOwner
 	m.wizard.RemoteProtocol = remoteProtocol
+	m.wizard.FetchPrune = fetchPrune
+	m.wizard.ForkRemoteExists = false
+	if m.app != nil && githubOwner != "" {
+		if remoteNames, err := m.app.Git.RemoteNames(decision.RepoPath); err == nil {
+			for _, name := range remoteNames {
+				if name == githubOwner {
+					m.wizard.ForkRemoteExists = true
+					break
+				}
+			}
+		}
+	}
 	m.wizard.DefaultVis = defaultVis
 	m.wizard.Visibility = m.wizard.DefaultVis
 	m.wizard.FocusArea = fixWizardFocusActions
@@ -473,15 +491,16 @@ func (m *fixTUIModel) updateRepoAfterWizardApply(updated fixRepoState) {
 	m.rebuildList(path)
 }
 
-func (m *fixTUIModel) detectWizardDefaults() (owner string, visibility domain.Visibility, remoteProtocol string) {
+func (m *fixTUIModel) detectWizardDefaults() (owner string, visibility domain.Visibility, remoteProtocol string, fetchPrune bool) {
 	visibility = domain.VisibilityPrivate
 	remoteProtocol = "ssh"
+	fetchPrune = true
 	if m.app == nil {
-		return "", visibility, remoteProtocol
+		return "", visibility, remoteProtocol, fetchPrune
 	}
 	cfg, _, err := m.app.loadContext()
 	if err != nil {
-		return "", visibility, remoteProtocol
+		return "", visibility, remoteProtocol, fetchPrune
 	}
 	owner = strings.TrimSpace(cfg.GitHub.Owner)
 	if strings.EqualFold(strings.TrimSpace(cfg.GitHub.RemoteProtocol), "https") {
@@ -490,7 +509,8 @@ func (m *fixTUIModel) detectWizardDefaults() (owner string, visibility domain.Vi
 	if strings.EqualFold(strings.TrimSpace(cfg.GitHub.DefaultVisibility), string(domain.VisibilityPublic)) {
 		visibility = domain.VisibilityPublic
 	}
-	return owner, visibility, remoteProtocol
+	fetchPrune = cfg.Sync.FetchPrune
+	return owner, visibility, remoteProtocol, fetchPrune
 }
 
 func (m *fixTUIModel) validateWizardInputs(opts fixApplyOptions) error {
@@ -1170,14 +1190,17 @@ func (m *fixTUIModel) wizardActionPlanContext() fixActionPlanContext {
 		Operation:               m.wizard.Operation,
 		Branch:                  strings.TrimSpace(m.wizard.Branch),
 		Upstream:                strings.TrimSpace(m.wizard.Upstream),
+		HeadSHA:                 strings.TrimSpace(m.wizard.HeadSHA),
 		OriginURL:               strings.TrimSpace(m.wizard.OriginURL),
 		SyncStrategy:            m.wizard.SyncStrategy,
 		PreferredRemote:         strings.TrimSpace(m.wizard.PreferredRemote),
 		GitHubOwner:             strings.TrimSpace(m.wizard.GitHubOwner),
 		RemoteProtocol:          strings.TrimSpace(m.wizard.RemoteProtocol),
+		ForkRemoteExists:        m.wizard.ForkRemoteExists,
 		RepoName:                strings.TrimSpace(m.wizard.RepoName),
 		CreateProjectVisibility: m.wizard.Visibility,
 		MissingRootGitignore:    m.wizard.Risk.MissingRootGitignore,
+		FetchPrune:              m.wizard.FetchPrune,
 	}
 	if m.wizard.EnableProjectName {
 		ctx.CreateProjectName = sanitizeGitHubRepositoryNameInput(m.wizard.ProjectName.Value())

@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -438,6 +439,103 @@ func TestFixCases(t *testing.T) {
 		expectedRemote := filepath.Join(h.RemotesRoot, "you", "demo.git")
 		if remoteURL != expectedRemote {
 			t.Fatalf("fork remote url = %q, want %q", remoteURL, expectedRemote)
+		}
+	})
+
+	t.Run("fork and retarget force-pushes when fork has advanced remotely", func(t *testing.T) {
+		t.Parallel()
+		h, m, catalogRoot := setupSingleMachine(t)
+		repoPath, remotePath := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+
+		remoteClone := filepath.Join(h.Root, "remote-clones", "demo-fork-stale")
+		m.MustRunGit(now, catalogRoot, "clone", remotePath, remoteClone)
+		m.MustRunGit(now, remoteClone, "checkout", "-B", "main", "--track", "origin/main")
+		m.MustWriteFile(filepath.Join(remoteClone, "remote-only.txt"), "remote only\n")
+		m.MustRunGit(now, remoteClone, "add", "remote-only.txt")
+		m.MustRunGit(now, remoteClone, "commit", "-m", "remote only commit")
+		m.MustRunGit(now, remoteClone, "push", "origin", "main")
+
+		m.MustWriteFile(filepath.Join(repoPath, "local-only.txt"), "local only\n")
+		m.MustRunGit(now, repoPath, "add", "local-only.txt")
+		m.MustRunGit(now, repoPath, "commit", "-m", "local only commit")
+		localHead := strings.TrimSpace(m.MustRunGit(now, repoPath, "rev-parse", "HEAD"))
+
+		if out, err := m.RunBB(now.Add(30*time.Second), "scan"); err != nil && out == "" {
+			t.Fatalf("scan failed without output: %v", err)
+		}
+		if out, err := m.RunBB(now.Add(1*time.Minute), "repo", "access-set", "demo", "--push-access=read_only"); err != nil {
+			t.Fatalf("repo access-set failed: %v\n%s", err, out)
+		}
+
+		if out, err := m.RunBB(now.Add(2*time.Minute), "fix", "demo", "fork-and-retarget"); err != nil {
+			t.Fatalf("fork-and-retarget failed: %v\n%s", err, out)
+		}
+
+		remoteHead := strings.TrimSpace(m.MustRunGit(now, catalogRoot, "--git-dir", remotePath, "rev-parse", "refs/heads/main"))
+		if remoteHead != localHead {
+			t.Fatalf("remote HEAD = %q, want %q after force push", remoteHead, localHead)
+		}
+	})
+
+	t.Run("fork and retarget writes metadata before push so failure does not loop action", func(t *testing.T) {
+		t.Parallel()
+		_, m, catalogRoot := setupSingleMachine(t)
+		repoPath, remotePath := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+
+		m.MustWriteFile(filepath.Join(repoPath, "ahead.txt"), "ahead\n")
+		m.MustRunGit(now, repoPath, "add", "ahead.txt")
+		m.MustRunGit(now, repoPath, "commit", "-m", "ahead")
+
+		if out, err := m.RunBB(now.Add(30*time.Second), "scan"); err != nil && out == "" {
+			t.Fatalf("scan failed without output: %v", err)
+		}
+		if out, err := m.RunBB(now.Add(1*time.Minute), "repo", "access-set", "demo", "--push-access=read_only"); err != nil {
+			t.Fatalf("repo access-set failed: %v\n%s", err, out)
+		}
+
+		if err := filepath.WalkDir(remotePath, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if d.IsDir() {
+				return os.Chmod(path, 0o555)
+			}
+			return os.Chmod(path, 0o444)
+		}); err != nil {
+			t.Fatalf("chmod remote read-only: %v", err)
+		}
+		defer func() {
+			_ = filepath.WalkDir(remotePath, func(path string, d fs.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return nil
+				}
+				if d.IsDir() {
+					_ = os.Chmod(path, 0o755)
+					return nil
+				}
+				_ = os.Chmod(path, 0o644)
+				return nil
+			})
+		}()
+
+		if out, err := m.RunBB(now.Add(2*time.Minute), "fix", "demo", "fork-and-retarget"); err == nil {
+			t.Fatalf("expected fork-and-retarget push failure, output=%s", out)
+		}
+
+		meta := m.MustReadFile(firstRepoMetadataPath(t, m))
+		if !strings.Contains(meta, "preferred_remote: you") {
+			t.Fatalf("expected preferred_remote=you after failed push, got:\n%s", meta)
+		}
+		if !strings.Contains(meta, "push_access: unknown") {
+			t.Fatalf("expected push_access=unknown after failed push, got:\n%s", meta)
+		}
+
+		out, err := m.RunBB(now.Add(3*time.Minute), "fix", "demo")
+		if err == nil {
+			t.Fatalf("expected fix list mode to remain unsyncable, output=%s", out)
+		}
+		if strings.Contains(out, "fork-and-retarget") {
+			t.Fatalf("did not expect fork-and-retarget action after metadata retarget, got: %s", out)
 		}
 	})
 

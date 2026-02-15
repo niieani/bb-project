@@ -139,6 +139,66 @@ func TestFixActionPlanCreateProjectIncludesGhAndMetadataWrite(t *testing.T) {
 	}
 }
 
+func TestFixActionPlanForkAndRetargetWritesMetadataBeforeForcePush(t *testing.T) {
+	t.Parallel()
+
+	plan := fixActionPlanFor(FixActionForkAndRetarget, fixActionPlanContext{
+		Branch:      "main",
+		GitHubOwner: "acme",
+	})
+
+	setRemoteIdx := planEntryIndex(plan, "fork-set-remote")
+	writeMetadataIdx := planEntryIndex(plan, "fork-write-metadata")
+	pushIdx := planEntryIndex(plan, "fork-push-upstream")
+	if setRemoteIdx < 0 || writeMetadataIdx < 0 || pushIdx < 0 {
+		t.Fatalf("missing expected fork plan entries, got %#v", plan)
+	}
+	if !(setRemoteIdx < writeMetadataIdx && writeMetadataIdx < pushIdx) {
+		t.Fatalf("expected metadata write between set-remote and push, got %#v", plan)
+	}
+
+	pushEntry := plan[pushIdx]
+	if !pushEntry.Command {
+		t.Fatalf("fork-push-upstream should be a command step, got %#v", pushEntry)
+	}
+	if !strings.Contains(pushEntry.Summary, "git push -u --force acme main") {
+		t.Fatalf("expected force push summary in fork-push-upstream, got %#v", pushEntry)
+	}
+}
+
+func TestFixActionPlanForkAndRetargetRendersConcreteForkCommands(t *testing.T) {
+	t.Parallel()
+
+	plan := fixActionPlanFor(FixActionForkAndRetarget, fixActionPlanContext{
+		Branch:         "main",
+		GitHubOwner:    "niieani",
+		RemoteProtocol: "ssh",
+		OriginURL:      "git@github.com:oven-sh/bun.git",
+	})
+
+	forkCmdIdx := planEntryIndex(plan, "fork-gh-fork")
+	setRemoteIdx := planEntryIndex(plan, "fork-set-remote")
+	if forkCmdIdx < 0 || setRemoteIdx < 0 {
+		t.Fatalf("missing expected fork plan entries, got %#v", plan)
+	}
+
+	forkCmd := plan[forkCmdIdx].Summary
+	if strings.Contains(forkCmd, "<source-owner>/<repo>") {
+		t.Fatalf("expected concrete fork source in summary, got %q", forkCmd)
+	}
+	if !strings.Contains(forkCmd, "gh repo fork oven-sh/bun --remote=false --clone=false") {
+		t.Fatalf("unexpected fork command summary = %q", forkCmd)
+	}
+
+	setRemoteCmd := plan[setRemoteIdx].Summary
+	if strings.Contains(setRemoteCmd, "<fork-url>") {
+		t.Fatalf("expected concrete fork url in summary, got %q", setRemoteCmd)
+	}
+	if !strings.Contains(setRemoteCmd, "git remote add niieani git@github.com:niieani/bun.git") {
+		t.Fatalf("unexpected set-remote summary = %q", setRemoteCmd)
+	}
+}
+
 func TestFixActionExecutionPlanAppendsRevalidationStep(t *testing.T) {
 	t.Parallel()
 
@@ -190,4 +250,13 @@ func planContains(plan []fixActionPlanEntry, command bool, fragment string) bool
 		}
 	}
 	return false
+}
+
+func planEntryIndex(plan []fixActionPlanEntry, id string) int {
+	for i, entry := range plan {
+		if entry.ID == id {
+			return i
+		}
+	}
+	return -1
 }

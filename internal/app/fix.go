@@ -541,7 +541,7 @@ func (a *App) applyFixActionWithObserver(
 	}
 
 	planByID := fixActionPlanEntriesByID(
-		fixActionExecutionPlanFor(action, buildFixActionPlanContext(cfg, target, opts)),
+		fixActionExecutionPlanFor(action, a.buildFixActionPlanContext(cfg, target, opts)),
 	)
 	refreshEntry := lookupFixActionPlanEntry(planByID, fixActionPlanRevalidateStateID, fixActionPlanEntry{
 		ID:      fixActionPlanRevalidateStateID,
@@ -707,7 +707,7 @@ func (a *App) executeFixAction(
 		preferredRemote = strings.TrimSpace(target.Meta.PreferredRemote)
 	}
 	planByID := fixActionPlanEntriesByID(
-		fixActionExecutionPlanFor(action, buildFixActionPlanContext(cfg, target, opts)),
+		fixActionExecutionPlanFor(action, a.buildFixActionPlanContext(cfg, target, opts)),
 	)
 	entryFor := func(id string, fallback fixActionPlanEntry) fixActionPlanEntry {
 		return lookupFixActionPlanEntry(planByID, id, fallback)
@@ -787,7 +787,7 @@ func (a *App) executeFixAction(
 			if err := runStep("sync-fetch-prune", fixActionPlanEntry{
 				ID:      "sync-fetch-prune",
 				Command: true,
-				Summary: "git fetch --prune (if sync.fetch_prune is enabled)",
+				Summary: "git fetch --prune",
 			}, func() error {
 				return a.Git.FetchPrune(path)
 			}); err != nil {
@@ -797,7 +797,7 @@ func (a *App) executeFixAction(
 			markSkipped("sync-fetch-prune", fixActionPlanEntry{
 				ID:      "sync-fetch-prune",
 				Command: true,
-				Summary: "git fetch --prune (if sync.fetch_prune is enabled)",
+				Summary: "git fetch --prune",
 			})
 		}
 		if syncStrategy == FixSyncStrategyMerge {
@@ -903,7 +903,7 @@ func (a *App) executeFixAction(
 			if err := runStep("pull-fetch-prune", fixActionPlanEntry{
 				ID:      "pull-fetch-prune",
 				Command: true,
-				Summary: "git fetch --prune (if sync.fetch_prune is enabled)",
+				Summary: "git fetch --prune",
 			}, func() error {
 				return a.Git.FetchPrune(path)
 			}); err != nil {
@@ -913,7 +913,7 @@ func (a *App) executeFixAction(
 			markSkipped("pull-fetch-prune", fixActionPlanEntry{
 				ID:      "pull-fetch-prune",
 				Command: true,
-				Summary: "git fetch --prune (if sync.fetch_prune is enabled)",
+				Summary: "git fetch --prune",
 			})
 		}
 		return runStep("pull-ff-only", fixActionPlanEntry{ID: "pull-ff-only", Command: true, Summary: "git pull --ff-only"}, func() error {
@@ -964,20 +964,35 @@ func (a *App) executeFixAction(
 	}
 }
 
-func buildFixActionPlanContext(cfg domain.ConfigFile, target fixRepoState, opts fixApplyOptions) fixActionPlanContext {
+func (a *App) buildFixActionPlanContext(cfg domain.ConfigFile, target fixRepoState, opts fixApplyOptions) fixActionPlanContext {
 	preferredRemote := ""
 	if target.Meta != nil {
 		preferredRemote = strings.TrimSpace(target.Meta.PreferredRemote)
+	}
+	owner := strings.TrimSpace(cfg.GitHub.Owner)
+	forkRemoteExists := false
+	if owner != "" && strings.TrimSpace(target.Record.Path) != "" {
+		remoteNames, err := a.Git.RemoteNames(target.Record.Path)
+		if err == nil {
+			for _, name := range remoteNames {
+				if name == owner {
+					forkRemoteExists = true
+					break
+				}
+			}
+		}
 	}
 	return fixActionPlanContext{
 		Operation:               target.Record.OperationInProgress,
 		Branch:                  strings.TrimSpace(target.Record.Branch),
 		Upstream:                strings.TrimSpace(target.Record.Upstream),
+		HeadSHA:                 strings.TrimSpace(target.Record.HeadSHA),
 		OriginURL:               strings.TrimSpace(target.Record.OriginURL),
 		SyncStrategy:            normalizeFixSyncStrategy(opts.SyncStrategy),
 		PreferredRemote:         preferredRemote,
-		GitHubOwner:             strings.TrimSpace(cfg.GitHub.Owner),
+		GitHubOwner:             owner,
 		RemoteProtocol:          strings.TrimSpace(cfg.GitHub.RemoteProtocol),
+		ForkRemoteExists:        forkRemoteExists,
 		RepoName:                strings.TrimSpace(target.Record.Name),
 		CommitMessage:           strings.TrimSpace(opts.CommitMessage),
 		CreateProjectName:       strings.TrimSpace(opts.CreateProjectName),
@@ -1065,12 +1080,13 @@ func (a *App) forkAndRetargetFromFix(
 	if forkRemoteName == "" {
 		return errors.New("fork remote name is required")
 	}
+	forkSource := plannedForkSource(originURL)
 
 	var forkURL string
 	if err := runStep("fork-gh-fork", fixActionPlanEntry{
 		ID:      "fork-gh-fork",
 		Command: true,
-		Summary: "gh repo fork <source-owner>/<repo> --remote=false --clone=false",
+		Summary: fmt.Sprintf("gh repo fork %s --remote=false --clone=false", forkSource),
 	}, func() error {
 		var err error
 		forkURL, err = a.ensureForkRemoteRepo(originURL, owner, cfg.GitHub.RemoteProtocol, repoPath)
@@ -1089,15 +1105,35 @@ func (a *App) forkAndRetargetFromFix(
 			}
 		}
 	}
+	setRemoteSummary := fmt.Sprintf("git remote add %s %s", owner, forkURL)
+	if remoteExists {
+		setRemoteSummary = fmt.Sprintf("git remote set-url %s %s", owner, forkURL)
+	}
 	if err := runStep("fork-set-remote", fixActionPlanEntry{
 		ID:      "fork-set-remote",
 		Command: true,
-		Summary: fmt.Sprintf("git remote add %s <fork-url> (or git remote set-url when that remote already exists)", owner),
+		Summary: setRemoteSummary,
 	}, func() error {
 		if remoteExists {
 			return a.Git.SetRemoteURL(repoPath, forkRemoteName, forkURL)
 		}
 		return a.Git.AddRemote(repoPath, forkRemoteName, forkURL)
+	}); err != nil {
+		return err
+	}
+
+	if err := runStep("fork-write-metadata", fixActionPlanEntry{
+		ID:      "fork-write-metadata",
+		Command: false,
+		Summary: "Update repo metadata immediately after retargeting remote (preferred remote and push-access probe state reset).",
+	}, func() error {
+		meta := *target.Meta
+		meta.PreferredRemote = forkRemoteName
+		meta.PushAccess = domain.PushAccessUnknown
+		meta.PushAccessCheckedAt = time.Time{}
+		meta.PushAccessCheckedRemote = ""
+		meta.PushAccessManualOverride = false
+		return state.SaveRepoMetadata(a.Paths, meta)
 	}); err != nil {
 		return err
 	}
@@ -1112,24 +1148,22 @@ func (a *App) forkAndRetargetFromFix(
 	if err := runStep("fork-push-upstream", fixActionPlanEntry{
 		ID:      "fork-push-upstream",
 		Command: true,
-		Summary: fmt.Sprintf("git push -u %s %s", owner, plannedBranch(branch)),
+		Summary: fmt.Sprintf("git push -u --force %s %s", owner, plannedBranch(branch)),
 	}, func() error {
-		return a.Git.PushUpstreamWithPreferredRemote(repoPath, branch, forkRemoteName)
+		return a.Git.PushUpstreamForceWithPreferredRemote(repoPath, branch, forkRemoteName)
 	}); err != nil {
 		return err
 	}
 
-	return runStep("fork-write-metadata", fixActionPlanEntry{
-		ID:      "fork-write-metadata",
+	return runStep("fork-refresh-metadata", fixActionPlanEntry{
+		ID:      "fork-refresh-metadata",
 		Command: false,
-		Summary: "Update repo metadata (preferred remote and push-access probe state).",
+		Summary: "Refresh repo metadata push-access probe state after retarget push.",
 	}, func() error {
-		meta := *target.Meta
-		meta.PreferredRemote = forkRemoteName
-		meta.PushAccess = domain.PushAccessUnknown
-		meta.PushAccessCheckedAt = time.Time{}
-		meta.PushAccessCheckedRemote = ""
-		meta.PushAccessManualOverride = false
+		meta, err := state.LoadRepoMetadata(a.Paths, target.Meta.RepoKey)
+		if err != nil {
+			return err
+		}
 
 		updated, _, err := a.probeAndUpdateRepoPushAccess(repoPath, target.Record.OriginURL, meta, true)
 		if err != nil {
@@ -1266,7 +1300,7 @@ func (a *App) createProjectFromFix(
 		if err := runStep("create-initial-push", fixActionPlanEntry{
 			ID:      "create-initial-push",
 			Command: true,
-			Summary: fmt.Sprintf("git push -u %s %s (when HEAD has commits)", plannedRemote(meta.PreferredRemote, target.Record.Upstream), plannedBranch(branch)),
+			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(meta.PreferredRemote, target.Record.Upstream), plannedBranch(branch)),
 		}, func() error {
 			if err := a.Git.PushUpstreamWithPreferredRemote(target.Record.Path, branch, meta.PreferredRemote); err != nil {
 				return fmt.Errorf("initial push failed: %w", err)
@@ -1279,7 +1313,7 @@ func (a *App) createProjectFromFix(
 		markSkipped("create-initial-push", fixActionPlanEntry{
 			ID:      "create-initial-push",
 			Command: true,
-			Summary: fmt.Sprintf("git push -u %s %s (when HEAD has commits)", plannedRemote(meta.PreferredRemote, target.Record.Upstream), plannedBranch(branch)),
+			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(meta.PreferredRemote, target.Record.Upstream), plannedBranch(branch)),
 		})
 	}
 
