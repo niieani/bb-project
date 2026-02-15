@@ -306,6 +306,7 @@ func newStatusCommand(runtime *runtimeState) *cobra.Command {
 func newFixCommand(runtime *runtimeState) *cobra.Command {
 	var includeCatalogs []string
 	var message string
+	var syncStrategy string
 	var noRefresh bool
 
 	cmd := &cobra.Command{
@@ -313,6 +314,11 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 		Short: "Inspect repositories and apply context-aware fixes.",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
+			strategy, err := app.ParseFixSyncStrategy(syncStrategy)
+			if err != nil {
+				return withExitCode(2, fmt.Errorf("invalid --sync-strategy value %q: %w", syncStrategy, err))
+			}
+
 			runner, err := runtime.appRunner()
 			if err != nil {
 				return withExitCode(2, err)
@@ -320,6 +326,7 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 			opts := app.FixOptions{
 				IncludeCatalogs: includeCatalogs,
 				CommitMessage:   message,
+				SyncStrategy:    strategy,
 				NoRefresh:       noRefresh,
 			}
 			if len(args) > 0 {
@@ -335,6 +342,7 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 
 	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
 	cmd.Flags().StringVar(&message, "message", "", "Commit message for stage-commit-push action (or 'auto').")
+	cmd.Flags().StringVar(&syncStrategy, "sync-strategy", string(app.FixSyncStrategyRebase), "Sync strategy for sync-with-upstream and pre-push validation (rebase|merge).")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Use current machine snapshot without running a refresh scan first.")
 
 	return cmd

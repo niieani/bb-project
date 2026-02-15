@@ -309,6 +309,71 @@ func (r Runner) PullFFOnly(path string) error {
 	return err
 }
 
+func (r Runner) Rebase(path, upstream string) error {
+	upstream = strings.TrimSpace(upstream)
+	if upstream == "" {
+		upstream = "@{u}"
+	}
+	_, err := r.RunGit(path, "rebase", upstream)
+	return err
+}
+
+func (r Runner) MergeNoEdit(path, upstream string) error {
+	upstream = strings.TrimSpace(upstream)
+	if upstream == "" {
+		upstream = "@{u}"
+	}
+	_, err := r.RunGit(path, "merge", "--no-edit", upstream)
+	return err
+}
+
+func (r Runner) CanSyncWithUpstream(path string, upstream string, strategy string) (bool, error) {
+	upstream = strings.TrimSpace(upstream)
+	if upstream == "" {
+		return false, nil
+	}
+	strategy = strings.ToLower(strings.TrimSpace(strategy))
+	if strategy != "rebase" && strategy != "merge" {
+		return false, fmt.Errorf("unsupported sync strategy %q", strategy)
+	}
+
+	tmpRoot, err := os.MkdirTemp("", "bb-sync-feasibility-*")
+	if err != nil {
+		return false, err
+	}
+	defer os.RemoveAll(tmpRoot)
+	worktreePath := filepath.Join(tmpRoot, "worktree")
+
+	if _, err := r.RunGit(path, "worktree", "add", "--detach", worktreePath, "HEAD"); err != nil {
+		return false, err
+	}
+	defer func() {
+		_, _ = r.RunGit(path, "worktree", "remove", "--force", worktreePath)
+	}()
+
+	var syncErr error
+	switch strategy {
+	case "merge":
+		_, syncErr = r.RunGit(worktreePath, "merge", "--no-edit", upstream)
+		if syncErr != nil {
+			_, _ = r.RunGit(worktreePath, "merge", "--abort")
+		}
+	default:
+		_, syncErr = r.RunGit(worktreePath, "rebase", upstream)
+		if syncErr != nil {
+			_, _ = r.RunGit(worktreePath, "rebase", "--abort")
+		}
+	}
+
+	if syncErr == nil {
+		return true, nil
+	}
+	if looksLikeSyncConflict(syncErr.Error()) {
+		return false, nil
+	}
+	return false, syncErr
+}
+
 func (r Runner) Push(path string) error {
 	_, err := r.RunGit(path, "push")
 	return err
@@ -357,6 +422,26 @@ func looksLikePushAccessDenied(msg string) bool {
 		"forbidden",
 		"authentication failed",
 		"could not read from remote repository",
+	}
+	for _, indicator := range indicators {
+		if strings.Contains(lower, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeSyncConflict(msg string) bool {
+	if strings.TrimSpace(msg) == "" {
+		return false
+	}
+	lower := strings.ToLower(msg)
+	indicators := []string{
+		"conflict",
+		"automatic merge failed",
+		"could not apply",
+		"resolve all conflicts manually",
+		"merge conflict",
 	}
 	for _, indicator := range indicators {
 		if strings.Contains(lower, indicator) {

@@ -359,6 +359,9 @@ func TestRunFixForwardsOptions(t *testing.T) {
 		if fake.fixOpts.NoRefresh {
 			t.Fatalf("no-refresh = %t, want false", fake.fixOpts.NoRefresh)
 		}
+		if fake.fixOpts.SyncStrategy != app.FixSyncStrategyRebase {
+			t.Fatalf("sync strategy = %q, want %q", fake.fixOpts.SyncStrategy, app.FixSyncStrategyRebase)
+		}
 		mustEqualSlices(t, fake.fixOpts.IncludeCatalogs, []string{"software", "references"})
 	})
 
@@ -408,6 +411,32 @@ func TestRunFixForwardsOptions(t *testing.T) {
 		if !fake.fixOpts.NoRefresh {
 			t.Fatalf("no-refresh = %t, want true", fake.fixOpts.NoRefresh)
 		}
+	})
+
+	t.Run("forwards explicit sync strategy", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"fix", "api", "sync-with-upstream", "--sync-strategy=merge"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.fixOpts.SyncStrategy != app.FixSyncStrategyMerge {
+			t.Fatalf("sync strategy = %q, want %q", fake.fixOpts.SyncStrategy, app.FixSyncStrategyMerge)
+		}
+	})
+
+	t.Run("invalid sync strategy returns usage error", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, calls, _ := runCLI(t, fake, []string{"fix", "--sync-strategy=invalid"})
+		if code != 2 {
+			t.Fatalf("exit code = %d, want 2", code)
+		}
+		if calls != 0 {
+			t.Fatalf("app factory calls = %d, want 0", calls)
+		}
+		mustContain(t, stderr, "invalid --sync-strategy")
 	})
 }
 

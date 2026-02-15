@@ -98,6 +98,117 @@ func TestFixCases(t *testing.T) {
 		}
 	})
 
+	t.Run("stage commit push validates push feasibility before mutating git state", func(t *testing.T) {
+		t.Parallel()
+		h, m, catalogRoot := setupSingleMachine(t)
+		repoPath, remotePath := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+
+		remoteClone := filepath.Join(h.Root, "remote-clones", "demo-behind")
+		m.MustRunGit(now, catalogRoot, "clone", remotePath, remoteClone)
+		m.MustRunGit(now, remoteClone, "checkout", "-B", "main", "--track", "origin/main")
+		m.MustWriteFile(filepath.Join(remoteClone, "remote-ahead.txt"), "remote ahead\n")
+		m.MustRunGit(now, remoteClone, "add", "remote-ahead.txt")
+		m.MustRunGit(now, remoteClone, "commit", "-m", "remote ahead commit")
+		m.MustRunGit(now, remoteClone, "push", "origin", "main")
+
+		m.MustRunGit(now, repoPath, "fetch", "origin")
+		beforeHead := strings.TrimSpace(m.MustRunGit(now, repoPath, "rev-parse", "HEAD"))
+
+		m.MustWriteFile(filepath.Join(repoPath, "dirty.txt"), "local dirty\n")
+		out, err := m.RunBB(now.Add(1*time.Minute), "fix", "demo", "stage-commit-push", "--message=auto")
+		if err == nil {
+			t.Fatalf("expected stage-commit-push to be rejected when branch is behind upstream, output=%s", out)
+		}
+		if !strings.Contains(out, "behind upstream") {
+			t.Fatalf("expected behind-upstream validation guidance, got: %s", out)
+		}
+
+		afterHead := strings.TrimSpace(m.MustRunGit(now, repoPath, "rev-parse", "HEAD"))
+		if afterHead != beforeHead {
+			t.Fatalf("HEAD changed despite pre-validation failure: before=%s after=%s", beforeHead, afterHead)
+		}
+		status := m.MustRunGit(now, repoPath, "status", "--porcelain")
+		if !strings.Contains(status, "dirty.txt") {
+			t.Fatalf("expected uncommitted file to remain unstaged after validation failure, status=%s", status)
+		}
+	})
+
+	t.Run("sync with upstream action resolves clean diverged branches", func(t *testing.T) {
+		t.Parallel()
+		h, m, catalogRoot := setupSingleMachine(t)
+		repoPath, remotePath := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+
+		remoteClone := filepath.Join(h.Root, "remote-clones", "demo-diverged")
+		m.MustRunGit(now, catalogRoot, "clone", remotePath, remoteClone)
+		m.MustRunGit(now, remoteClone, "checkout", "-B", "main", "--track", "origin/main")
+		m.MustWriteFile(filepath.Join(remoteClone, "remote.txt"), "remote commit\n")
+		m.MustRunGit(now, remoteClone, "add", "remote.txt")
+		m.MustRunGit(now, remoteClone, "commit", "-m", "remote commit")
+		m.MustRunGit(now, remoteClone, "push", "origin", "main")
+
+		m.MustWriteFile(filepath.Join(repoPath, "local.txt"), "local commit\n")
+		m.MustRunGit(now, repoPath, "add", "local.txt")
+		m.MustRunGit(now, repoPath, "commit", "-m", "local commit")
+		m.MustRunGit(now, repoPath, "fetch", "origin")
+
+		out, err := m.RunBB(now.Add(1*time.Minute), "fix", "demo")
+		if err == nil {
+			t.Fatalf("expected list mode exit 1 for diverged state, output=%s", out)
+		}
+		if !strings.Contains(out, "sync-with-upstream") {
+			t.Fatalf("expected sync-with-upstream action in output, got: %s", out)
+		}
+
+		out, err = m.RunBB(now.Add(2*time.Minute), "fix", "demo", "sync-with-upstream")
+		if !strings.Contains(out, "applied sync-with-upstream") {
+			t.Fatalf("expected sync action apply confirmation, got err=%v output=%s", err, out)
+		}
+
+		counts := strings.TrimSpace(m.MustRunGit(now, repoPath, "rev-list", "--left-right", "--count", "@{u}...HEAD"))
+		parts := strings.Fields(counts)
+		if len(parts) != 2 {
+			t.Fatalf("unexpected ahead/behind output: %q", counts)
+		}
+		if parts[0] != "0" {
+			t.Fatalf("expected behind count to be 0 after sync-with-upstream, counts=%q", counts)
+		}
+	})
+
+	t.Run("sync conflict reason is surfaced when neither rebase nor merge can be applied cleanly", func(t *testing.T) {
+		t.Parallel()
+		h, m, catalogRoot := setupSingleMachine(t)
+		repoPath, remotePath := createRepoWithOrigin(t, m, catalogRoot, "demo", now)
+
+		m.MustWriteFile(filepath.Join(repoPath, "conflict.txt"), "base\n")
+		m.MustRunGit(now, repoPath, "add", "conflict.txt")
+		m.MustRunGit(now, repoPath, "commit", "-m", "add baseline conflict file")
+		m.MustRunGit(now, repoPath, "push", "origin", "main")
+
+		remoteClone := filepath.Join(h.Root, "remote-clones", "demo-conflict")
+		m.MustRunGit(now, catalogRoot, "clone", remotePath, remoteClone)
+		m.MustRunGit(now, remoteClone, "checkout", "-B", "main", "--track", "origin/main")
+		m.MustWriteFile(filepath.Join(remoteClone, "conflict.txt"), "remote change\n")
+		m.MustRunGit(now, remoteClone, "add", "conflict.txt")
+		m.MustRunGit(now, remoteClone, "commit", "-m", "remote conflict change")
+		m.MustRunGit(now, remoteClone, "push", "origin", "main")
+
+		m.MustWriteFile(filepath.Join(repoPath, "conflict.txt"), "local change\n")
+		m.MustRunGit(now, repoPath, "add", "conflict.txt")
+		m.MustRunGit(now, repoPath, "commit", "-m", "local conflict change")
+		m.MustRunGit(now, repoPath, "fetch", "origin")
+
+		out, err := m.RunBB(now.Add(1*time.Minute), "fix", "demo")
+		if err == nil {
+			t.Fatalf("expected list mode exit 1 for unsyncable diverged conflict state, output=%s", out)
+		}
+		if !strings.Contains(out, "sync_conflict_requires_manual_resolution") {
+			t.Fatalf("expected sync conflict validation reason in output, got: %s", out)
+		}
+		if strings.Contains(out, "sync-with-upstream") {
+			t.Fatalf("did not expect sync-with-upstream action when conflict is predicted, got: %s", out)
+		}
+	})
+
 	t.Run("stage commit push blocked when uncommitted .env exists", func(t *testing.T) {
 		t.Parallel()
 		_, m, catalogRoot := setupSingleMachine(t)

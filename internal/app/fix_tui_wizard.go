@@ -43,6 +43,7 @@ type fixWizardState struct {
 	GitHubOwner     string
 	RemoteProtocol  string
 	Action          string
+	SyncStrategy    FixSyncStrategy
 	Risk            fixRiskSnapshot
 
 	EnableCommitMessage bool
@@ -200,6 +201,7 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	m.wizard.PreferredRemote = preferredRemote
 	m.wizard.Operation = operation
 	m.wizard.Action = decision.Action
+	m.wizard.SyncStrategy = FixSyncStrategyRebase
 	m.wizard.Risk = repoRisk
 	m.wizard.EnableCommitMessage = decision.Action == FixActionStageCommitPush
 	m.wizard.CommitMessage = commitInput
@@ -266,7 +268,10 @@ func (m *fixTUIModel) applyWizardCurrent() tea.Cmd {
 		return nil
 	}
 
-	opts := fixApplyOptions{Interactive: true}
+	opts := fixApplyOptions{
+		Interactive:  true,
+		SyncStrategy: m.wizard.SyncStrategy,
+	}
 	if m.wizard.EnableProjectName {
 		opts.CreateProjectName = sanitizeGitHubRepositoryNameInput(m.wizard.ProjectName.Value())
 	}
@@ -1032,6 +1037,7 @@ func (m *fixTUIModel) wizardActionPlanContext() fixActionPlanContext {
 		Branch:                  strings.TrimSpace(m.wizard.Branch),
 		Upstream:                strings.TrimSpace(m.wizard.Upstream),
 		OriginURL:               strings.TrimSpace(m.wizard.OriginURL),
+		SyncStrategy:            m.wizard.SyncStrategy,
 		PreferredRemote:         strings.TrimSpace(m.wizard.PreferredRemote),
 		GitHubOwner:             strings.TrimSpace(m.wizard.GitHubOwner),
 		RemoteProtocol:          strings.TrimSpace(m.wizard.RemoteProtocol),

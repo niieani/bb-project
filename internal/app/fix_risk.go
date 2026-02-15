@@ -27,8 +27,10 @@ type fixRiskSnapshot struct {
 }
 
 type fixEligibilityContext struct {
-	Interactive bool
-	Risk        fixRiskSnapshot
+	Interactive     bool
+	Risk            fixRiskSnapshot
+	SyncStrategy    FixSyncStrategy
+	SyncFeasibility fixSyncFeasibility
 }
 
 func collectFixRiskSnapshot(repoPath string, git gitx.Runner) (fixRiskSnapshot, error) {

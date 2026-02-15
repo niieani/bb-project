@@ -14,15 +14,16 @@ import (
 )
 
 const (
-	FixActionIgnore          = "ignore"
-	FixActionAbortOperation  = "abort-operation"
-	FixActionCreateProject   = "create-project"
-	FixActionForkAndRetarget = "fork-and-retarget"
-	FixActionPush            = "push"
-	FixActionStageCommitPush = "stage-commit-push"
-	FixActionPullFFOnly      = "pull-ff-only"
-	FixActionSetUpstreamPush = "set-upstream-push"
-	FixActionEnableAutoPush  = "enable-auto-push"
+	FixActionIgnore           = "ignore"
+	FixActionAbortOperation   = "abort-operation"
+	FixActionCreateProject    = "create-project"
+	FixActionForkAndRetarget  = "fork-and-retarget"
+	FixActionSyncWithUpstream = "sync-with-upstream"
+	FixActionPush             = "push"
+	FixActionStageCommitPush  = "stage-commit-push"
+	FixActionPullFFOnly       = "pull-ff-only"
+	FixActionSetUpstreamPush  = "set-upstream-push"
+	FixActionEnableAutoPush   = "enable-auto-push"
 
 	DefaultFixCommitMessage = "bb: checkpoint local changes before sync"
 )
@@ -33,12 +34,14 @@ type fixRepoState struct {
 	Record           domain.MachineRepoRecord
 	Meta             *domain.RepoMetadataFile
 	Risk             fixRiskSnapshot
+	SyncFeasibility  fixSyncFeasibility
 	IsDefaultCatalog bool
 }
 
 type fixApplyOptions struct {
 	Interactive             bool
 	CommitMessage           string
+	SyncStrategy            FixSyncStrategy
 	CreateProjectName       string
 	CreateProjectVisibility domain.Visibility
 	GenerateGitignore       bool
@@ -102,8 +105,14 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 	if err != nil {
 		return 2, err
 	}
+	strategy := normalizeFixSyncStrategy(opts.SyncStrategy)
 
-	eligibility := fixEligibilityContext{Interactive: false, Risk: target.Risk}
+	eligibility := fixEligibilityContext{
+		Interactive:     false,
+		Risk:            target.Risk,
+		SyncStrategy:    strategy,
+		SyncFeasibility: target.SyncFeasibility,
+	}
 	eligible := eligibleFixActions(target.Record, target.Meta, eligibility)
 	if strings.TrimSpace(opts.Action) == "" {
 		a.renderFixStatus(target.Record, eligible)
@@ -121,7 +130,7 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 	if !containsAction(eligible, action) {
 		a.renderFixStatus(target.Record, eligible)
 		fmt.Fprintf(a.Stdout, "action %q is not eligible for %s\n", action, target.Record.Name)
-		if reason := ineligibleFixReason(action, eligibility); reason != "" {
+		if reason := ineligibleFixReason(action, target.Record, eligibility); reason != "" {
 			fmt.Fprintln(a.Stdout, reason)
 		}
 		return 1, nil
@@ -130,6 +139,7 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 	updated, err := a.applyFixAction(opts.IncludeCatalogs, target.Record.Path, action, fixApplyOptions{
 		Interactive:   false,
 		CommitMessage: opts.CommitMessage,
+		SyncStrategy:  strategy,
 	})
 	if errors.Is(err, errFixActionNotEligible) {
 		var ineligibleErr *fixIneligibleError
@@ -144,8 +154,10 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 
 	fmt.Fprintf(a.Stdout, "applied %s to %s\n", action, updated.Record.Name)
 	a.renderFixStatus(updated.Record, eligibleFixActions(updated.Record, updated.Meta, fixEligibilityContext{
-		Interactive: false,
-		Risk:        updated.Risk,
+		Interactive:     false,
+		Risk:            updated.Risk,
+		SyncStrategy:    strategy,
+		SyncFeasibility: updated.SyncFeasibility,
 	}))
 	if updated.Record.Syncable {
 		return 0, nil
@@ -210,10 +222,20 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	if rec.OriginURL == "" {
 		actions = append(actions, FixActionCreateProject)
 	}
+	if rec.OriginURL != "" &&
+		rec.Upstream != "" &&
+		rec.Diverged &&
+		!rec.HasDirtyTracked &&
+		!rec.HasUntracked &&
+		ctx.SyncFeasibility.cleanFor(ctx.SyncStrategy) {
+		actions = append(actions, FixActionSyncWithUpstream)
+	}
 	if rec.OriginURL != "" && rec.Upstream != "" && rec.Ahead > 0 && !rec.Diverged && pushAllowed {
 		actions = append(actions, FixActionPush)
 	}
+	pushBeforeCommitAllowed := strings.TrimSpace(rec.OriginURL) == "" || strings.TrimSpace(rec.Upstream) == "" || (!rec.Diverged && rec.Behind == 0)
 	if (rec.HasDirtyTracked || rec.HasUntracked) && !rec.Diverged &&
+		pushBeforeCommitAllowed &&
 		(strings.TrimSpace(rec.OriginURL) == "" || pushAllowed) &&
 		!ctx.Risk.hasSecretLikeChanges() &&
 		!(ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive) {
@@ -234,18 +256,34 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	return actions
 }
 
-func ineligibleFixReason(action string, ctx fixEligibilityContext) string {
-	if action != FixActionStageCommitPush {
+func ineligibleFixReason(action string, rec domain.MachineRepoRecord, ctx fixEligibilityContext) string {
+	if action == FixActionStageCommitPush {
+		if strings.TrimSpace(rec.OriginURL) != "" && strings.TrimSpace(rec.Upstream) != "" && (rec.Diverged || rec.Behind > 0) {
+			return "stage-commit-push is blocked: branch is behind upstream, so push would be rejected; run sync-with-upstream first"
+		}
+		if ctx.Risk.hasSecretLikeChanges() {
+			return fmt.Sprintf(
+				"stage-commit-push is blocked: secret-like uncommitted files detected (%s)",
+				strings.Join(ctx.Risk.SecretLikeChangedPaths, ", "),
+			)
+		}
+		if ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive {
+			return "stage-commit-push is blocked: root .gitignore is missing and noisy uncommitted paths were detected; run interactive `bb fix` to review/generate .gitignore or add it manually"
+		}
 		return ""
 	}
-	if ctx.Risk.hasSecretLikeChanges() {
-		return fmt.Sprintf(
-			"stage-commit-push is blocked: secret-like uncommitted files detected (%s)",
-			strings.Join(ctx.Risk.SecretLikeChangedPaths, ", "),
-		)
-	}
-	if ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive {
-		return "stage-commit-push is blocked: root .gitignore is missing and noisy uncommitted paths were detected; run interactive `bb fix` to review/generate .gitignore or add it manually"
+	if action == FixActionSyncWithUpstream {
+		if !ctx.SyncFeasibility.Checked {
+			return "sync-with-upstream is blocked: sync feasibility has not been validated"
+		}
+		if !ctx.SyncFeasibility.cleanFor(ctx.SyncStrategy) {
+			return fmt.Sprintf(
+				"sync-with-upstream is blocked: %s (selected strategy: %s)",
+				domain.ReasonSyncConflict,
+				normalizeFixSyncStrategy(ctx.SyncStrategy),
+			)
+		}
+		return ""
 	}
 	return ""
 }
@@ -339,6 +377,7 @@ func (a *App) loadFixRepos(includeCatalogs []string, refreshMode scanRefreshMode
 
 	out := make([]fixRepoState, 0, len(machine.Repos))
 	for _, rec := range machine.Repos {
+		rec, syncFeasibility := a.enrichFixSyncFeasibility(rec)
 		risk, riskErr := collectFixRiskSnapshot(rec.Path, a.Git)
 		if riskErr != nil && !errors.Is(riskErr, os.ErrNotExist) {
 			a.logf("fix: risk scan failed for %s: %v", rec.Path, riskErr)
@@ -347,6 +386,7 @@ func (a *App) loadFixRepos(includeCatalogs []string, refreshMode scanRefreshMode
 			Record:           rec,
 			Meta:             metaByRepoKey[rec.RepoKey],
 			Risk:             risk,
+			SyncFeasibility:  syncFeasibility,
 			IsDefaultCatalog: rec.Catalog == machine.DefaultCatalog,
 		})
 	}
@@ -361,6 +401,41 @@ func (a *App) loadFixRepos(includeCatalogs []string, refreshMode scanRefreshMode
 	})
 
 	return out, nil
+}
+
+func (a *App) enrichFixSyncFeasibility(rec domain.MachineRepoRecord) (domain.MachineRepoRecord, fixSyncFeasibility) {
+	feasibility := fixSyncFeasibility{}
+	if strings.TrimSpace(rec.OriginURL) == "" ||
+		strings.TrimSpace(rec.Upstream) == "" ||
+		!rec.Diverged ||
+		rec.HasDirtyTracked ||
+		rec.HasUntracked ||
+		(rec.OperationInProgress != "" && rec.OperationInProgress != domain.OperationNone) {
+		return rec, feasibility
+	}
+
+	feasibility.Checked = true
+
+	canRebase, err := a.Git.CanSyncWithUpstream(rec.Path, rec.Upstream, string(FixSyncStrategyRebase))
+	if err != nil {
+		a.logf("fix: sync feasibility rebase probe failed for %s: %v", rec.Path, err)
+	} else {
+		feasibility.RebaseClean = canRebase
+	}
+
+	canMerge, err := a.Git.CanSyncWithUpstream(rec.Path, rec.Upstream, string(FixSyncStrategyMerge))
+	if err != nil {
+		a.logf("fix: sync feasibility merge probe failed for %s: %v", rec.Path, err)
+	} else {
+		feasibility.MergeClean = canMerge
+	}
+
+	if !feasibility.RebaseClean && !feasibility.MergeClean {
+		rec.UnsyncableReasons = appendUniqueUnsyncableReason(rec.UnsyncableReasons, domain.ReasonSyncConflict)
+		rec.Syncable = false
+		rec.StateHash = domain.ComputeStateHash(rec)
+	}
+	return rec, feasibility
 }
 
 func (a *App) applyFixAction(includeCatalogs []string, repoPath string, action string, opts fixApplyOptions) (fixRepoState, error) {
@@ -401,14 +476,16 @@ func (a *App) applyFixActionWithObserver(
 		return fixRepoState{}, err
 	}
 	eligibility := fixEligibilityContext{
-		Interactive: opts.Interactive,
-		Risk:        target.Risk,
+		Interactive:     opts.Interactive,
+		Risk:            target.Risk,
+		SyncStrategy:    normalizeFixSyncStrategy(opts.SyncStrategy),
+		SyncFeasibility: target.SyncFeasibility,
 	}
 	eligible := eligibleFixActions(target.Record, target.Meta, eligibility)
 	if !containsAction(eligible, action) {
 		return target, &fixIneligibleError{
 			Action: action,
-			Reason: ineligibleFixReason(action, eligibility),
+			Reason: ineligibleFixReason(action, target.Record, eligibility),
 		}
 	}
 
@@ -461,6 +538,7 @@ func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, 
 
 	out := make([]fixRepoState, 0, len(machine.Repos))
 	for _, rec := range machine.Repos {
+		rec, syncFeasibility := a.enrichFixSyncFeasibility(rec)
 		risk, riskErr := collectFixRiskSnapshot(rec.Path, a.Git)
 		if riskErr != nil && !errors.Is(riskErr, os.ErrNotExist) {
 			a.logf("fix: risk scan failed for %s: %v", rec.Path, riskErr)
@@ -469,6 +547,7 @@ func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, 
 			Record:           rec,
 			Meta:             metaByRepoKey[rec.RepoKey],
 			Risk:             risk,
+			SyncFeasibility:  syncFeasibility,
 			IsDefaultCatalog: rec.Catalog == machine.DefaultCatalog,
 		})
 	}
@@ -496,10 +575,12 @@ func (a *App) loadFixRepoByPathUnlocked(machine domain.MachineFile, repoPath str
 		if riskErr != nil && !errors.Is(riskErr, os.ErrNotExist) {
 			a.logf("fix: risk scan failed for %s: %v", rec.Path, riskErr)
 		}
+		rec, syncFeasibility := a.enrichFixSyncFeasibility(rec)
 		return fixRepoState{
 			Record:           rec,
 			Meta:             meta,
 			Risk:             risk,
+			SyncFeasibility:  syncFeasibility,
 			IsDefaultCatalog: rec.Catalog == machine.DefaultCatalog,
 		}, nil
 	}
@@ -569,6 +650,7 @@ func (a *App) executeFixAction(
 	}
 
 	path := target.Record.Path
+	syncStrategy := normalizeFixSyncStrategy(opts.SyncStrategy)
 	preferredRemote := ""
 	if target.Meta != nil {
 		preferredRemote = strings.TrimSpace(target.Meta.PreferredRemote)
@@ -608,8 +690,61 @@ func (a *App) executeFixAction(
 			return fmt.Errorf("no operation in progress for %s", target.Record.Name)
 		}
 	case FixActionPush:
+		if strings.TrimSpace(target.Record.Upstream) != "" && (target.Record.Diverged || target.Record.Behind > 0) {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "push is blocked: branch is behind upstream; run sync-with-upstream first",
+			}
+		}
 		return runStep("push-main", fixActionPlanEntry{ID: "push-main", Command: true, Summary: "git push"}, func() error {
 			return a.Git.Push(path)
+		})
+	case FixActionSyncWithUpstream:
+		if strings.TrimSpace(target.Record.Upstream) == "" {
+			return errors.New("upstream is required for sync-with-upstream")
+		}
+		if !target.SyncFeasibility.cleanFor(syncStrategy) {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: fmt.Sprintf(
+					"sync-with-upstream is blocked: %s (selected strategy: %s)",
+					domain.ReasonSyncConflict,
+					syncStrategy,
+				),
+			}
+		}
+		if cfg.Sync.FetchPrune {
+			if err := runStep("sync-fetch-prune", fixActionPlanEntry{
+				ID:      "sync-fetch-prune",
+				Command: true,
+				Summary: "git fetch --prune (if sync.fetch_prune is enabled)",
+			}, func() error {
+				return a.Git.FetchPrune(path)
+			}); err != nil {
+				return err
+			}
+		} else {
+			markSkipped("sync-fetch-prune", fixActionPlanEntry{
+				ID:      "sync-fetch-prune",
+				Command: true,
+				Summary: "git fetch --prune (if sync.fetch_prune is enabled)",
+			})
+		}
+		if syncStrategy == FixSyncStrategyMerge {
+			return runStep("sync-merge", fixActionPlanEntry{
+				ID:      "sync-merge",
+				Command: true,
+				Summary: fmt.Sprintf("git merge --no-edit %s", target.Record.Upstream),
+			}, func() error {
+				return a.Git.MergeNoEdit(path, target.Record.Upstream)
+			})
+		}
+		return runStep("sync-rebase", fixActionPlanEntry{
+			ID:      "sync-rebase",
+			Command: true,
+			Summary: fmt.Sprintf("git rebase %s", target.Record.Upstream),
+		}, func() error {
+			return a.Git.Rebase(path, target.Record.Upstream)
 		})
 	case FixActionCreateProject:
 		return a.createProjectFromFix(
@@ -623,6 +758,14 @@ func (a *App) executeFixAction(
 	case FixActionForkAndRetarget:
 		return a.forkAndRetargetFromFix(cfg, target, observer, planByID)
 	case FixActionStageCommitPush:
+		if strings.TrimSpace(target.Record.OriginURL) != "" &&
+			strings.TrimSpace(target.Record.Upstream) != "" &&
+			(target.Record.Diverged || target.Record.Behind > 0) {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "stage-commit-push is blocked: branch is behind upstream, so push would be rejected; run sync-with-upstream first",
+			}
+		}
 		if opts.GenerateGitignore && len(opts.GitignorePatterns) > 0 {
 			stepID := "stage-gitignore-append"
 			summary := fmt.Sprintf("Append %d selected pattern(s) to root .gitignore.", len(opts.GitignorePatterns))
@@ -752,6 +895,7 @@ func buildFixActionPlanContext(cfg domain.ConfigFile, target fixRepoState, opts 
 		Branch:                  strings.TrimSpace(target.Record.Branch),
 		Upstream:                strings.TrimSpace(target.Record.Upstream),
 		OriginURL:               strings.TrimSpace(target.Record.OriginURL),
+		SyncStrategy:            normalizeFixSyncStrategy(opts.SyncStrategy),
 		PreferredRemote:         preferredRemote,
 		GitHubOwner:             strings.TrimSpace(cfg.GitHub.Owner),
 		RemoteProtocol:          strings.TrimSpace(cfg.GitHub.RemoteProtocol),
@@ -762,6 +906,7 @@ func buildFixActionPlanContext(cfg domain.ConfigFile, target fixRepoState, opts 
 		GenerateGitignore:       opts.GenerateGitignore,
 		GitignorePatterns:       append([]string(nil), opts.GitignorePatterns...),
 		MissingRootGitignore:    target.Risk.MissingRootGitignore,
+		FetchPrune:              cfg.Sync.FetchPrune,
 	}
 }
 

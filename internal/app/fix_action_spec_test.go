@@ -15,6 +15,7 @@ func TestFixActionSpecsHaveCoreMetadata(t *testing.T) {
 		FixActionAbortOperation,
 		FixActionCreateProject,
 		FixActionForkAndRetarget,
+		FixActionSyncWithUpstream,
 		FixActionPush,
 		FixActionStageCommitPush,
 		FixActionPullFFOnly,
@@ -53,6 +54,7 @@ func TestFixActionRiskUsesSharedSpec(t *testing.T) {
 	}{
 		{action: FixActionPush, risky: true},
 		{action: FixActionStageCommitPush, risky: true},
+		{action: FixActionSyncWithUpstream, risky: true},
 		{action: FixActionPullFFOnly, risky: false},
 		{action: FixActionEnableAutoPush, risky: false},
 		{action: "unknown-action", risky: false},
@@ -155,6 +157,26 @@ func TestFixActionExecutionPlanAppendsRevalidationStep(t *testing.T) {
 	}
 	if !strings.Contains(last.Summary, "Revalidate repository status") {
 		t.Fatalf("unexpected last execution-plan summary = %q", last.Summary)
+	}
+}
+
+func TestFixActionPlanSyncWithUpstreamUsesSelectedStrategy(t *testing.T) {
+	t.Parallel()
+
+	rebasePlan := fixActionPlanFor(FixActionSyncWithUpstream, fixActionPlanContext{
+		Upstream:     "origin/main",
+		SyncStrategy: FixSyncStrategyRebase,
+	})
+	if !planContains(rebasePlan, true, "git rebase origin/main") {
+		t.Fatalf("expected rebase command in sync-with-upstream plan, got %#v", rebasePlan)
+	}
+
+	mergePlan := fixActionPlanFor(FixActionSyncWithUpstream, fixActionPlanContext{
+		Upstream:     "origin/main",
+		SyncStrategy: FixSyncStrategyMerge,
+	})
+	if !planContains(mergePlan, true, "git merge --no-edit origin/main") {
+		t.Fatalf("expected merge command in sync-with-upstream plan, got %#v", mergePlan)
 	}
 }
 

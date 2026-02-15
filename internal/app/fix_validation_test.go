@@ -95,4 +95,18 @@ func TestValidateFixApplyOptionsCreateProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected gitignore generation to be allowed for stage-commit-push, got %v", err)
 	}
+
+	err = validateFixApplyOptions(FixActionPush, fixApplyOptions{
+		SyncStrategy: FixSyncStrategy("squash"),
+	})
+	if err == nil {
+		t.Fatal("expected validation error for invalid sync strategy")
+	}
+
+	err = validateFixApplyOptions(FixActionPush, fixApplyOptions{
+		SyncStrategy: FixSyncStrategyMerge,
+	})
+	if err != nil {
+		t.Fatalf("expected merge sync strategy to be valid, got %v", err)
+	}
 }

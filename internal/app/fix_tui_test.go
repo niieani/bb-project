@@ -3090,11 +3090,31 @@ func TestClassifyFixRepoMarksReadOnlyPushAccessAsFixableWithForkAction(t *testin
 func TestSelectableFixActionsAddsAllFixesOptionForMultiple(t *testing.T) {
 	t.Parallel()
 
-	options := selectableFixActions([]string{FixActionPush, FixActionStageCommitPush})
-	if len(options) != 3 {
-		t.Fatalf("options len = %d, want 3", len(options))
+	options := selectableFixActions(fixActionsForSelection([]string{
+		FixActionStageCommitPush,
+		FixActionSyncWithUpstream,
+		FixActionPush,
+	}))
+	if len(options) != 4 {
+		t.Fatalf("options len = %d, want 4", len(options))
 	}
-	if got := options[2]; got != fixAllActions {
+	syncIndex := -1
+	stageIndex := -1
+	for i, option := range options {
+		if option == FixActionSyncWithUpstream {
+			syncIndex = i
+		}
+		if option == FixActionStageCommitPush {
+			stageIndex = i
+		}
+	}
+	if syncIndex < 0 || stageIndex < 0 {
+		t.Fatalf("expected sync and stage options in %v", options)
+	}
+	if syncIndex > stageIndex {
+		t.Fatalf("expected sync-with-upstream to be ordered before stage-commit-push, got %v", options)
+	}
+	if got := options[3]; got != fixAllActions {
 		t.Fatalf("last option = %q, want %q", got, fixAllActions)
 	}
 }

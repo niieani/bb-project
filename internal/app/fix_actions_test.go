@@ -46,10 +46,57 @@ func TestEligibleFixActions(t *testing.T) {
 			actions: []string{FixActionStageCommitPush},
 		},
 		{
+			name: "dirty behind branch blocks stage commit push",
+			rec: func() domain.MachineRepoRecord {
+				r := base
+				r.HasDirtyTracked = true
+				r.Behind = 1
+				return r
+			}(),
+			ctx:     fixEligibilityContext{},
+			actions: []string{},
+		},
+		{
 			name:    "behind allows pull ff only",
 			rec:     func() domain.MachineRepoRecord { r := base; r.Behind = 2; return r }(),
 			ctx:     fixEligibilityContext{},
 			actions: []string{FixActionPullFFOnly},
+		},
+		{
+			name: "diverged clean allows sync with upstream when selected strategy is clean",
+			rec: func() domain.MachineRepoRecord {
+				r := base
+				r.Ahead = 2
+				r.Behind = 1
+				r.Diverged = true
+				return r
+			}(),
+			ctx: fixEligibilityContext{
+				SyncStrategy: FixSyncStrategyRebase,
+				SyncFeasibility: fixSyncFeasibility{
+					Checked:     true,
+					RebaseClean: true,
+				},
+			},
+			actions: []string{FixActionSyncWithUpstream},
+		},
+		{
+			name: "diverged clean hides sync action when selected strategy would conflict",
+			rec: func() domain.MachineRepoRecord {
+				r := base
+				r.Ahead = 2
+				r.Behind = 1
+				r.Diverged = true
+				return r
+			}(),
+			ctx: fixEligibilityContext{
+				SyncStrategy: FixSyncStrategyRebase,
+				SyncFeasibility: fixSyncFeasibility{
+					Checked:    true,
+					MergeClean: true,
+				},
+			},
+			actions: []string{},
 		},
 		{
 			name:    "missing upstream allows set upstream push",

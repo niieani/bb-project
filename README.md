@@ -166,7 +166,7 @@ Forms:
 
 Interactive apply behavior:
 
-- Risky fixes (`push`, `set-upstream-push`, `stage-commit-push`, `create-project`) open a confirmation wizard before execution.
+- Risky fixes (`push`, `sync-with-upstream`, `set-upstream-push`, `stage-commit-push`, `create-project`) open a confirmation wizard before execution.
 - Wizard shows changed files with `+/-` stats, target branch context, and a per-repo skip option.
 - For `stage-commit-push`, wizard includes commit message input and can generate a minimal root `.gitignore` when missing.
 
@@ -180,10 +180,12 @@ Flags:
 
 - `--include-catalog <name>` (repeatable)
 - `--message <text>` (used with `stage-commit-push`; pass `auto` for generated message)
+- `--sync-strategy <rebase|merge>` (used with `sync-with-upstream`; default `rebase`)
 
 Actions:
 
 - `push`
+- `sync-with-upstream`
 - `create-project`
 - `stage-commit-push`
 - `pull-ff-only`
@@ -196,6 +198,7 @@ Safety gating:
 
 - `stage-commit-push` is blocked when secret-like uncommitted files are detected (for example `.env`).
 - In non-interactive flow, `stage-commit-push` is also blocked when root `.gitignore` is missing and noisy uncommitted paths are detected (for example `node_modules`).
+- `stage-commit-push` is blocked when branch is behind upstream (run `sync-with-upstream` first).
 
 ### `bb repo policy <repo> --auto-push=<true|false>`
 
@@ -328,6 +331,7 @@ Unsyncable reasons include:
 - `diverged`
 - `push_policy_blocked`
 - `push_failed`
+- `sync_conflict_requires_manual_resolution`
 - `pull_failed`
 - `checkout_failed`
 - `target_path_nonempty_not_repo`

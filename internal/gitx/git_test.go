@@ -27,6 +27,31 @@ func TestLooksLikePushAccessDenied(t *testing.T) {
 	}
 }
 
+func TestLooksLikeSyncConflict(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		msg  string
+		want bool
+	}{
+		{name: "merge conflict", msg: "CONFLICT (content): Merge conflict in file.txt", want: true},
+		{name: "rebase could not apply", msg: "error: could not apply abc123", want: true},
+		{name: "network timeout", msg: "fatal: unable to access remote: timeout", want: false},
+		{name: "empty", msg: "", want: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := looksLikeSyncConflict(tt.msg); got != tt.want {
+				t.Fatalf("looksLikeSyncConflict() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGitCommandEnvDisablesInteractivePrompts(t *testing.T) {
 	t.Parallel()
 

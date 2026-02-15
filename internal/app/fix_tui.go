@@ -154,8 +154,10 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 	if hasRepo {
 		if !m.ignored[repo.Record.Path] {
 			actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
-				Interactive: true,
-				Risk:        repo.Risk,
+				Interactive:     true,
+				Risk:            repo.Risk,
+				SyncStrategy:    FixSyncStrategyRebase,
+				SyncFeasibility: repo.SyncFeasibility,
 			})
 			options = selectableFixActions(fixActionsForSelection(actions))
 		}
@@ -317,8 +319,10 @@ func (m *fixTUIModel) hasAnySelectedFixes() bool {
 			continue
 		}
 		actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
-			Interactive: true,
-			Risk:        repo.Risk,
+			Interactive:     true,
+			Risk:            repo.Risk,
+			SyncStrategy:    FixSyncStrategyRebase,
+			SyncFeasibility: repo.SyncFeasibility,
 		})
 		options := selectableFixActions(fixActionsForSelection(actions))
 		if idx < len(options) {
@@ -671,6 +675,9 @@ var (
 
 	fixActionForkStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("99"))
+
+	fixActionSyncStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("111"))
 
 	fixActionAutoPushStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("70"))
@@ -1179,8 +1186,10 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 		return ""
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
-		Interactive: true,
-		Risk:        repo.Risk,
+		Interactive:     true,
+		Risk:            repo.Risk,
+		SyncStrategy:    FixSyncStrategyRebase,
+		SyncFeasibility: repo.SyncFeasibility,
 	})
 	action := m.currentActionForRepo(repo.Record.Path, fixActionsForSelection(actions))
 	ignored := m.ignored[repo.Record.Path]
@@ -1277,8 +1286,10 @@ func (m *fixTUIModel) viewFixSummary() string {
 			continue
 		}
 		tier := classifyFixRepo(repo, eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
-			Interactive: true,
-			Risk:        repo.Risk,
+			Interactive:     true,
+			Risk:            repo.Risk,
+			SyncStrategy:    FixSyncStrategyRebase,
+			SyncFeasibility: repo.SyncFeasibility,
 		}))
 		switch tier {
 		case fixRepoTierAutofixable:
@@ -1422,8 +1433,10 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 		path := repo.Record.Path
 
 		actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
-			Interactive: true,
-			Risk:        repo.Risk,
+			Interactive:     true,
+			Risk:            repo.Risk,
+			SyncStrategy:    FixSyncStrategyRebase,
+			SyncFeasibility: repo.SyncFeasibility,
 		})
 		options := selectableFixActions(fixActionsForSelection(actions))
 		if idx, ok := m.selectedAction[path]; !ok || idx < -1 || idx >= len(options) {
@@ -1616,8 +1629,10 @@ func (m *fixTUIModel) cycleCurrentAction(delta int) {
 		return
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
-		Interactive: true,
-		Risk:        repo.Risk,
+		Interactive:     true,
+		Risk:            repo.Risk,
+		SyncStrategy:    FixSyncStrategyRebase,
+		SyncFeasibility: repo.SyncFeasibility,
 	})
 	options := selectableFixActions(fixActionsForSelection(actions))
 	key := repo.Record.Path
@@ -1648,8 +1663,10 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		return
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
-		Interactive: true,
-		Risk:        repo.Risk,
+		Interactive:     true,
+		Risk:            repo.Risk,
+		SyncStrategy:    FixSyncStrategyRebase,
+		SyncFeasibility: repo.SyncFeasibility,
 	})
 	selectionActions := fixActionsForSelection(actions)
 	options := selectableFixActions(selectionActions)
@@ -1739,8 +1756,10 @@ func (m *fixTUIModel) applyAllSelections() {
 			continue
 		}
 		actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
-			Interactive: true,
-			Risk:        repo.Risk,
+			Interactive:     true,
+			Risk:            repo.Risk,
+			SyncStrategy:    FixSyncStrategyRebase,
+			SyncFeasibility: repo.SyncFeasibility,
 		})
 		selectionActions := fixActionsForSelection(actions)
 		options := selectableFixActions(selectionActions)
@@ -1816,7 +1835,8 @@ func (m *fixTUIModel) applyImmediateAction(repo fixRepoState, action string) err
 		return errors.New("internal: app is not configured")
 	}
 	_, err := m.app.applyFixAction(m.includeCatalogs, repo.Record.Path, action, fixApplyOptions{
-		Interactive: true,
+		Interactive:  true,
+		SyncStrategy: FixSyncStrategyRebase,
 	})
 	return err
 }
@@ -1935,7 +1955,38 @@ func fixActionsForSelection(actions []string) []string {
 		}
 		out = append(out, action)
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		li := fixActionSelectionPriority(out[i])
+		lj := fixActionSelectionPriority(out[j])
+		if li != lj {
+			return li < lj
+		}
+		return out[i] < out[j]
+	})
 	return out
+}
+
+func fixActionSelectionPriority(action string) int {
+	switch action {
+	case FixActionAbortOperation:
+		return 10
+	case FixActionCreateProject:
+		return 20
+	case FixActionPush:
+		return 30
+	case FixActionSyncWithUpstream:
+		return 40
+	case FixActionStageCommitPush:
+		return 50
+	case FixActionPullFFOnly:
+		return 60
+	case FixActionSetUpstreamPush:
+		return 70
+	case FixActionForkAndRetarget:
+		return 80
+	default:
+		return 100
+	}
 }
 
 func fixListColumnsForWidth(listWidth int) fixColumnLayout {
@@ -2016,6 +2067,8 @@ func fixActionStyleFor(action string) lipgloss.Style {
 		return fixActionCreateProjectStyle
 	case FixActionForkAndRetarget:
 		return fixActionForkStyle
+	case FixActionSyncWithUpstream:
+		return fixActionSyncStyle
 	case FixActionEnableAutoPush:
 		return fixActionAutoPushStyle
 	case FixActionAbortOperation:
@@ -2156,10 +2209,14 @@ func unsyncableReasonsFullyCoverable(reasons []domain.UnsyncableReason, actions 
 			return has[FixActionStageCommitPush]
 		case domain.ReasonMissingUpstream:
 			return has[FixActionSetUpstreamPush] || has[FixActionStageCommitPush] || has[FixActionCreateProject]
+		case domain.ReasonDiverged:
+			return has[FixActionSyncWithUpstream]
 		case domain.ReasonPushPolicyBlocked:
 			return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush] || has[FixActionCreateProject]
 		case domain.ReasonPushFailed:
 			return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush] || has[FixActionCreateProject]
+		case domain.ReasonSyncConflict:
+			return false
 		case domain.ReasonPushAccessBlocked:
 			return has[FixActionForkAndRetarget]
 		case domain.ReasonPullFailed:

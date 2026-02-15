@@ -63,6 +63,7 @@ type FixOptions struct {
 	Project         string
 	Action          string
 	CommitMessage   string
+	SyncStrategy    FixSyncStrategy
 	NoRefresh       bool
 }
 

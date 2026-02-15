@@ -19,6 +19,7 @@ type fixActionPlanContext struct {
 	Branch                  string
 	Upstream                string
 	OriginURL               string
+	SyncStrategy            FixSyncStrategy
 	PreferredRemote         string
 	GitHubOwner             string
 	RemoteProtocol          string
@@ -29,6 +30,7 @@ type fixActionPlanContext struct {
 	GenerateGitignore       bool
 	GitignorePatterns       []string
 	MissingRootGitignore    bool
+	FetchPrune              bool
 }
 
 type fixActionPlanEntry struct {
@@ -63,6 +65,12 @@ var fixActionSpecs = map[string]fixActionSpec{
 		Description: "Fork the upstream repository, add your fork as a remote, retarget this branch upstream, and update repo metadata.",
 		Risky:       true,
 		BuildPlan:   planFixActionForkAndRetarget,
+	},
+	FixActionSyncWithUpstream: {
+		Label:       "Sync with upstream",
+		Description: "Integrate upstream commits into your local branch using the selected sync strategy (rebase by default).",
+		Risky:       true,
+		BuildPlan:   planFixActionSyncWithUpstream,
 	},
 	FixActionPush: {
 		Label:       "Push commits",
@@ -156,6 +164,19 @@ func planFixActionPush(_ fixActionPlanContext) []fixActionPlanEntry {
 	return []fixActionPlanEntry{
 		{ID: "push-main", Command: true, Summary: "git push"},
 	}
+}
+
+func planFixActionSyncWithUpstream(ctx fixActionPlanContext) []fixActionPlanEntry {
+	upstream := plannedUpstream(ctx.Upstream)
+	entries := []fixActionPlanEntry{
+		{ID: "sync-fetch-prune", Command: true, Summary: "git fetch --prune (if sync.fetch_prune is enabled)"},
+	}
+	if normalizeFixSyncStrategy(ctx.SyncStrategy) == FixSyncStrategyMerge {
+		entries = append(entries, fixActionPlanEntry{ID: "sync-merge", Command: true, Summary: fmt.Sprintf("git merge --no-edit %s", upstream)})
+		return entries
+	}
+	entries = append(entries, fixActionPlanEntry{ID: "sync-rebase", Command: true, Summary: fmt.Sprintf("git rebase %s", upstream)})
+	return entries
 }
 
 func planFixActionStageCommitPush(ctx fixActionPlanContext) []fixActionPlanEntry {
@@ -315,6 +336,13 @@ func plannedBranch(branch string) string {
 		return trimmed
 	}
 	return "<current-branch>"
+}
+
+func plannedUpstream(upstream string) string {
+	if trimmed := strings.TrimSpace(upstream); trimmed != "" {
+		return trimmed
+	}
+	return "@{u}"
 }
 
 func plannedProjectName(name string, repoName string) string {
