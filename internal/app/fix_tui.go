@@ -1545,6 +1545,7 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		if err := m.applyImmediateAction(repo, selection); err != nil {
 			m.summaryResults = append(m.summaryResults, fixSummaryResult{
 				RepoName: repo.Record.Name,
+				RepoPath: repo.Record.Path,
 				Action:   fixActionLabel(selection),
 				Status:   "failed",
 				Detail:   err.Error(),
@@ -1554,6 +1555,7 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		}
 		m.summaryResults = append(m.summaryResults, fixSummaryResult{
 			RepoName: repo.Record.Name,
+			RepoPath: repo.Record.Path,
 			Action:   fixActionLabel(selection),
 			Status:   "applied",
 		})
@@ -1625,6 +1627,7 @@ func (m *fixTUIModel) applyAllSelections() {
 				failures = append(failures, fmt.Sprintf("%s (%s)", repo.Record.Name, fixActionLabel(selected)))
 				m.summaryResults = append(m.summaryResults, fixSummaryResult{
 					RepoName: repo.Record.Name,
+					RepoPath: repo.Record.Path,
 					Action:   fixActionLabel(selected),
 					Status:   "failed",
 					Detail:   err.Error(),
@@ -1633,6 +1636,7 @@ func (m *fixTUIModel) applyAllSelections() {
 			}
 			m.summaryResults = append(m.summaryResults, fixSummaryResult{
 				RepoName: repo.Record.Name,
+				RepoPath: repo.Record.Path,
 				Action:   fixActionLabel(selected),
 				Status:   "applied",
 			})

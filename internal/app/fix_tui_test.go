@@ -710,6 +710,82 @@ func TestFixTUIWizardSkipShowsSummary(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardSummaryViewShowsSinglePreciseHeadingAndTotals(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Syncable:  true,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.summaryResults = []fixSummaryResult{
+		{
+			RepoName: "api",
+			RepoPath: "/repos/api",
+			Action:   fixActionLabel(FixActionPush),
+			Status:   "applied",
+		},
+	}
+	m.viewMode = fixViewSummary
+
+	view := ansi.Strip(m.viewSummaryContent())
+	if !strings.Contains(view, "Fix outcomes and current syncability after revalidation.") {
+		t.Fatalf("expected precise summary heading, got %q", view)
+	}
+	if strings.Contains(view, "Fix Summary") || strings.Contains(view, "Results from this apply session.") {
+		t.Fatalf("expected redundant summary copy to be removed, got %q", view)
+	}
+	if !strings.Contains(view, "Session totals") {
+		t.Fatalf("expected totals block inside summary view, got %q", view)
+	}
+	if !strings.Contains(view, "Applied: 1") || !strings.Contains(view, "Skipped: 0") || !strings.Contains(view, "Failed: 0") {
+		t.Fatalf("expected in-box applied/skipped/failed totals, got %q", view)
+	}
+	if !strings.Contains(view, "Result: syncable now.") {
+		t.Fatalf("expected post-revalidation syncable outcome, got %q", view)
+	}
+}
+
+func TestFixTUIWizardSummaryViewReportsWhenMoreFixesAreStillNeeded(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Syncable:  false,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.summaryResults = []fixSummaryResult{
+		{
+			RepoName: "api",
+			RepoPath: "/repos/api",
+			Action:   fixActionLabel(FixActionPush),
+			Status:   "applied",
+		},
+	}
+	m.viewMode = fixViewSummary
+
+	view := ansi.Strip(m.viewSummaryContent())
+	if !strings.Contains(view, "Result: still unsyncable; more fixes needed.") {
+		t.Fatalf("expected explicit follow-up-needed outcome, got %q", view)
+	}
+}
+
 func TestFixTUIWizardCommitInputStartsEmptyWithPlaceholder(t *testing.T) {
 	t.Parallel()
 

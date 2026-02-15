@@ -73,6 +73,7 @@ type fixWizardState struct {
 
 type fixSummaryResult struct {
 	RepoName string
+	RepoPath string
 	Action   string
 	Status   string
 	Detail   string
@@ -233,25 +234,13 @@ func (m *fixTUIModel) loadWizardCurrent() {
 
 func (m *fixTUIModel) completeWizard() {
 	m.viewMode = fixViewSummary
-	applied := 0
-	skipped := 0
-	failed := 0
-	for _, item := range m.summaryResults {
-		switch item.Status {
-		case "applied":
-			applied++
-		case "skipped":
-			skipped++
-		case "failed":
-			failed++
-		}
-	}
-	m.status = fmt.Sprintf("applied %d, skipped %d, failed %d", applied, skipped, failed)
+	m.status = ""
 }
 
 func (m *fixTUIModel) appendSummaryResult(action string, status string, detail string) {
 	m.summaryResults = append(m.summaryResults, fixSummaryResult{
 		RepoName: m.wizard.RepoName,
+		RepoPath: m.wizard.RepoPath,
 		Action:   fixActionLabel(action),
 		Status:   status,
 		Detail:   detail,
@@ -1230,22 +1219,24 @@ func longestANSIWidth(s string) int {
 
 func (m *fixTUIModel) viewSummaryContent() string {
 	var b strings.Builder
-	b.WriteString(labelStyle.Render("Fix Summary"))
-	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Results from this apply session."))
+	b.WriteString(labelStyle.Render("Fix outcomes and current syncability after revalidation."))
+	b.WriteString("\n\n")
+	b.WriteString(renderFieldBlock(false, "Session totals", "", m.renderSummaryTotals(), ""))
 	b.WriteString("\n\n")
 	if len(m.summaryResults) == 0 {
-		b.WriteString(fieldStyle.Render("No fixes were applied."))
+		b.WriteString(renderFieldBlock(false, "Actions", "", "No fixes were applied.", ""))
 	} else {
 		for i, item := range m.summaryResults {
 			if i > 0 {
-				b.WriteString("\n")
+				b.WriteString("\n\n")
 			}
-			value := fmt.Sprintf("%s: %s", item.Action, item.Status)
-			if strings.TrimSpace(item.Detail) != "" {
-				value += " (" + item.Detail + ")"
-			}
-			b.WriteString(renderFieldBlock(false, item.RepoName, "", value, ""))
+			b.WriteString(renderFieldBlock(
+				false,
+				item.RepoName,
+				strings.TrimSpace(item.RepoPath),
+				m.renderSummaryResultValue(item),
+				m.renderSummaryResultError(item),
+			))
 		}
 	}
 	b.WriteString("\n\n")
@@ -1253,6 +1244,103 @@ func (m *fixTUIModel) viewSummaryContent() string {
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Enter or esc to return to repository list."))
 	return b.String()
+}
+
+func (m *fixTUIModel) renderSummaryTotals() string {
+	applied, skipped, failed := m.summaryResultCounts()
+	lines := []string{
+		fmt.Sprintf("%s Applied: %d", lipgloss.NewStyle().Foreground(successColor).Bold(true).Render("✓"), applied),
+		fmt.Sprintf("%s Skipped: %d", lipgloss.NewStyle().Foreground(mutedTextColor).Bold(true).Render("◦"), skipped),
+		fmt.Sprintf("%s Failed: %d", lipgloss.NewStyle().Foreground(errorFgColor).Bold(true).Render("✗"), failed),
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *fixTUIModel) renderSummaryResultValue(item fixSummaryResult) string {
+	lines := []string{
+		fmt.Sprintf("%s %s: %s", renderSummaryResultMarker(item.Status), item.Action, item.Status),
+	}
+	if outcome := m.summaryOutcomeLine(item); outcome != "" {
+		lines = append(lines, outcome)
+	}
+	if detail := strings.TrimSpace(item.Detail); detail != "" && item.Status != "failed" {
+		lines = append(lines, "Detail: "+detail)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *fixTUIModel) renderSummaryResultError(item fixSummaryResult) string {
+	if item.Status != "failed" {
+		return ""
+	}
+	return strings.TrimSpace(item.Detail)
+}
+
+func renderSummaryResultMarker(status string) string {
+	switch strings.TrimSpace(status) {
+	case "applied":
+		return lipgloss.NewStyle().Foreground(successColor).Bold(true).Render("✓")
+	case "failed":
+		return lipgloss.NewStyle().Foreground(errorFgColor).Bold(true).Render("✗")
+	case "skipped":
+		return lipgloss.NewStyle().Foreground(mutedTextColor).Bold(true).Render("◦")
+	default:
+		return lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("•")
+	}
+}
+
+func (m *fixTUIModel) summaryOutcomeLine(item fixSummaryResult) string {
+	switch strings.TrimSpace(item.Status) {
+	case "applied":
+		repo, ok := m.summaryRepoState(item.RepoPath)
+		if !ok {
+			return "Result: applied; revalidated state unavailable."
+		}
+		if repo.Record.Syncable {
+			return "Result: syncable now."
+		}
+		return "Result: still unsyncable; more fixes needed."
+	case "skipped":
+		return "Result: skipped; no repository changes."
+	case "failed":
+		repo, ok := m.summaryRepoState(item.RepoPath)
+		if !ok {
+			return "Result: action failed before completion."
+		}
+		if repo.Record.Syncable {
+			return "Result: action failed, but repository is syncable."
+		}
+		return "Result: action failed; repository still needs fixes."
+	default:
+		return ""
+	}
+}
+
+func (m *fixTUIModel) summaryRepoState(repoPath string) (fixRepoState, bool) {
+	target := strings.TrimSpace(repoPath)
+	if target == "" {
+		return fixRepoState{}, false
+	}
+	for _, repo := range m.repos {
+		if strings.TrimSpace(repo.Record.Path) == target {
+			return repo, true
+		}
+	}
+	return fixRepoState{}, false
+}
+
+func (m *fixTUIModel) summaryResultCounts() (applied int, skipped int, failed int) {
+	for _, item := range m.summaryResults {
+		switch strings.TrimSpace(item.Status) {
+		case "applied":
+			applied++
+		case "skipped":
+			skipped++
+		case "failed":
+			failed++
+		}
+	}
+	return applied, skipped, failed
 }
 
 func renderWizardActionButtons(focus int) string {
