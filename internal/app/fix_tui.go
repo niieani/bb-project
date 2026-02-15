@@ -1687,7 +1687,7 @@ func (m *fixTUIModel) applyCurrentSelection() {
 	queue := make([]fixWizardDecision, 0, 2)
 	selections := []string{action}
 	if action == fixAllActions {
-		selections = selectionActions
+		selections = fixActionsForAllExecution(selectionActions)
 	}
 
 	applied := 0
@@ -1777,7 +1777,7 @@ func (m *fixTUIModel) applyAllSelections() {
 		selection := options[idx]
 		selections := []string{selection}
 		if selection == fixAllActions {
-			selections = selectionActions
+			selections = fixActionsForAllExecution(selectionActions)
 		}
 		for _, selected := range selections {
 			if isRiskyFixAction(selected) {
@@ -1966,21 +1966,41 @@ func fixActionsForSelection(actions []string) []string {
 	return out
 }
 
+func fixActionsForAllExecution(actions []string) []string {
+	if len(actions) == 0 {
+		return nil
+	}
+	stageCommitSelected := containsAction(actions, FixActionStageCommitPush)
+	seen := make(map[string]struct{}, len(actions))
+	out := make([]string, 0, len(actions))
+	for _, action := range actions {
+		if _, ok := seen[action]; ok {
+			continue
+		}
+		seen[action] = struct{}{}
+		if stageCommitSelected && (action == FixActionPush || action == FixActionSetUpstreamPush) {
+			continue
+		}
+		out = append(out, action)
+	}
+	return out
+}
+
 func fixActionSelectionPriority(action string) int {
 	switch action {
 	case FixActionAbortOperation:
 		return 10
-	case FixActionCreateProject:
-		return 20
-	case FixActionPush:
-		return 30
 	case FixActionSyncWithUpstream:
-		return 40
-	case FixActionStageCommitPush:
-		return 50
+		return 20
 	case FixActionPullFFOnly:
-		return 60
+		return 30
+	case FixActionStageCommitPush:
+		return 40
+	case FixActionCreateProject:
+		return 50
 	case FixActionSetUpstreamPush:
+		return 60
+	case FixActionPush:
 		return 70
 	case FixActionForkAndRetarget:
 		return 80

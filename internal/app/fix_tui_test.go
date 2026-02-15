@@ -82,11 +82,18 @@ func TestFixTUISelectionFallbackAfterEligibilityChange(t *testing.T) {
 
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
-	m.cycleCurrentAction(1)
-	m.cycleCurrentAction(1)
+	initialActions := eligibleFixActions(m.visible[0].Record, m.visible[0].Meta, fixEligibilityContext{
+		Interactive: true,
+		Risk:        m.visible[0].Risk,
+	})
+	initialOptions := selectableFixActions(fixActionsForSelection(initialActions))
+	if len(initialOptions) < 2 {
+		t.Fatalf("expected at least two options before fallback test, got %v", initialOptions)
+	}
+	m.selectedAction["/repos/api"] = 1
 	before := actionForVisibleRepo(m, 0)
-	if !strings.Contains(before, FixActionStageCommitPush) {
-		t.Fatalf("expected second cycle to pick %q, got %q", FixActionStageCommitPush, before)
+	if before == fixNoAction {
+		t.Fatalf("expected preselected action to be non-default before fallback, got %q", before)
 	}
 
 	m.repos[0].Record = domain.MachineRepoRecord{
@@ -3143,6 +3150,158 @@ func TestSelectableFixActionsAddsAllFixesOptionForMultiple(t *testing.T) {
 	}
 	if got := options[3]; got != fixAllActions {
 		t.Fatalf("last option = %q, want %q", got, fixAllActions)
+	}
+}
+
+func TestSelectableFixActionsOrdersStageCommitBeforeCreateProject(t *testing.T) {
+	t.Parallel()
+
+	options := selectableFixActions(fixActionsForSelection([]string{
+		FixActionCreateProject,
+		FixActionStageCommitPush,
+	}))
+	if len(options) != 3 {
+		t.Fatalf("options len = %d, want 3", len(options))
+	}
+	stageIndex := -1
+	createIndex := -1
+	for i, option := range options {
+		if option == FixActionStageCommitPush {
+			stageIndex = i
+		}
+		if option == FixActionCreateProject {
+			createIndex = i
+		}
+	}
+	if stageIndex < 0 || createIndex < 0 {
+		t.Fatalf("expected stage and create options in %v", options)
+	}
+	if stageIndex > createIndex {
+		t.Fatalf("expected stage-commit-push before create-project, got %v", options)
+	}
+}
+
+func TestFixActionsForAllExecutionSkipsRedundantPushAfterStageCommitPush(t *testing.T) {
+	t.Parallel()
+
+	got := fixActionsForAllExecution([]string{
+		FixActionStageCommitPush,
+		FixActionPush,
+		FixActionSetUpstreamPush,
+	})
+	want := []string{FixActionStageCommitPush}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("all-fixes execution actions = %v, want %v", got, want)
+	}
+}
+
+func TestFixTUIAllFixesQueueUsesExecutionOrderAndDeduplicatesRiskyActions(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:            "api",
+				Path:            "/repos/api",
+				OriginURL:       "git@github.com:you/api.git",
+				Upstream:        "origin/main",
+				HasDirtyTracked: true,
+				Ahead:           1,
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	repo := m.visible[0]
+	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+		Interactive: true,
+		Risk:        repo.Risk,
+	})
+	options := selectableFixActions(fixActionsForSelection(actions))
+	m.selectedAction[repo.Record.Path] = len(options) - 1 // All fixes
+
+	m.applyCurrentSelection()
+	if m.viewMode != fixViewWizard {
+		t.Fatalf("view mode = %v, want %v", m.viewMode, fixViewWizard)
+	}
+	if len(m.wizard.Queue) != 1 {
+		t.Fatalf("wizard queue len = %d, want 1 after dedupe", len(m.wizard.Queue))
+	}
+	if got := m.wizard.Queue[0].Action; got != FixActionStageCommitPush {
+		t.Fatalf("wizard queue[0] action = %q, want %q", got, FixActionStageCommitPush)
+	}
+}
+
+func TestFixTUIAllFixesQueueRunsStageCommitBeforeCreateProject(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:         "api",
+				Path:         "/repos/api",
+				OriginURL:    "",
+				Upstream:     "",
+				HasUntracked: true,
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	repo := m.visible[0]
+	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+		Interactive: true,
+		Risk:        repo.Risk,
+	})
+	options := selectableFixActions(fixActionsForSelection(actions))
+	m.selectedAction[repo.Record.Path] = len(options) - 1 // All fixes
+
+	m.applyCurrentSelection()
+	if m.viewMode != fixViewWizard {
+		t.Fatalf("view mode = %v, want %v", m.viewMode, fixViewWizard)
+	}
+	if len(m.wizard.Queue) != 2 {
+		t.Fatalf("wizard queue len = %d, want 2", len(m.wizard.Queue))
+	}
+	if got := m.wizard.Queue[0].Action; got != FixActionStageCommitPush {
+		t.Fatalf("wizard queue[0] action = %q, want %q", got, FixActionStageCommitPush)
+	}
+	if got := m.wizard.Queue[1].Action; got != FixActionCreateProject {
+		t.Fatalf("wizard queue[1] action = %q, want %q", got, FixActionCreateProject)
+	}
+}
+
+func TestFixTUIApplyAllSelectionsUsesAllFixesExecutionOrderPerRepo(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:            "api",
+				Path:            "/repos/api",
+				OriginURL:       "git@github.com:you/api.git",
+				Upstream:        "origin/main",
+				HasDirtyTracked: true,
+				Ahead:           1,
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	repo := m.visible[0]
+	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+		Interactive: true,
+		Risk:        repo.Risk,
+	})
+	options := selectableFixActions(fixActionsForSelection(actions))
+	m.selectedAction[repo.Record.Path] = len(options) - 1 // All fixes
+
+	m.applyAllSelections()
+	if m.viewMode != fixViewWizard {
+		t.Fatalf("view mode = %v, want %v", m.viewMode, fixViewWizard)
+	}
+	if len(m.wizard.Queue) != 1 {
+		t.Fatalf("wizard queue len = %d, want 1 after dedupe", len(m.wizard.Queue))
+	}
+	if got := m.wizard.Queue[0].Action; got != FixActionStageCommitPush {
+		t.Fatalf("wizard queue[0] action = %q, want %q", got, FixActionStageCommitPush)
 	}
 }
 
