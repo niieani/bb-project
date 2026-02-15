@@ -91,6 +91,12 @@ type fixSummaryFollowUpCandidate struct {
 	Label    string
 }
 
+type fixSummaryRepoGroup struct {
+	RepoName string
+	RepoPath string
+	Items    []fixSummaryResult
+}
+
 const (
 	fixWizardActionCancel = iota
 	fixWizardActionSkip
@@ -1378,25 +1384,30 @@ func longestANSIWidth(s string) int {
 func (m *fixTUIModel) viewSummaryContent() string {
 	candidates := m.summaryFollowUpCandidates()
 	m.syncSummaryFollowUpState(candidates)
+	groups := m.summaryRepoGroups()
 
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("Fix outcomes and current syncability after revalidation."))
 	b.WriteString("\n\n")
 	b.WriteString(renderFieldBlock(false, "Session totals", "", m.renderSummaryTotals(), ""))
 	b.WriteString("\n\n")
-	if len(m.summaryResults) == 0 {
+	if len(groups) == 0 {
 		b.WriteString(renderFieldBlock(false, "Actions", "", "No fixes were applied.", ""))
 	} else {
-		for i, item := range m.summaryResults {
+		for i, group := range groups {
 			if i > 0 {
 				b.WriteString("\n\n")
 			}
+			repoName := strings.TrimSpace(group.RepoName)
+			if repoName == "" {
+				repoName = "(repository)"
+			}
 			b.WriteString(renderFieldBlock(
 				false,
-				item.RepoName,
-				strings.TrimSpace(item.RepoPath),
-				m.renderSummaryResultValue(item, candidates),
-				m.renderSummaryResultError(item),
+				repoName,
+				strings.TrimSpace(group.RepoPath),
+				m.renderSummaryRepoGroupValue(group, candidates),
+				"",
 			))
 		}
 	}
@@ -1418,6 +1429,42 @@ func (m *fixTUIModel) viewSummaryContent() string {
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Enter or esc to return to repository list."))
 	return b.String()
+}
+
+func (m *fixTUIModel) summaryRepoGroups() []fixSummaryRepoGroup {
+	if len(m.summaryResults) == 0 {
+		return nil
+	}
+
+	indexByKey := make(map[string]int, len(m.summaryResults))
+	groups := make([]fixSummaryRepoGroup, 0, len(m.summaryResults))
+	for _, item := range m.summaryResults {
+		repoPath := strings.TrimSpace(item.RepoPath)
+		repoName := strings.TrimSpace(item.RepoName)
+
+		key := repoPath
+		if key == "" {
+			key = "name:" + repoName
+		}
+		if idx, ok := indexByKey[key]; ok {
+			groups[idx].Items = append(groups[idx].Items, item)
+			if groups[idx].RepoName == "" && repoName != "" {
+				groups[idx].RepoName = repoName
+			}
+			if groups[idx].RepoPath == "" && repoPath != "" {
+				groups[idx].RepoPath = repoPath
+			}
+			continue
+		}
+
+		indexByKey[key] = len(groups)
+		groups = append(groups, fixSummaryRepoGroup{
+			RepoName: repoName,
+			RepoPath: repoPath,
+			Items:    []fixSummaryResult{item},
+		})
+	}
+	return groups
 }
 
 func (m *fixTUIModel) renderSummaryTotals() string {
@@ -1484,6 +1531,81 @@ func (m *fixTUIModel) renderSummaryResultValue(item fixSummaryResult, candidates
 		lines = append(lines, "Detail: "+detail)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *fixTUIModel) renderSummaryRepoGroupValue(group fixSummaryRepoGroup, candidates []fixSummaryFollowUpCandidate) string {
+	lines := make([]string, 0, len(group.Items)+8)
+	for _, item := range group.Items {
+		lines = append(lines, fmt.Sprintf("%s %s: %s", renderSummaryResultMarker(item.Status), item.Action, item.Status))
+		if detail := strings.TrimSpace(item.Detail); detail != "" {
+			prefix := "Detail"
+			if strings.TrimSpace(item.Status) == "failed" {
+				prefix = "Error"
+			}
+			lines = append(lines, "  "+prefix+": "+detail)
+		}
+	}
+
+	repo, hasRepo := m.summaryRepoState(group.RepoPath)
+	if outcome := m.summaryOutcomeLine(fixSummaryResult{Status: summaryRepoGroupOutcomeStatus(group.Items)}, repo, hasRepo); outcome != "" {
+		lines = append(lines, outcome)
+	}
+	if hasRepo && !repo.Record.Syncable {
+		blockers := append([]domain.UnsyncableReason(nil), repo.Record.UnsyncableReasons...)
+		if len(blockers) > 0 {
+			lines = append(lines, "", "Remaining blockers")
+			for _, reason := range blockers {
+				lines = append(lines, fmt.Sprintf("- %s (%s)", summaryUnsyncableReasonLabel(reason), reason))
+			}
+		}
+
+		followUps := m.summaryFollowUpsForRepo(group.RepoPath, candidates)
+		if len(followUps) > 0 {
+			lines = append(lines, "", "Automated next fixes")
+			for _, followUp := range followUps {
+				lines = append(lines, m.renderSummaryFollowUpLine(followUp))
+			}
+		}
+
+		actionKeys := make([]string, 0, len(followUps))
+		for _, followUp := range followUps {
+			actionKeys = append(actionKeys, followUp.Action)
+		}
+		uncovered := uncoveredUnsyncableReasons(repo.Record.UnsyncableReasons, actionKeys)
+		if len(uncovered) > 0 || len(followUps) == 0 {
+			lines = append(lines, "", "Manual intervention required - bb has no additional safe automated fixes for this repo.")
+			for _, guidance := range summaryManualInterventionGuidance(uncovered) {
+				lines = append(lines, "- "+guidance)
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func summaryRepoGroupOutcomeStatus(items []fixSummaryResult) string {
+	hasApplied := false
+	hasFailed := false
+	hasSkipped := false
+	for _, item := range items {
+		switch strings.TrimSpace(item.Status) {
+		case "applied":
+			hasApplied = true
+		case "failed":
+			hasFailed = true
+		case "skipped":
+			hasSkipped = true
+		}
+	}
+	switch {
+	case hasApplied:
+		return "applied"
+	case hasFailed:
+		return "failed"
+	case hasSkipped:
+		return "skipped"
+	default:
+		return ""
+	}
 }
 
 func (m *fixTUIModel) renderSummaryResultError(item fixSummaryResult) string {

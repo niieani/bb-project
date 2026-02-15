@@ -1239,6 +1239,54 @@ func TestFixTUIWizardSummaryViewShowsSinglePreciseHeadingAndTotals(t *testing.T)
 	}
 }
 
+func TestFixTUIWizardSummaryGroupsMultipleActionsPerRepoIntoSingleRepoBlock(t *testing.T) {
+	t.Parallel()
+
+	repoPath := "/Volumes/Projects/Software/ultrasound-extractor"
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "ultrasound-extractor",
+				Path:      repoPath,
+				OriginURL: "git@github.com:you/ultrasound-extractor.git",
+				Upstream:  "origin/main",
+				Syncable:  true,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/ultrasound-extractor.git", AutoPush: domain.AutoPushModeEnabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.summaryResults = []fixSummaryResult{
+		{
+			RepoName: "ultrasound-extractor",
+			RepoPath: repoPath,
+			Action:   fixActionLabel(FixActionStageCommitPush),
+			Status:   "applied",
+		},
+		{
+			RepoName: "ultrasound-extractor",
+			RepoPath: repoPath,
+			Action:   fixActionLabel(FixActionCreateProject),
+			Status:   "applied",
+		},
+	}
+	m.viewMode = fixViewSummary
+
+	view := ansi.Strip(m.viewSummaryContent())
+	if got := strings.Count(view, repoPath); got != 1 {
+		t.Fatalf("expected single repo block for %q, path occurrence count=%d, view=%q", repoPath, got, view)
+	}
+	if !strings.Contains(view, "✓ Stage, commit & push: applied") {
+		t.Fatalf("expected stage-commit-push result in grouped repo block, got %q", view)
+	}
+	if !strings.Contains(view, "✓ Create project & push: applied") {
+		t.Fatalf("expected create-project result in grouped repo block, got %q", view)
+	}
+	if got := strings.Count(view, "Revalidation: syncable now."); got != 1 {
+		t.Fatalf("expected single revalidation outcome line in grouped repo block, got count=%d, view=%q", got, view)
+	}
+}
+
 func TestFixTUIWizardSummaryViewReportsWhenMoreFixesAreStillNeeded(t *testing.T) {
 	t.Parallel()
 
