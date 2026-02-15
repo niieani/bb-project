@@ -80,6 +80,14 @@ type fixSummaryResult struct {
 	Detail   string
 }
 
+type fixSummaryFollowUpCandidate struct {
+	Key      string
+	RepoName string
+	RepoPath string
+	Action   string
+	Label    string
+}
+
 const (
 	fixWizardActionCancel = iota
 	fixWizardActionSkip
@@ -236,17 +244,27 @@ func (m *fixTUIModel) loadWizardCurrent() {
 
 func (m *fixTUIModel) completeWizard() {
 	m.viewMode = fixViewSummary
+	m.resetSummaryFollowUpState()
 	m.status = ""
 }
 
 func (m *fixTUIModel) appendSummaryResult(action string, status string, detail string) {
+	m.appendSummaryResultForRepo(m.wizard.RepoName, m.wizard.RepoPath, action, status, detail)
+}
+
+func (m *fixTUIModel) appendSummaryResultForRepo(repoName string, repoPath string, action string, status string, detail string) {
 	m.summaryResults = append(m.summaryResults, fixSummaryResult{
-		RepoName: m.wizard.RepoName,
-		RepoPath: m.wizard.RepoPath,
+		RepoName: strings.TrimSpace(repoName),
+		RepoPath: strings.TrimSpace(repoPath),
 		Action:   fixActionLabel(action),
 		Status:   status,
 		Detail:   detail,
 	})
+}
+
+func (m *fixTUIModel) resetSummaryFollowUpState() {
+	m.summaryCursor = 0
+	m.summarySelectedFollowUps = map[string]bool{}
 }
 
 func (m *fixTUIModel) advanceWizard() {
@@ -798,6 +816,9 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *fixTUIModel) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	candidates := m.summaryFollowUpCandidates()
+	m.syncSummaryFollowUpState(candidates)
+
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
@@ -808,11 +829,124 @@ func (m *fixTUIModel) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.help.ShowAll = !m.help.ShowAll
 		return m, nil
 	}
-	if key.Matches(msg, m.keys.Apply) || key.Matches(msg, m.keys.Cancel) || key.Matches(msg, m.keys.Skip) {
+	if msg.String() == "up" && len(candidates) > 0 {
+		m.summaryCursor--
+		if m.summaryCursor < 0 {
+			m.summaryCursor = len(candidates) - 1
+		}
+		return m, nil
+	}
+	if msg.String() == "down" && len(candidates) > 0 {
+		m.summaryCursor++
+		if m.summaryCursor >= len(candidates) {
+			m.summaryCursor = 0
+		}
+		return m, nil
+	}
+	if msg.String() == " " && len(candidates) > 0 {
+		m.toggleSummaryFollowUpSelection(candidates)
+		return m, nil
+	}
+	if key.Matches(msg, m.keys.Apply) {
+		if m.summarySelectedFollowUpCount(candidates) > 0 {
+			return m, m.runSelectedSummaryFollowUps(candidates)
+		}
+		m.viewMode = fixViewList
+		return m, nil
+	}
+	if key.Matches(msg, m.keys.Cancel) || key.Matches(msg, m.keys.Skip) {
 		m.viewMode = fixViewList
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m *fixTUIModel) runSelectedSummaryFollowUps(candidates []fixSummaryFollowUpCandidate) tea.Cmd {
+	selected := m.selectedSummaryFollowUps(candidates)
+	if len(selected) == 0 {
+		m.status = "no follow-up fixes selected"
+		return nil
+	}
+
+	m.summaryResults = nil
+	m.resetSummaryFollowUpState()
+
+	applied := 0
+	failed := 0
+	queue := make([]fixWizardDecision, 0, len(selected))
+	for _, candidate := range selected {
+		repo, ok := m.summaryRepoState(candidate.RepoPath)
+		if !ok {
+			m.appendSummaryResultForRepo(candidate.RepoName, candidate.RepoPath, candidate.Action, "failed", "repository state is unavailable after revalidation")
+			failed++
+			continue
+		}
+		if isRiskyFixAction(candidate.Action) {
+			queue = append(queue, fixWizardDecision{
+				RepoPath: repo.Record.Path,
+				Action:   candidate.Action,
+			})
+			continue
+		}
+		if err := m.applyImmediateAction(repo, candidate.Action); err != nil {
+			m.appendSummaryResultForRepo(repo.Record.Name, repo.Record.Path, candidate.Action, "failed", err.Error())
+			failed++
+			continue
+		}
+		m.appendSummaryResultForRepo(repo.Record.Name, repo.Record.Path, candidate.Action, "applied", "")
+		applied++
+	}
+
+	if m.app != nil && applied > 0 {
+		if err := m.refreshRepos(scanRefreshAlways); err != nil {
+			m.errText = err.Error()
+			return nil
+		}
+	}
+
+	if failed > 0 {
+		m.errText = "one or more follow-up fixes failed"
+	} else {
+		m.errText = ""
+	}
+	if len(queue) > 0 {
+		m.startWizardQueue(queue)
+		return nil
+	}
+
+	m.status = fmt.Sprintf("follow-up run: applied %d, failed %d", applied, failed)
+	return nil
+}
+
+func (m *fixTUIModel) toggleSummaryFollowUpSelection(candidates []fixSummaryFollowUpCandidate) {
+	if len(candidates) == 0 {
+		return
+	}
+	if m.summarySelectedFollowUps == nil {
+		m.summarySelectedFollowUps = map[string]bool{}
+	}
+	current := candidates[m.summaryCursor]
+	selected := !m.summarySelectedFollowUps[current.Key]
+	m.summarySelectedFollowUps[current.Key] = selected
+	if selected {
+		m.status = fmt.Sprintf("queued follow-up fix: %s (%s)", current.Label, current.RepoName)
+		return
+	}
+	m.status = fmt.Sprintf("unqueued follow-up fix: %s (%s)", current.Label, current.RepoName)
+}
+
+func (m *fixTUIModel) selectedSummaryFollowUps(candidates []fixSummaryFollowUpCandidate) []fixSummaryFollowUpCandidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	selected := make([]fixSummaryFollowUpCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if !m.summarySelectedFollowUps[candidate.Key] {
+			continue
+		}
+		selected = append(selected, candidate)
+	}
+	return selected
 }
 
 func (m *fixTUIModel) viewWizardContent() string {
@@ -1224,6 +1358,9 @@ func longestANSIWidth(s string) int {
 }
 
 func (m *fixTUIModel) viewSummaryContent() string {
+	candidates := m.summaryFollowUpCandidates()
+	m.syncSummaryFollowUpState(candidates)
+
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("Fix outcomes and current syncability after revalidation."))
 	b.WriteString("\n\n")
@@ -1240,12 +1377,25 @@ func (m *fixTUIModel) viewSummaryContent() string {
 				false,
 				item.RepoName,
 				strings.TrimSpace(item.RepoPath),
-				m.renderSummaryResultValue(item),
+				m.renderSummaryResultValue(item, candidates),
 				m.renderSummaryResultError(item),
 			))
 		}
 	}
 	b.WriteString("\n\n")
+	selectedFollowUps := m.summarySelectedFollowUpCount(candidates)
+	if len(candidates) > 0 {
+		runStyle := buttonStyle
+		if selectedFollowUps > 0 {
+			runStyle = buttonPrimaryStyle
+		}
+		b.WriteString(runStyle.Render("Run selected fixes"))
+		b.WriteString(" ")
+		b.WriteString(buttonPrimaryStyle.Render("Done"))
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render("Enter runs selected fixes when any are checked; otherwise it returns to the repository list."))
+		return b.String()
+	}
 	b.WriteString(buttonPrimaryStyle.Render("Done"))
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Enter or esc to return to repository list."))
@@ -1254,20 +1404,63 @@ func (m *fixTUIModel) viewSummaryContent() string {
 
 func (m *fixTUIModel) renderSummaryTotals() string {
 	applied, skipped, failed := m.summaryResultCounts()
+	syncableNow, stillUnsyncable, manualRequired := m.summaryRevalidationCounts()
 	lines := []string{
+		"Action outcomes",
 		fmt.Sprintf("%s Applied: %d", lipgloss.NewStyle().Foreground(successColor).Bold(true).Render("✓"), applied),
 		fmt.Sprintf("%s Skipped: %d", lipgloss.NewStyle().Foreground(mutedTextColor).Bold(true).Render("◦"), skipped),
-		fmt.Sprintf("%s Failed: %d", lipgloss.NewStyle().Foreground(errorFgColor).Bold(true).Render("✗"), failed),
 	}
+	if failed > 0 {
+		lines = append(lines, fmt.Sprintf("%s Failed: %d", lipgloss.NewStyle().Foreground(errorFgColor).Bold(true).Render("✗"), failed))
+	} else {
+		lines = append(lines, "Errors: none")
+	}
+	lines = append(lines, "")
+	lines = append(lines, "Revalidation")
+	lines = append(lines,
+		fmt.Sprintf("%s Syncable now: %d", lipgloss.NewStyle().Foreground(successColor).Bold(true).Render("✓"), syncableNow),
+		fmt.Sprintf("%s Still unsyncable: %d", lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("!"), stillUnsyncable),
+		fmt.Sprintf("%s Manual intervention required: %d", lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("!"), manualRequired),
+	)
 	return strings.Join(lines, "\n")
 }
 
-func (m *fixTUIModel) renderSummaryResultValue(item fixSummaryResult) string {
+func (m *fixTUIModel) renderSummaryResultValue(item fixSummaryResult, candidates []fixSummaryFollowUpCandidate) string {
 	lines := []string{
 		fmt.Sprintf("%s %s: %s", renderSummaryResultMarker(item.Status), item.Action, item.Status),
 	}
-	if outcome := m.summaryOutcomeLine(item); outcome != "" {
+	repo, hasRepo := m.summaryRepoState(item.RepoPath)
+	if outcome := m.summaryOutcomeLine(item, repo, hasRepo); outcome != "" {
 		lines = append(lines, outcome)
+	}
+	if hasRepo && !repo.Record.Syncable {
+		blockers := append([]domain.UnsyncableReason(nil), repo.Record.UnsyncableReasons...)
+		if len(blockers) > 0 {
+			lines = append(lines, "", "Remaining blockers")
+			for _, reason := range blockers {
+				lines = append(lines, fmt.Sprintf("- %s (%s)", summaryUnsyncableReasonLabel(reason), reason))
+			}
+		}
+
+		followUps := m.summaryFollowUpsForRepo(item.RepoPath, candidates)
+		if len(followUps) > 0 {
+			lines = append(lines, "", "Automated next fixes")
+			for _, followUp := range followUps {
+				lines = append(lines, m.renderSummaryFollowUpLine(followUp))
+			}
+		}
+
+		actionKeys := make([]string, 0, len(followUps))
+		for _, followUp := range followUps {
+			actionKeys = append(actionKeys, followUp.Action)
+		}
+		uncovered := uncoveredUnsyncableReasons(repo.Record.UnsyncableReasons, actionKeys)
+		if len(uncovered) > 0 || len(followUps) == 0 {
+			lines = append(lines, "", "Manual intervention required - bb has no additional safe automated fixes for this repo.")
+			for _, guidance := range summaryManualInterventionGuidance(uncovered) {
+				lines = append(lines, "- "+guidance)
+			}
+		}
 	}
 	if detail := strings.TrimSpace(item.Detail); detail != "" && item.Status != "failed" {
 		lines = append(lines, "Detail: "+detail)
@@ -1295,22 +1488,28 @@ func renderSummaryResultMarker(status string) string {
 	}
 }
 
-func (m *fixTUIModel) summaryOutcomeLine(item fixSummaryResult) string {
+func (m *fixTUIModel) summaryOutcomeLine(item fixSummaryResult, repo fixRepoState, hasRepo bool) string {
 	switch strings.TrimSpace(item.Status) {
 	case "applied":
-		repo, ok := m.summaryRepoState(item.RepoPath)
-		if !ok {
+		if !hasRepo {
 			return "Result: applied; revalidated state unavailable."
 		}
 		if repo.Record.Syncable {
-			return "Result: syncable now."
+			return "Revalidation: syncable now."
 		}
-		return "Result: still unsyncable; more fixes needed."
+		blockers := len(repo.Record.UnsyncableReasons)
+		if blockers <= 0 {
+			return "Revalidation: unsyncable."
+		}
+		label := "blockers"
+		if blockers == 1 {
+			label = "blocker"
+		}
+		return fmt.Sprintf("Revalidation: unsyncable (%d %s).", blockers, label)
 	case "skipped":
 		return "Result: skipped; no repository changes."
 	case "failed":
-		repo, ok := m.summaryRepoState(item.RepoPath)
-		if !ok {
+		if !hasRepo {
 			return "Result: action failed before completion."
 		}
 		if repo.Record.Syncable {
@@ -1347,6 +1546,222 @@ func (m *fixTUIModel) summaryResultCounts() (applied int, skipped int, failed in
 		}
 	}
 	return applied, skipped, failed
+}
+
+func (m *fixTUIModel) summaryRevalidationCounts() (syncableNow int, stillUnsyncable int, manualRequired int) {
+	seen := map[string]bool{}
+	for _, item := range m.summaryResults {
+		path := strings.TrimSpace(item.RepoPath)
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+
+		repo, ok := m.summaryRepoState(path)
+		if !ok {
+			continue
+		}
+		if repo.Record.Syncable {
+			syncableNow++
+			continue
+		}
+		stillUnsyncable++
+		followUps := m.summaryEligibleFollowUpActions(repo)
+		uncovered := uncoveredUnsyncableReasons(repo.Record.UnsyncableReasons, followUps)
+		if len(followUps) == 0 || len(uncovered) > 0 {
+			manualRequired++
+		}
+	}
+	return syncableNow, stillUnsyncable, manualRequired
+}
+
+func summaryFollowUpKey(repoPath string, action string) string {
+	return strings.TrimSpace(repoPath) + "::" + strings.TrimSpace(action)
+}
+
+func (m *fixTUIModel) summaryEligibleFollowUpActions(repo fixRepoState) []string {
+	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
+		Interactive:     true,
+		Risk:            repo.Risk,
+		SyncStrategy:    FixSyncStrategyRebase,
+		SyncFeasibility: repo.SyncFeasibility,
+	})
+	return fixActionsForSelection(actions)
+}
+
+func (m *fixTUIModel) summaryFollowUpCandidates() []fixSummaryFollowUpCandidate {
+	if len(m.summaryResults) == 0 {
+		return nil
+	}
+
+	seen := map[string]bool{}
+	out := make([]fixSummaryFollowUpCandidate, 0, 8)
+	for _, item := range m.summaryResults {
+		repo, ok := m.summaryRepoState(item.RepoPath)
+		if !ok || repo.Record.Syncable {
+			continue
+		}
+		for _, action := range m.summaryEligibleFollowUpActions(repo) {
+			key := summaryFollowUpKey(repo.Record.Path, action)
+			if key == "::" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, fixSummaryFollowUpCandidate{
+				Key:      key,
+				RepoName: repo.Record.Name,
+				RepoPath: repo.Record.Path,
+				Action:   action,
+				Label:    fixActionLabel(action),
+			})
+		}
+	}
+	return out
+}
+
+func (m *fixTUIModel) syncSummaryFollowUpState(candidates []fixSummaryFollowUpCandidate) {
+	if m.summarySelectedFollowUps == nil {
+		m.summarySelectedFollowUps = map[string]bool{}
+	}
+	valid := map[string]bool{}
+	for _, candidate := range candidates {
+		valid[candidate.Key] = true
+	}
+	for key := range m.summarySelectedFollowUps {
+		if valid[key] {
+			continue
+		}
+		delete(m.summarySelectedFollowUps, key)
+	}
+	if len(candidates) == 0 {
+		m.summaryCursor = 0
+		return
+	}
+	if m.summaryCursor < 0 {
+		m.summaryCursor = 0
+	}
+	if m.summaryCursor >= len(candidates) {
+		m.summaryCursor = len(candidates) - 1
+	}
+}
+
+func (m *fixTUIModel) summarySelectedFollowUpCount(candidates []fixSummaryFollowUpCandidate) int {
+	if len(candidates) == 0 {
+		return 0
+	}
+	count := 0
+	for _, candidate := range candidates {
+		if m.summarySelectedFollowUps[candidate.Key] {
+			count++
+		}
+	}
+	return count
+}
+
+func (m *fixTUIModel) summaryFollowUpsForRepo(repoPath string, candidates []fixSummaryFollowUpCandidate) []fixSummaryFollowUpCandidate {
+	target := strings.TrimSpace(repoPath)
+	if target == "" || len(candidates) == 0 {
+		return nil
+	}
+	out := make([]fixSummaryFollowUpCandidate, 0, 2)
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate.RepoPath) != target {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func (m *fixTUIModel) renderSummaryFollowUpLine(followUp fixSummaryFollowUpCandidate) string {
+	checked := "[ ]"
+	if m.summarySelectedFollowUps[followUp.Key] {
+		checked = "[x]"
+	}
+	cursor := " "
+	candidates := m.summaryFollowUpCandidates()
+	for i, candidate := range candidates {
+		if candidate.Key != followUp.Key {
+			continue
+		}
+		if i == m.summaryCursor {
+			cursor = "▸"
+		}
+		break
+	}
+	return fmt.Sprintf("%s %s %s", cursor, checked, followUp.Label)
+}
+
+func summaryUnsyncableReasonLabel(reason domain.UnsyncableReason) string {
+	switch reason {
+	case domain.ReasonMissingOrigin:
+		return "Remote origin is missing"
+	case domain.ReasonOperationInProgress:
+		return "A git operation is in progress"
+	case domain.ReasonDirtyTracked:
+		return "Tracked files have uncommitted changes"
+	case domain.ReasonDirtyUntracked:
+		return "Untracked files must be committed or ignored"
+	case domain.ReasonMissingUpstream:
+		return "Branch has no upstream configured"
+	case domain.ReasonDiverged:
+		return "Branch diverged from upstream"
+	case domain.ReasonPushPolicyBlocked:
+		return "Push policy blocks this repository"
+	case domain.ReasonPushAccessBlocked:
+		return "Remote is read-only for push"
+	case domain.ReasonPushFailed:
+		return "Push failed during remediation"
+	case domain.ReasonPullFailed:
+		return "Pull failed during remediation"
+	case domain.ReasonSyncConflict:
+		return "Sync conflict requires manual resolution"
+	case domain.ReasonSyncProbeFailed:
+		return "Sync feasibility probe failed"
+	case domain.ReasonCheckoutFailed:
+		return "Checkout failed during remediation"
+	case domain.ReasonTargetPathNonRepo:
+		return "Target path is not an initialized git repository"
+	case domain.ReasonTargetPathRepoMismatch:
+		return "Target path points to a different repository"
+	default:
+		return string(reason)
+	}
+}
+
+func summaryManualInterventionGuidance(reasons []domain.UnsyncableReason) []string {
+	if len(reasons) == 0 {
+		return []string{"Review the blockers and revalidate after applying the required manual changes."}
+	}
+	lines := make([]string, 0, len(reasons))
+	seen := map[string]bool{}
+	for _, reason := range reasons {
+		line := summaryManualGuidanceForReason(reason)
+		if line == "" || seen[line] {
+			continue
+		}
+		seen[line] = true
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return []string{"Review the blockers and revalidate after applying the required manual changes."}
+	}
+	return lines
+}
+
+func summaryManualGuidanceForReason(reason domain.UnsyncableReason) string {
+	switch reason {
+	case domain.ReasonSyncConflict:
+		return "Resolve merge/rebase conflicts manually, then revalidate."
+	case domain.ReasonSyncProbeFailed:
+		return "Inspect local branch history and upstream state; rerun revalidation after fixing probe blockers."
+	case domain.ReasonCheckoutFailed:
+		return "Repair branch checkout manually and rerun revalidation."
+	case domain.ReasonTargetPathNonRepo, domain.ReasonTargetPathRepoMismatch:
+		return "Fix the target path mismatch manually, then rerun revalidation."
+	default:
+		return "Review this blocker manually, then rerun revalidation."
+	}
 }
 
 func renderWizardActionButtons(focus int) string {

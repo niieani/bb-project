@@ -294,18 +294,34 @@ func (m *fixTUIModel) wizardHelpMap() fixTUIHelpMap {
 }
 
 func (m *fixTUIModel) summaryHelpMap() fixTUIHelpMap {
-	back := newHelpBinding([]string{"enter"}, "enter", "back to list")
+	candidates := m.summaryFollowUpCandidates()
+	m.syncSummaryFollowUpState(candidates)
+	selectedCount := m.summarySelectedFollowUpCount(candidates)
+
+	enterDesc := "back to list"
+	if selectedCount > 0 {
+		enterDesc = "run selected fixes"
+	}
+	back := newHelpBinding([]string{"enter"}, "enter", enterDesc)
 	cancel := newHelpBinding([]string{"esc"}, "esc", "back to list")
 	skip := newHelpBinding([]string{"ctrl+x"}, "ctrl+x", "back to list")
 	quit := newHelpBinding([]string{"q", "ctrl+c"}, "q", "quit")
 	helpToggle := newHelpBinding([]string{"?"}, "?", "more keys")
+	move := newHelpBinding([]string{"up", "down"}, "↑/↓", "move follow-up")
+	toggle := newHelpBinding([]string{"space"}, "space", "toggle follow-up")
+
+	short := []key.Binding{back, cancel, quit}
+	rows := [][]key.Binding{}
+	if len(candidates) > 0 {
+		short = []key.Binding{back, move, toggle, cancel, quit}
+		rows = append(rows, []key.Binding{back, move, toggle})
+	}
+	rows = append(rows, []key.Binding{cancel, skip})
+	rows = append(rows, []key.Binding{quit, helpToggle})
 
 	return fixTUIHelpMap{
-		short: []key.Binding{back, cancel, quit},
-		full: [][]key.Binding{
-			{back, cancel, skip},
-			{quit, helpToggle},
-		},
+		short: short,
+		full:  rows,
 	}
 }
 
@@ -432,7 +448,9 @@ type fixTUIModel struct {
 	viewMode fixViewMode
 	wizard   fixWizardState
 
-	summaryResults []fixSummaryResult
+	summaryResults           []fixSummaryResult
+	summaryCursor            int
+	summarySelectedFollowUps map[string]bool
 }
 
 type fixListItem struct {
@@ -875,15 +893,17 @@ func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUI
 	repoList := newFixRepoListModel()
 
 	m := &fixTUIModel{
-		app:               app,
-		includeCatalogs:   append([]string(nil), includeCatalogs...),
-		loadReposFn:       app.loadFixRepos,
-		ignored:           map[string]bool{},
-		selectedAction:    map[string]int{},
-		keys:              defaultFixTUIKeyMap(),
-		help:              help.New(),
-		repoList:          repoList,
-		revalidateSpinner: newFixProgressSpinner(),
+		app:                      app,
+		includeCatalogs:          append([]string(nil), includeCatalogs...),
+		loadReposFn:              app.loadFixRepos,
+		ignored:                  map[string]bool{},
+		selectedAction:           map[string]int{},
+		summaryCursor:            0,
+		summarySelectedFollowUps: map[string]bool{},
+		keys:                     defaultFixTUIKeyMap(),
+		help:                     help.New(),
+		repoList:                 repoList,
+		revalidateSpinner:        newFixProgressSpinner(),
 	}
 	m.help.ShowAll = false
 	initialRefreshMode := scanRefreshIfStale
@@ -1682,6 +1702,7 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		return
 	}
 	action := options[idx]
+	m.resetSummaryFollowUpState()
 	m.summaryResults = nil
 
 	queue := make([]fixWizardDecision, 0, 2)
@@ -1744,6 +1765,7 @@ func (m *fixTUIModel) applyAllSelections() {
 		return
 	}
 
+	m.resetSummaryFollowUpState()
 	m.summaryResults = nil
 	applied := 0
 	skipped := 0
@@ -2214,46 +2236,65 @@ func unsyncableReasonsFullyCoverable(reasons []domain.UnsyncableReason, actions 
 	if len(reasons) == 0 || len(actions) == 0 {
 		return false
 	}
-	has := map[string]bool{}
-	for _, action := range actions {
-		has[action] = true
-	}
-
-	covers := func(reason domain.UnsyncableReason) bool {
-		switch reason {
-		case domain.ReasonMissingOrigin:
-			return has[FixActionCreateProject]
-		case domain.ReasonOperationInProgress:
-			return has[FixActionAbortOperation]
-		case domain.ReasonDirtyTracked, domain.ReasonDirtyUntracked:
-			return has[FixActionStageCommitPush]
-		case domain.ReasonMissingUpstream:
-			return has[FixActionSetUpstreamPush] || has[FixActionStageCommitPush] || has[FixActionCreateProject]
-		case domain.ReasonDiverged:
-			return has[FixActionSyncWithUpstream]
-		case domain.ReasonPushPolicyBlocked:
-			return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush] || has[FixActionCreateProject]
-		case domain.ReasonPushFailed:
-			return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush] || has[FixActionCreateProject]
-		case domain.ReasonSyncConflict:
-			return false
-		case domain.ReasonSyncProbeFailed:
-			return false
-		case domain.ReasonPushAccessBlocked:
-			return has[FixActionForkAndRetarget]
-		case domain.ReasonPullFailed:
-			return has[FixActionPullFFOnly]
-		default:
-			return false
-		}
-	}
-
+	has := fixActionSet(actions)
 	for _, reason := range reasons {
-		if !covers(reason) {
+		if !fixReasonCoveredByActions(reason, has) {
 			return false
 		}
 	}
 	return true
+}
+
+func uncoveredUnsyncableReasons(reasons []domain.UnsyncableReason, actions []string) []domain.UnsyncableReason {
+	if len(reasons) == 0 {
+		return nil
+	}
+	has := fixActionSet(actions)
+	uncovered := make([]domain.UnsyncableReason, 0, len(reasons))
+	for _, reason := range reasons {
+		if fixReasonCoveredByActions(reason, has) {
+			continue
+		}
+		uncovered = append(uncovered, reason)
+	}
+	return uncovered
+}
+
+func fixActionSet(actions []string) map[string]bool {
+	has := map[string]bool{}
+	for _, action := range actions {
+		has[action] = true
+	}
+	return has
+}
+
+func fixReasonCoveredByActions(reason domain.UnsyncableReason, has map[string]bool) bool {
+	switch reason {
+	case domain.ReasonMissingOrigin:
+		return has[FixActionCreateProject]
+	case domain.ReasonOperationInProgress:
+		return has[FixActionAbortOperation]
+	case domain.ReasonDirtyTracked, domain.ReasonDirtyUntracked:
+		return has[FixActionStageCommitPush]
+	case domain.ReasonMissingUpstream:
+		return has[FixActionSetUpstreamPush] || has[FixActionStageCommitPush] || has[FixActionCreateProject]
+	case domain.ReasonDiverged:
+		return has[FixActionSyncWithUpstream]
+	case domain.ReasonPushPolicyBlocked:
+		return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush] || has[FixActionCreateProject]
+	case domain.ReasonPushFailed:
+		return has[FixActionPush] || has[FixActionStageCommitPush] || has[FixActionSetUpstreamPush] || has[FixActionCreateProject]
+	case domain.ReasonSyncConflict:
+		return false
+	case domain.ReasonSyncProbeFailed:
+		return false
+	case domain.ReasonPushAccessBlocked:
+		return has[FixActionForkAndRetarget]
+	case domain.ReasonPullFailed:
+		return has[FixActionPullFFOnly]
+	default:
+		return false
+	}
 }
 
 func sortStrings(in []string) {

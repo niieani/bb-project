@@ -999,10 +999,22 @@ func TestFixTUIWizardSummaryViewShowsSinglePreciseHeadingAndTotals(t *testing.T)
 	if !strings.Contains(view, "Session totals") {
 		t.Fatalf("expected totals block inside summary view, got %q", view)
 	}
-	if !strings.Contains(view, "Applied: 1") || !strings.Contains(view, "Skipped: 0") || !strings.Contains(view, "Failed: 0") {
-		t.Fatalf("expected in-box applied/skipped/failed totals, got %q", view)
+	if !strings.Contains(view, "Action outcomes") {
+		t.Fatalf("expected action outcomes totals section, got %q", view)
 	}
-	if !strings.Contains(view, "Result: syncable now.") {
+	if !strings.Contains(view, "Applied: 1") || !strings.Contains(view, "Skipped: 0") {
+		t.Fatalf("expected applied/skipped counts, got %q", view)
+	}
+	if strings.Contains(view, "Failed: 0") {
+		t.Fatalf("expected zero-failure case to avoid failure marker, got %q", view)
+	}
+	if !strings.Contains(view, "Errors: none") {
+		t.Fatalf("expected explicit zero-error text, got %q", view)
+	}
+	if !strings.Contains(view, "Revalidation") || !strings.Contains(view, "Syncable now: 1") || !strings.Contains(view, "Still unsyncable: 0") {
+		t.Fatalf("expected revalidation totals, got %q", view)
+	}
+	if !strings.Contains(view, "Revalidation: syncable now.") {
 		t.Fatalf("expected post-revalidation syncable outcome, got %q", view)
 	}
 }
@@ -1017,7 +1029,16 @@ func TestFixTUIWizardSummaryViewReportsWhenMoreFixesAreStillNeeded(t *testing.T)
 				Path:      "/repos/api",
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
+				Diverged:  true,
 				Syncable:  false,
+				UnsyncableReasons: []domain.UnsyncableReason{
+					domain.ReasonDiverged,
+				},
+			},
+			SyncFeasibility: fixSyncFeasibility{
+				Checked:       true,
+				RebaseOutcome: fixSyncProbeClean,
+				MergeOutcome:  fixSyncProbeClean,
 			},
 			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
 		},
@@ -1034,8 +1055,109 @@ func TestFixTUIWizardSummaryViewReportsWhenMoreFixesAreStillNeeded(t *testing.T)
 	m.viewMode = fixViewSummary
 
 	view := ansi.Strip(m.viewSummaryContent())
-	if !strings.Contains(view, "Result: still unsyncable; more fixes needed.") {
-		t.Fatalf("expected explicit follow-up-needed outcome, got %q", view)
+	if !strings.Contains(view, "Revalidation: unsyncable (1 blocker).") {
+		t.Fatalf("expected explicit unsyncable blocker count, got %q", view)
+	}
+	if !strings.Contains(view, "Remaining blockers") || !strings.Contains(view, "Branch diverged from upstream (diverged)") {
+		t.Fatalf("expected blocker list with reason labels, got %q", view)
+	}
+	if !strings.Contains(view, "Automated next fixes") || !strings.Contains(view, "[ ] Sync with upstream") {
+		t.Fatalf("expected actionable automated follow-up fixes, got %q", view)
+	}
+}
+
+func TestFixTUIWizardSummaryViewFlagsManualInterventionWhenNoAutomatedFixesRemain(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Diverged:  true,
+				Syncable:  false,
+				UnsyncableReasons: []domain.UnsyncableReason{
+					domain.ReasonSyncConflict,
+				},
+			},
+			SyncFeasibility: fixSyncFeasibility{
+				Checked:       true,
+				RebaseOutcome: fixSyncProbeConflict,
+				MergeOutcome:  fixSyncProbeConflict,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.summaryResults = []fixSummaryResult{
+		{
+			RepoName: "api",
+			RepoPath: "/repos/api",
+			Action:   fixActionLabel(FixActionPush),
+			Status:   "applied",
+		},
+	}
+	m.viewMode = fixViewSummary
+
+	view := ansi.Strip(m.viewSummaryContent())
+	if !strings.Contains(view, "Manual intervention required - bb has no additional safe automated fixes for this repo.") {
+		t.Fatalf("expected explicit manual intervention message, got %q", view)
+	}
+	if !strings.Contains(view, "Resolve merge/rebase conflicts manually, then revalidate.") {
+		t.Fatalf("expected concrete manual resolution guidance, got %q", view)
+	}
+	if strings.Contains(view, "Automated next fixes") {
+		t.Fatalf("expected no automated fix list when none are available, got %q", view)
+	}
+}
+
+func TestFixTUISummaryFollowUpSelectionCanQueueAndRunFixes(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:              "api",
+				Path:              "/repos/api",
+				OriginURL:         "git@github.com:you/api.git",
+				Upstream:          "origin/main",
+				HasDirtyTracked:   true,
+				Syncable:          false,
+				UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: true},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.summaryResults = []fixSummaryResult{
+		{
+			RepoName: "api",
+			RepoPath: "/repos/api",
+			Action:   fixActionLabel(FixActionPush),
+			Status:   "applied",
+		},
+	}
+	m.viewMode = fixViewSummary
+
+	view := ansi.Strip(m.viewSummaryContent())
+	if !strings.Contains(view, "[ ] Stage, commit & push") {
+		t.Fatalf("expected selectable follow-up fixes, got %q", view)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	view = ansi.Strip(m.viewSummaryContent())
+	if !strings.Contains(view, "[x] Stage, commit & push") {
+		t.Fatalf("expected selected follow-up fix checkbox, got %q", view)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.viewMode != fixViewWizard {
+		t.Fatalf("view mode after running selected follow-up fix = %v, want wizard", m.viewMode)
+	}
+	if m.wizard.Action != FixActionStageCommitPush {
+		t.Fatalf("wizard action after summary follow-up run = %q, want %q", m.wizard.Action, FixActionStageCommitPush)
 	}
 }
 
