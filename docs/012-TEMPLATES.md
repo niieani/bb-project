@@ -37,11 +37,18 @@ Template shape:
 init:
   templates:
     node-api:
-      source: "templates:node/api" # optional; if omitted => hook-only template
+      source: "templates:node/api" # optional override; if omitted, resolve by template key first
       post_create_hooks:
         - "npm install"
         - ["npx", "some-generator", ".", "--flag"]
 ```
+
+`source` semantics:
+
+- `source` is optional and acts as an explicit lookup override.
+- If `source` is omitted, `bb` first attempts normal template lookup using the template key itself.
+- A template becomes hook-only only when lookup finds no source files and hooks are defined.
+- If lookup finds no source files and no hooks are defined, init fails.
 
 Hook command type supports both forms:
 
@@ -78,19 +85,24 @@ Hook command type supports both forms:
 Resolution follows `bb link` selector spirit plus configured hook-only templates:
 
 1. If selector matches `config.init.templates[selector]`, use that template config.
-2. Resolve source from template `source` if set; if no `source`, this is a hook-only template.
-3. If selector is not a named template, treat selector as ad-hoc source and resolve via:
+2. Resolve lookup token:
+
+- if template `source` is set, use `source`,
+- if template `source` is omitted, use the template key (`selector`).
+
+3. Attempt normal source lookup using that token via:
 
 - local selector resolution (same local selector logic as link),
 - template catalog fallback using `init.template_catalog` and catalog path-depth rules,
 - remote repo input parsing (`owner/repo`, GitHub URL, git URL) with temporary clone.
 
-4. If named template source cannot be resolved:
+4. If selector is not a named template, treat selector as ad-hoc source token and run the same lookup.
+5. If lookup resolves source files, apply template copy flow.
+6. If lookup does not resolve source files:
 
 - if template has hooks, continue as hook-only and emit warning.
 - if template has no hooks, fail.
-
-5. If ad-hoc source cannot be resolved, fail.
+- if selector was ad-hoc (not a named template), fail.
 
 ### Init Execution Ordering
 
@@ -182,15 +194,16 @@ Update wizard validation, diff/review rendering, step navigation labels/order, a
 1. `bb init --template <named-template>` copies template files, runs template+global hooks, then creates remote.
 2. `bb init` with `init.default_template` applies template automatically.
 3. `bb init --no-template` bypasses default template and hooks tied to template.
-4. Named hook-only template runs hooks even when source is absent.
-5. Named template with missing source and no hooks fails clearly.
-6. Ad-hoc unresolved template ref fails clearly.
-7. Hook failure aborts init before remote creation/push and prints remediation guidance.
-8. Template copy excludes `.git` and source gitignored files.
-9. Conflict in non-interactive mode fails with conflict summary.
-10. Conflict in interactive mode prompts and honors overwrite/skip/apply-to-all decisions.
-11. Hooks do not run on adopt/idempotent init runs where origin already exists.
-12. CLI docs/man and README reflect new flags/config behavior.
+4. Named template with omitted `source` falls back to lookup by template key.
+5. Named template whose lookup misses but has hooks runs as hook-only with warning.
+6. Named template whose lookup misses and has no hooks fails clearly.
+7. Ad-hoc unresolved template ref fails clearly.
+8. Hook failure aborts init before remote creation/push and prints remediation guidance.
+9. Template copy excludes `.git` and source gitignored files.
+10. Conflict in non-interactive mode fails with conflict summary.
+11. Conflict in interactive mode prompts and honors overwrite/skip/apply-to-all decisions.
+12. Hooks do not run on adopt/idempotent init runs where origin already exists.
+13. CLI docs/man and README reflect new flags/config behavior.
 
 ## Assumptions and Defaults Chosen
 
@@ -198,5 +211,5 @@ Update wizard validation, diff/review rendering, step navigation labels/order, a
 - `init.template_catalog` references existing machine catalog names, not raw paths.
 - Working-tree template copy is authoritative; `.git` and gitignored files are excluded.
 - Hook execution happens only in creation path (origin missing).
-- Missing source for configured template is allowed only when hooks exist (hook-only fallback).
+- Missing lookup result for configured template is allowed only when hooks exist (hook-only fallback).
 - Hook order is template hooks first, then global hooks.
