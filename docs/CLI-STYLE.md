@@ -207,6 +207,7 @@ When you need rich styling, prefer a details panel below/alongside the list:
 
 - Show "Action help" for the currently selected action.
 - Use distinct label/value styling (muted label + higher-contrast value).
+- Keep detail values complete: do not truncate selected-item details (for example full repo paths) just to fit width; wrap as needed and reclaim space by shrinking adjacent scrollable regions (table/viewport) first.
 - Avoid vertical border glyphs (`│`) that visually merge with table columns.
 
 ### Scroll Indicators (More Above/Below)

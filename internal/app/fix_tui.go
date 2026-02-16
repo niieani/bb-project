@@ -1191,41 +1191,6 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *fixTUIModel) View() string {
 	m.resizeRepoList()
 
-	var b strings.Builder
-	if m.viewMode == fixViewWizard {
-		b.WriteString(m.viewWizardTopLine())
-		b.WriteString("\n")
-	} else {
-		title := lipgloss.JoinHorizontal(lipgloss.Center,
-			titleBadgeStyle.Render("bb"),
-			" "+headerStyle.Render("fix"),
-		)
-		subtitle := hintStyle.Render("Interactive remediation for unsyncable repositories")
-		b.WriteString(title)
-		b.WriteString("\n")
-		b.WriteString(subtitle)
-		b.WriteString("\n\n")
-	}
-
-	contentPanel := m.mainContentPanelStyle()
-	content := m.viewMainContent()
-	switch m.viewMode {
-	case fixViewWizard:
-		content = m.viewWizardContent()
-	case fixViewSummary:
-		content = m.viewSummaryContent()
-	}
-	b.WriteString(contentPanel.Render(content))
-
-	if m.status != "" {
-		b.WriteString("\n")
-		b.WriteString(hintStyle.Render(m.status))
-	}
-	if m.errText != "" {
-		b.WriteString("\n")
-		b.WriteString(alertStyle.Render(errorStyle.Render(m.errText)))
-	}
-
 	helpPanel := helpPanelStyle
 	if w := m.viewContentWidth(); w > 0 {
 		helpPanel = helpPanel.Width(w)
@@ -1233,7 +1198,7 @@ func (m *fixTUIModel) View() string {
 	helpView := m.footerHelpView(helpPanel)
 	helpBlock := helpPanel.Render(helpView)
 
-	body := b.String()
+	body := m.viewBodyForMode(m.viewMode)
 	spacer := ""
 	if m.height > 0 {
 		available := m.height - fixPageStyle.GetVerticalFrameSize()
@@ -1249,6 +1214,53 @@ func (m *fixTUIModel) View() string {
 
 	doc := body + "\n" + spacer + helpBlock
 	return fixPageStyle.Render(doc)
+}
+
+func (m *fixTUIModel) viewBodyForMode(mode fixViewMode) string {
+	var b strings.Builder
+	b.WriteString(m.viewTopChromeForMode(mode))
+	contentPanel := m.mainContentPanelStyle()
+	b.WriteString(contentPanel.Render(m.viewContentForMode(mode)))
+	if m.status != "" {
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render(m.status))
+	}
+	if m.errText != "" {
+		b.WriteString("\n")
+		b.WriteString(alertStyle.Render(errorStyle.Render(m.errText)))
+	}
+	return b.String()
+}
+
+func (m *fixTUIModel) viewTopChromeForMode(mode fixViewMode) string {
+	var b strings.Builder
+	if mode == fixViewWizard {
+		b.WriteString(m.viewWizardTopLine())
+		b.WriteString("\n")
+		return b.String()
+	}
+
+	title := lipgloss.JoinHorizontal(lipgloss.Center,
+		titleBadgeStyle.Render("bb"),
+		" "+headerStyle.Render("fix"),
+	)
+	subtitle := hintStyle.Render("Interactive remediation for unsyncable repositories")
+	b.WriteString(title)
+	b.WriteString("\n")
+	b.WriteString(subtitle)
+	b.WriteString("\n\n")
+	return b.String()
+}
+
+func (m *fixTUIModel) viewContentForMode(mode fixViewMode) string {
+	switch mode {
+	case fixViewWizard:
+		return m.viewWizardContent()
+	case fixViewSummary:
+		return m.viewSummaryContent()
+	default:
+		return m.viewMainContent()
+	}
 }
 
 func (m *fixTUIModel) mainContentPanelStyle() lipgloss.Style {
@@ -1549,31 +1561,27 @@ func (m *fixTUIModel) viewContentWidth() int {
 	return contentWidth
 }
 
+func (m *fixTUIModel) selectedDetailsWraps() bool {
+	details := m.viewSelectedRepoDetails()
+	if details == "" {
+		return false
+	}
+	innerWidth := m.viewContentWidth()
+	if innerWidth <= 0 {
+		return false
+	}
+	innerWidth -= panelStyle.GetHorizontalFrameSize()
+	if innerWidth <= 0 {
+		return false
+	}
+	rawHeight := lipgloss.Height(details)
+	renderedHeight := lipgloss.Height(lipgloss.NewStyle().Width(innerWidth).Render(details))
+	return renderedHeight > rawHeight
+}
+
 func (m *fixTUIModel) resizeRepoList() {
 	if m.height <= 0 {
 		return
-	}
-	helpPanel := helpPanelStyle
-	if w := m.viewContentWidth(); w > 0 {
-		helpPanel = helpPanel.Width(w)
-	}
-	helpHeight := lipgloss.Height(helpPanel.Render(m.footerHelpView(helpPanel)))
-
-	reserved := 0
-	reserved += fixPageStyle.GetVerticalFrameSize()
-	reserved += 3  // title + subtitle + one spacer line
-	reserved += 14 // main panel border and non-list content
-	reserved += 1  // single spacer line between body and footer help
-	reserved += helpHeight
-	if m.status != "" {
-		reserved++
-	}
-	if m.errText != "" {
-		reserved++
-	}
-	height := m.height - reserved
-	if height < 6 {
-		height = 6
 	}
 
 	listWidth := fixListDefaultWidth
@@ -1582,6 +1590,50 @@ func (m *fixTUIModel) resizeRepoList() {
 	}
 	if listWidth < 52 {
 		listWidth = 52
+	}
+	// Keep width in sync for all view modes; list height only matters in list mode.
+	if m.viewMode != fixViewList {
+		height := m.repoList.Height()
+		if height < 6 {
+			height = 6
+		}
+		m.repoList.SetSize(listWidth, height)
+		return
+	}
+
+	helpPanel := helpPanelStyle
+	if w := m.viewContentWidth(); w > 0 {
+		helpPanel = helpPanel.Width(w)
+	}
+	helpHeight := lipgloss.Height(helpPanel.Render(m.footerHelpView(helpPanel)))
+
+	available := m.height - fixPageStyle.GetVerticalFrameSize()
+	if available < 0 {
+		available = 0
+	}
+
+	const (
+		preferredMinListHeight = 6
+		hardMinListHeight      = 1
+		separatorLines         = 1
+	)
+	minListHeight := preferredMinListHeight
+	if m.selectedDetailsWraps() {
+		minListHeight = hardMinListHeight
+	}
+
+	height := available
+	if height < minListHeight {
+		height = minListHeight
+	}
+	for {
+		m.repoList.SetSize(listWidth, height)
+		bodyHeight := lipgloss.Height(m.viewBodyForMode(fixViewList))
+		used := bodyHeight + separatorLines + helpHeight
+		if used <= available || height <= minListHeight {
+			break
+		}
+		height--
 	}
 	m.repoList.SetSize(listWidth, height)
 }

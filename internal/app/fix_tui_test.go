@@ -4049,6 +4049,115 @@ func TestFixTUIViewShowsMainPanelTopBorderBeforeContent(t *testing.T) {
 	}
 }
 
+func TestFixTUIResizeShrinksListHeightWhenSelectedDetailsWrap(t *testing.T) {
+	t.Parallel()
+
+	shortPath := "/repos/api"
+	longPath := "/Volumes/Projects/Software/" + strings.Repeat("codegen-typescript-graphql-module-declarations-plugin-", 2) + "api"
+
+	newModel := func(path string, rows int) *fixTUIModel {
+		repos := make([]fixRepoState, 0, rows)
+		repos = append(repos, fixRepoState{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      path,
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Syncable:  false,
+				Ahead:     1,
+				UnsyncableReasons: []domain.UnsyncableReason{
+					domain.ReasonPushAccessBlocked,
+				},
+			},
+			Meta: &domain.RepoMetadataFile{
+				OriginURL:  "https://github.com/you/api.git",
+				AutoPush:   domain.AutoPushModeDisabled,
+				PushAccess: domain.PushAccessReadOnly,
+			},
+		})
+		for i := 0; i < rows-1; i++ {
+			repos = append(repos, fixRepoState{
+				Record: domain.MachineRepoRecord{
+					Name:      fmt.Sprintf("repo-%02d", i),
+					Path:      fmt.Sprintf("/repos/repo-%02d", i),
+					OriginURL: fmt.Sprintf("git@github.com:you/repo-%02d.git", i),
+					Upstream:  "origin/main",
+					Ahead:     1,
+				},
+				Meta: &domain.RepoMetadataFile{
+					OriginURL: fmt.Sprintf("https://github.com/you/repo-%02d.git", i),
+					AutoPush:  domain.AutoPushModeDisabled,
+				},
+			})
+		}
+		return newFixTUIModelForTest(repos)
+	}
+
+	shortModel := newModel(shortPath, 20)
+	longModel := newModel(longPath, 20)
+	_, _ = shortModel.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	_, _ = longModel.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+
+	shortHeight := shortModel.repoList.Height()
+	longHeight := longModel.repoList.Height()
+	if longHeight >= shortHeight {
+		t.Fatalf("expected wrapped selected details to shrink list height: short=%d long=%d", shortHeight, longHeight)
+	}
+}
+
+func TestFixTUIViewStaysWithinWindowHeightWhenSelectedDetailsWrap(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "codegen-typescript-graphql-module-declarations-plugin",
+				Path:      "/Volumes/Projects/Software/" + strings.Repeat("codegen-typescript-graphql-module-declarations-plugin-", 2) + "repo",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Syncable:  false,
+				Ahead:     1,
+				UnsyncableReasons: []domain.UnsyncableReason{
+					domain.ReasonPushAccessBlocked,
+				},
+			},
+			Meta: &domain.RepoMetadataFile{
+				OriginURL:  "https://github.com/you/api.git",
+				AutoPush:   domain.AutoPushModeDisabled,
+				PushAccess: domain.PushAccessReadOnly,
+			},
+		},
+	}
+	for i := 0; i < 24; i++ {
+		repos = append(repos, fixRepoState{
+			Record: domain.MachineRepoRecord{
+				Name:      fmt.Sprintf("repo-%02d", i),
+				Path:      fmt.Sprintf("/repos/repo-%02d", i),
+				OriginURL: fmt.Sprintf("git@github.com:you/repo-%02d.git", i),
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{
+				OriginURL: fmt.Sprintf("https://github.com/you/repo-%02d.git", i),
+				AutoPush:  domain.AutoPushModeDisabled,
+			},
+		})
+	}
+	m := newFixTUIModelForTest(repos)
+
+	const width = 118
+	const height = 26
+	_, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+
+	view := m.View()
+	if got := lipgloss.Height(view); got > height {
+		t.Fatalf("view height overflowed terminal height: got=%d want<=%d", got, height)
+	}
+	if !strings.Contains(ansi.Strip(view), "Repository Fixes") {
+		t.Fatalf("expected repository fixes title to stay visible, got %q", view)
+	}
+}
+
 func TestFixTUISelectedDetailsRenderActionHelp(t *testing.T) {
 	t.Parallel()
 
