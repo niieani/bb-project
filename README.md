@@ -288,7 +288,7 @@ Sets the repo-level preferred remote used when `bb` needs to choose a remote for
 Launches an interactive Bubble Tea wizard for onboarding and reconfiguration.
 
 - edits all `config.yaml` keys
-- edits this machine's catalogs (including layout depth) and default catalog
+- edits this machine's catalogs (including layout depth, clone preset mapping, and default branch auto-push defaults) and default catalog
 - can be rerun to change existing values
 - requires an interactive terminal
 

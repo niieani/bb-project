@@ -139,6 +139,9 @@ type catalogEditor struct {
 	row           int
 	err           string
 	confirmDelete bool
+	repoPathDepth int
+	privatePush   bool
+	publicPush    bool
 }
 
 type configWizardModel struct {
@@ -394,6 +397,15 @@ func newConfigWizardModel(input ConfigWizardInput) *configWizardModel {
 	}
 	if m.config.Scheduler.IntervalMinutes <= 0 {
 		m.config.Scheduler.IntervalMinutes = 60
+	}
+	if m.config.Clone.Presets == nil {
+		m.config.Clone.Presets = map[string]domain.ClonePreset{}
+	}
+	if m.config.Clone.CatalogPreset == nil {
+		m.config.Clone.CatalogPreset = map[string]string{}
+	}
+	if strings.TrimSpace(m.config.Link.TargetDir) == "" {
+		m.config.Link.TargetDir = "references"
 	}
 	m.initGitHubInputs()
 	m.initSchedulerInput()
@@ -972,6 +984,7 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 	if editor == nil {
 		return m, nil
 	}
+	actionStart := m.catalogEditorActionStart()
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.String() {
 		case "esc":
@@ -997,7 +1010,7 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 			m.updateCatalogEditorFocus()
 			return m, nil
 		case "right":
-			if editor.focus >= len(editor.inputs) {
+			if editor.focus >= actionStart {
 				last := m.catalogEditorFocusCount() - 1
 				if editor.focus < last {
 					editor.focus++
@@ -1007,10 +1020,20 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 				return m, nil
 			}
 		case "left":
-			if editor.focus > len(editor.inputs) {
+			if editor.focus > actionStart {
 				editor.focus--
 				editor.confirmDelete = false
 				m.updateCatalogEditorFocus()
+				return m, nil
+			}
+		case " ":
+			if editor.mode == catalogEditorEditRoot && editor.focus >= len(editor.inputs) && editor.focus < actionStart {
+				if err := m.toggleCatalogEditorOption(editor.focus - len(editor.inputs)); err != nil {
+					editor.err = err.Error()
+					return m, nil
+				}
+				editor.confirmDelete = false
+				editor.err = ""
 				return m, nil
 			}
 		case "enter":
@@ -1019,13 +1042,22 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 				if editor.focus < len(editor.inputs)-1 {
 					editor.focus++
 				} else {
-					editor.focus = len(editor.inputs)
+					editor.focus = actionStart
 				}
 				editor.confirmDelete = false
 				m.updateCatalogEditorFocus()
 				return m, nil
 			}
-			action := editor.focus - len(editor.inputs)
+			if editor.mode == catalogEditorEditRoot && editor.focus >= len(editor.inputs) && editor.focus < actionStart {
+				if err := m.toggleCatalogEditorOption(editor.focus - len(editor.inputs)); err != nil {
+					editor.err = err.Error()
+					return m, nil
+				}
+				editor.confirmDelete = false
+				editor.err = ""
+				return m, nil
+			}
+			action := editor.focus - actionStart
 			switch editor.mode {
 			case catalogEditorAdd:
 				switch action {
@@ -1180,6 +1212,7 @@ func (m *configWizardModel) initCatalogTable() {
 	cols := []table.Column{
 		{Title: "Name", Width: 16},
 		{Title: "Root", Width: 36},
+		{Title: "Preset", Width: 12},
 		{Title: "Layout", Width: 10},
 		{Title: "Default", Width: 8},
 		{Title: "Private Push", Width: 12},
@@ -1298,10 +1331,27 @@ func (m *configWizardModel) catalogEditorFocusCount() int {
 	case catalogEditorAdd:
 		return len(m.catalogEdit.inputs) + 2 // save, cancel
 	case catalogEditorEditRoot:
-		return len(m.catalogEdit.inputs) + 3 // save, delete, cancel
+		return len(m.catalogEdit.inputs) + m.catalogEditorToggleCount() + 3 // toggles + save, delete, cancel
 	default:
 		return len(m.catalogEdit.inputs)
 	}
+}
+
+func (m *configWizardModel) catalogEditorToggleCount() int {
+	if m.catalogEdit == nil {
+		return 0
+	}
+	if m.catalogEdit.mode == catalogEditorEditRoot {
+		return 3
+	}
+	return 0
+}
+
+func (m *configWizardModel) catalogEditorActionStart() int {
+	if m.catalogEdit == nil {
+		return 0
+	}
+	return len(m.catalogEdit.inputs) + m.catalogEditorToggleCount()
 }
 
 func (m *configWizardModel) toggleSyncOption(idx int) {
@@ -1622,7 +1672,7 @@ func (m *configWizardModel) viewCatalogs() string {
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Catalogs define root folders where bb discovers repositories."))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Select a row and use action buttons to set default, toggle folder layout depth, and change default-branch auto-push policy."))
+	b.WriteString(hintStyle.Render("Use Edit to configure root path, clone preset mapping, layout depth, and default-branch auto-push policy for the selected catalog."))
 	b.WriteString("\n\n")
 	if m.catalogEdit != nil {
 		b.WriteString(panelStyle.Render(m.viewCatalogEditor()))
@@ -1689,7 +1739,7 @@ func (m *configWizardModel) viewCatalogEditor() string {
 			m.catalogEdit.focus == 3,
 		))
 	} else {
-		b.WriteString(labelStyle.Render("Edit catalog root"))
+		b.WriteString(labelStyle.Render("Edit catalog"))
 		b.WriteString("\n\n")
 		b.WriteString(renderFieldBlock(
 			m.catalogEdit.focus == 0,
@@ -1698,12 +1748,44 @@ func (m *configWizardModel) viewCatalogEditor() string {
 			renderInputContainer(m.catalogEdit.inputs[0].View(), m.catalogEdit.focus == 0),
 			"",
 		))
+		b.WriteString("\n")
+		b.WriteString(renderFieldBlock(
+			m.catalogEdit.focus == 1,
+			"Clone preset mapping",
+			"Preset name from clone.presets applied to this catalog (empty = no preset).",
+			renderInputContainer(m.catalogEdit.inputs[1].View(), m.catalogEdit.focus == 1),
+			"",
+		))
+		b.WriteString("\n")
+		b.WriteString(renderFieldBlock(
+			m.catalogEdit.focus == 2,
+			"Repository layout depth",
+			"Choose how repo paths are derived under this catalog root.",
+			renderEnumLine(strconv.Itoa(m.catalogEdit.repoPathDepth), []string{"1", "2"}),
+			"",
+		))
+		b.WriteString("\n")
+		b.WriteString(renderFieldBlock(
+			m.catalogEdit.focus == 3,
+			"Private default-branch auto-push",
+			"Default auto-push behavior for private repositories in this catalog.",
+			renderCheckbox(m.catalogEdit.privatePush),
+			"",
+		))
+		b.WriteString("\n")
+		b.WriteString(renderFieldBlock(
+			m.catalogEdit.focus == 4,
+			"Public default-branch auto-push",
+			"Default auto-push behavior for public repositories in this catalog.",
+			renderCheckbox(m.catalogEdit.publicPush),
+			"",
+		))
 		b.WriteString("\n\n")
 		b.WriteString(renderEditorActions(
 			true,
-			m.catalogEdit.focus == 1,
-			m.catalogEdit.focus == 2,
-			m.catalogEdit.focus == 3,
+			m.catalogEdit.focus == 5,
+			m.catalogEdit.focus == 6,
+			m.catalogEdit.focus == 7,
 		))
 	}
 	if m.catalogEdit.err != "" {
@@ -1769,6 +1851,12 @@ func (m *configWizardModel) diffLines() []string {
 	}
 	if m.originalConfig.GitHub.RemoteProtocol != m.config.GitHub.RemoteProtocol {
 		out = append(out, fmt.Sprintf("github.remote_protocol: %q -> %q", m.originalConfig.GitHub.RemoteProtocol, m.config.GitHub.RemoteProtocol))
+	}
+	if !reflect.DeepEqual(m.originalConfig.Clone, m.config.Clone) {
+		out = append(out, "clone settings updated")
+	}
+	if m.originalConfig.Link != m.config.Link {
+		out = append(out, "link settings updated")
 	}
 	if m.originalConfig.Sync != m.config.Sync {
 		out = append(out, "sync settings updated")
@@ -1993,6 +2081,7 @@ func (m *configWizardModel) rebuildCatalogRows() {
 		rows = append(rows, table.Row{
 			c.Name,
 			c.Root,
+			strings.TrimSpace(m.config.Clone.CatalogPreset[c.Name]),
 			repoPathDepthLabel(c),
 			def,
 			onOffLabel(c.AllowsDefaultBranchAutoPush(domain.VisibilityPrivate)),
@@ -2041,16 +2130,25 @@ func (m *configWizardModel) startCatalogEditRootEditor() {
 		m.errorText = "select a catalog first"
 		return
 	}
+	catalog := m.machine.Catalogs[idx]
 	root := textinput.New()
 	root.Prompt = ""
 	root.Placeholder = "/absolute/path"
-	root.SetValue(m.machine.Catalogs[idx].Root)
+	root.SetValue(catalog.Root)
 	root.Focus()
+	preset := textinput.New()
+	preset.Prompt = ""
+	preset.Placeholder = "preset name (optional)"
+	preset.SetValue(strings.TrimSpace(m.config.Clone.CatalogPreset[catalog.Name]))
+	preset.Blur()
 	m.catalogEdit = &catalogEditor{
-		mode:   catalogEditorEditRoot,
-		inputs: []textinput.Model{root},
-		focus:  0,
-		row:    idx,
+		mode:          catalogEditorEditRoot,
+		inputs:        []textinput.Model{root, preset},
+		focus:         0,
+		row:           idx,
+		repoPathDepth: domain.EffectiveRepoPathDepth(catalog),
+		privatePush:   catalog.AllowsDefaultBranchAutoPush(domain.VisibilityPrivate),
+		publicPush:    catalog.AllowsDefaultBranchAutoPush(domain.VisibilityPublic),
 	}
 	m.catalogTable.Blur()
 }
@@ -2100,7 +2198,33 @@ func (m *configWizardModel) commitCatalogEditor() error {
 		if !filepath.IsAbs(root) {
 			return fmt.Errorf("catalog root must be absolute")
 		}
+		preset := strings.TrimSpace(editor.inputs[1].Value())
+		if preset != "" {
+			if _, ok := m.config.Clone.Presets[preset]; !ok {
+				return fmt.Errorf("clone preset %q is not defined", preset)
+			}
+		}
+
 		m.machine.Catalogs[editor.row].Root = root
+		if editor.repoPathDepth == 2 {
+			m.machine.Catalogs[editor.row].RepoPathDepth = 2
+		} else {
+			m.machine.Catalogs[editor.row].RepoPathDepth = 1
+		}
+		privatePush := editor.privatePush
+		publicPush := editor.publicPush
+		m.machine.Catalogs[editor.row].AllowAutoPushDefaultBranchPrivate = &privatePush
+		m.machine.Catalogs[editor.row].AllowAutoPushDefaultBranchPublic = &publicPush
+
+		name := m.machine.Catalogs[editor.row].Name
+		if m.config.Clone.CatalogPreset == nil {
+			m.config.Clone.CatalogPreset = map[string]string{}
+		}
+		if preset == "" {
+			delete(m.config.Clone.CatalogPreset, name)
+		} else {
+			m.config.Clone.CatalogPreset[name] = preset
+		}
 		m.rebuildCatalogRows()
 		m.catalogTable.SetCursor(editor.row)
 		return nil
@@ -2190,15 +2314,42 @@ func (m *configWizardModel) toggleDefaultBranchAutoPushFromSelection(visibility 
 	return nil
 }
 
+func (m *configWizardModel) toggleCatalogEditorOption(toggleIndex int) error {
+	editor := m.catalogEdit
+	if editor == nil || editor.mode != catalogEditorEditRoot {
+		return nil
+	}
+	switch toggleIndex {
+	case 0:
+		if editor.repoPathDepth == 2 {
+			editor.repoPathDepth = 1
+		} else {
+			editor.repoPathDepth = 2
+		}
+	case 1:
+		editor.privatePush = !editor.privatePush
+	case 2:
+		editor.publicPush = !editor.publicPush
+	default:
+		return fmt.Errorf("invalid editor toggle selection")
+	}
+	return nil
+}
+
 func (m *configWizardModel) selectedCatalogPolicySummary() string {
 	idx := m.catalogTable.Cursor()
 	if idx < 0 || idx >= len(m.machine.Catalogs) {
 		return "Select a catalog to change default-branch auto-push policy."
 	}
 	c := m.machine.Catalogs[idx]
+	preset := strings.TrimSpace(m.config.Clone.CatalogPreset[c.Name])
+	if preset == "" {
+		preset = "-"
+	}
 	return fmt.Sprintf(
-		"Selected %q: layout=%s, private=%s, public=%s",
+		"Selected %q: preset=%s, layout=%s, private=%s, public=%s",
 		c.Name,
+		preset,
 		repoPathDepthLabel(c),
 		onOffLabel(c.AllowsDefaultBranchAutoPush(domain.VisibilityPrivate)),
 		onOffLabel(c.AllowsDefaultBranchAutoPush(domain.VisibilityPublic)),

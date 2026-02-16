@@ -716,6 +716,19 @@ func TestRunCatalogAndConfigCommands(t *testing.T) {
 func TestRunCloneAndLinkForwardOptions(t *testing.T) {
 	t.Parallel()
 
+	t.Run("clone missing repo shows command hint", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, calls, _ := runCLI(t, fake, []string{"clone"})
+		if code != 2 {
+			t.Fatalf("exit code = %d, want 2", code)
+		}
+		if calls != 0 {
+			t.Fatalf("app factory calls = %d, want 0", calls)
+		}
+		mustContain(t, stderr, "bb clone")
+		mustContain(t, stderr, "accepts 1 arg(s), received 0")
+	})
+
 	t.Run("clone forwards flags", func(t *testing.T) {
 		fake := &fakeApp{}
 		code, _, stderr, _, _ := runCLI(t, fake, []string{

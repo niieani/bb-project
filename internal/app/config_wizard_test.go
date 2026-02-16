@@ -464,6 +464,8 @@ func TestWizardCatalogButtonsAllowChangingSelectedRowWithUpDown(t *testing.T) {
 }
 
 func TestWizardCatalogEnterOnTableRowOpensEditor(t *testing.T) {
+	t.Parallel()
+
 	m := testConfigWizardModel(t)
 	m.step = stepCatalogs
 	m.focusTabs = false
@@ -477,7 +479,76 @@ func TestWizardCatalogEnterOnTableRowOpensEditor(t *testing.T) {
 	}
 }
 
+func TestWizardCatalogEditScreenIncludesPresetAndPushToggles(t *testing.T) {
+	t.Parallel()
+
+	m := testConfigWizardModel(t)
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.startCatalogEditRootEditor()
+	if m.catalogEdit == nil {
+		t.Fatal("expected edit editor")
+	}
+
+	view := m.viewCatalogEditor()
+	if !strings.Contains(view, "Clone preset mapping") {
+		t.Fatalf("expected clone preset field in editor view, got: %q", view)
+	}
+	if !strings.Contains(view, "Private default-branch auto-push") {
+		t.Fatalf("expected private auto-push toggle in editor view, got: %q", view)
+	}
+	if !strings.Contains(view, "Public default-branch auto-push") {
+		t.Fatalf("expected public auto-push toggle in editor view, got: %q", view)
+	}
+}
+
+func TestWizardCatalogEditScreenCanSaveLayoutAndPushPolicy(t *testing.T) {
+	t.Parallel()
+
+	m := testConfigWizardModel(t)
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.startCatalogEditRootEditor()
+	if m.catalogEdit == nil {
+		t.Fatal("expected edit editor")
+	}
+	if got := domain.EffectiveRepoPathDepth(m.machine.Catalogs[0]); got != 1 {
+		t.Fatalf("initial layout depth = %d, want 1", got)
+	}
+	if !m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPrivate) {
+		t.Fatal("expected private auto-push default on")
+	}
+	if m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPublic) {
+		t.Fatal("expected public auto-push default off")
+	}
+
+	m.catalogEdit.inputs[1].SetValue("references")
+	m.catalogEdit.focus = 2 // layout toggle
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.catalogEdit.focus = 3 // private toggle
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.catalogEdit.focus = 4 // public toggle
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.catalogEdit.focus = 5 // save action
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if got := domain.EffectiveRepoPathDepth(m.machine.Catalogs[0]); got != 2 {
+		t.Fatalf("layout depth after save = %d, want 2", got)
+	}
+	if m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPrivate) {
+		t.Fatal("expected private auto-push toggled off")
+	}
+	if !m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPublic) {
+		t.Fatal("expected public auto-push toggled on")
+	}
+	if got := m.config.Clone.CatalogPreset["software"]; got != "references" {
+		t.Fatalf("clone.catalog_preset[software] = %q, want references", got)
+	}
+}
+
 func TestWizardCatalogEditorDeleteRequiresConfirmation(t *testing.T) {
+	t.Parallel()
+
 	m := testConfigWizardModel(t)
 	m.step = stepCatalogs
 	m.focusTabs = false
@@ -490,9 +561,9 @@ func TestWizardCatalogEditorDeleteRequiresConfirmation(t *testing.T) {
 		t.Fatalf("unexpected initial catalog count %d", len(m.machine.Catalogs))
 	}
 
-	// Move focus to Delete button (root input -> Save -> Delete).
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	// Focus Delete action directly.
+	m.catalogEdit.focus = 6
+	m.updateCatalogEditorFocus()
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.catalogEdit == nil {
 		t.Fatal("expected editor to stay open on first delete confirmation")
@@ -511,6 +582,8 @@ func TestWizardCatalogEditorDeleteRequiresConfirmation(t *testing.T) {
 }
 
 func TestWizardCatalogEditorActionButtonsNavigateWithLeftRight(t *testing.T) {
+	t.Parallel()
+
 	m := testConfigWizardModel(t)
 	m.step = stepCatalogs
 	m.focusTabs = false
@@ -521,33 +594,35 @@ func TestWizardCatalogEditorActionButtonsNavigateWithLeftRight(t *testing.T) {
 	}
 
 	// Move from input to Save action.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	if m.catalogEdit.focus != 1 {
-		t.Fatalf("focus = %d, want 1 (Save)", m.catalogEdit.focus)
+	for range 5 {
+		_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+	if m.catalogEdit.focus != 5 {
+		t.Fatalf("focus = %d, want 5 (Save)", m.catalogEdit.focus)
 	}
 	// Left from Save should stay.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	if m.catalogEdit.focus != 1 {
-		t.Fatalf("focus = %d, want 1 after left at first action", m.catalogEdit.focus)
+	if m.catalogEdit.focus != 5 {
+		t.Fatalf("focus = %d, want 5 after left at first action", m.catalogEdit.focus)
 	}
 	// Right to Delete then Cancel.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	if m.catalogEdit.focus != 2 {
-		t.Fatalf("focus = %d, want 2 (Delete)", m.catalogEdit.focus)
+	if m.catalogEdit.focus != 6 {
+		t.Fatalf("focus = %d, want 6 (Delete)", m.catalogEdit.focus)
 	}
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	if m.catalogEdit.focus != 3 {
-		t.Fatalf("focus = %d, want 3 (Cancel)", m.catalogEdit.focus)
+	if m.catalogEdit.focus != 7 {
+		t.Fatalf("focus = %d, want 7 (Cancel)", m.catalogEdit.focus)
 	}
 	// Right at end should stay.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	if m.catalogEdit.focus != 3 {
-		t.Fatalf("focus = %d, want 3 after right at last action", m.catalogEdit.focus)
+	if m.catalogEdit.focus != 7 {
+		t.Fatalf("focus = %d, want 7 after right at last action", m.catalogEdit.focus)
 	}
 	// Left back to Delete.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	if m.catalogEdit.focus != 2 {
-		t.Fatalf("focus = %d, want 2 after left from cancel", m.catalogEdit.focus)
+	if m.catalogEdit.focus != 6 {
+		t.Fatalf("focus = %d, want 6 after left from cancel", m.catalogEdit.focus)
 	}
 }
 

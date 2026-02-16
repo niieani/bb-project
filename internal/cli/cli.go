@@ -245,7 +245,7 @@ func newCloneCommand(runtime *runtimeState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "clone <repo>",
 		Short: "Clone repository into a catalog and register metadata/state.",
-		Args:  cobra.ExactArgs(1),
+		Args:  exactArgsWithCommandHint(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if shallow && noShallow {
 				return withExitCode(2, errors.New("--shallow and --no-shallow are mutually exclusive"))
@@ -296,7 +296,7 @@ func newLinkCommand(runtime *runtimeState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "link <project-or-repo>",
 		Short: "Create local reference symlink to a project or repository.",
-		Args:  cobra.ExactArgs(1),
+		Args:  exactArgsWithCommandHint(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			runner, err := runtime.appRunner()
 			if err != nil {
@@ -319,6 +319,15 @@ func newLinkCommand(runtime *runtimeState) *cobra.Command {
 	cmd.Flags().StringVar(&catalog, "catalog", "", "Catalog override used for auto-clone fallback.")
 
 	return cmd
+}
+
+func exactArgsWithCommandHint(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := cobra.ExactArgs(n)(cmd, args); err != nil {
+			return fmt.Errorf("%s\n%w", cmd.CommandPath(), err)
+		}
+		return nil
+	}
 }
 
 func newScanCommand(runtime *runtimeState) *cobra.Command {
