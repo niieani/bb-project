@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -254,6 +255,12 @@ func (m *fixTUIModel) wizardHelpMap() fixTUIHelpMap {
 	if m.wizard.FocusArea != fixWizardFocusActions {
 		enterDesc = "next field"
 	}
+	if m.wizard.FocusArea == fixWizardFocusCommit && m.wizard.CommitButtonFocused {
+		enterDesc = "generate message"
+	}
+	if m.wizard.FocusArea == fixWizardFocusDiff {
+		enterDesc = "open visual diff"
+	}
 	enter := newHelpBinding([]string{"enter"}, "enter", enterDesc)
 	short = append(short, enter)
 	primary = append(primary, enter)
@@ -265,6 +272,10 @@ func (m *fixTUIModel) wizardHelpMap() fixTUIHelpMap {
 		primary = append(primary, b)
 	case fixWizardFocusActions:
 		b := newHelpBinding([]string{"left", "right"}, "←/→", "select button")
+		short = append(short, b)
+		primary = append(primary, b)
+	case fixWizardFocusCommit:
+		b := newHelpBinding([]string{"left", "right"}, "←/→", "input/generate")
 		short = append(short, b)
 		primary = append(primary, b)
 	case fixWizardFocusGitignore:
@@ -426,16 +437,19 @@ func renderSingleLineShortHelp(helpModel help.Model, bindings []key.Binding, wid
 }
 
 type fixTUIModel struct {
-	app             *App
-	includeCatalogs []string
-	loadReposFn     func(includeCatalogs []string, refreshMode scanRefreshMode) ([]fixRepoState, error)
-	repos           []fixRepoState
-	visible         []fixRepoState
-	ignored         map[string]bool
-	actionCursor    map[string]int
-	scheduled       map[string][]string
-	rowRepoIndex    []int
-	repoIndexToRow  []int
+	app                     *App
+	includeCatalogs         []string
+	loadReposFn             func(includeCatalogs []string, refreshMode scanRefreshMode) ([]fixRepoState, error)
+	execProcessFn           func(c *exec.Cmd, fn tea.ExecCallback) tea.Cmd
+	generateCommitMessageFn func(repoPath string) (string, error)
+	prepareVisualDiffCmdFn  func(repoPath string, args []string) (*exec.Cmd, func(error) error, error)
+	repos                   []fixRepoState
+	visible                 []fixRepoState
+	ignored                 map[string]bool
+	actionCursor            map[string]int
+	scheduled               map[string][]string
+	rowRepoIndex            []int
+	repoIndexToRow          []int
 
 	keys fixTUIKeyMap
 	help help.Model
@@ -959,6 +973,9 @@ func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUI
 		app:                      app,
 		includeCatalogs:          append([]string(nil), includeCatalogs...),
 		loadReposFn:              app.loadFixRepos,
+		execProcessFn:            tea.ExecProcess,
+		generateCommitMessageFn:  app.generateLumenCommitMessage,
+		prepareVisualDiffCmdFn:   app.prepareLumenDiffExecCommand,
 		ignored:                  map[string]bool{},
 		actionCursor:             map[string]int{},
 		scheduled:                map[string][]string{},
@@ -1027,6 +1044,11 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.wizard.ApplySpinner, cmd = m.wizard.ApplySpinner.Update(msg)
 			return m, cmd
 		}
+		if m.viewMode == fixViewWizard && m.wizard.CommitGenerating {
+			var cmd tea.Cmd
+			m.wizard.CommitGenerateSpinner, cmd = m.wizard.CommitGenerateSpinner.Update(msg)
+			return m, cmd
+		}
 		if m.immediateApplying {
 			var cmd tea.Cmd
 			m.immediateApplySpinner, cmd = m.immediateApplySpinner.Update(msg)
@@ -1065,6 +1087,10 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case fixWizardCommitGeneratedMsg:
+		return m, m.handleWizardCommitGenerated(msg)
+	case fixWizardDiffCompletedMsg:
+		return m, m.handleWizardDiffCompleted(msg)
 	case fixTUIImmediateApplyTaskStartedMsg:
 		m.immediatePhase = fixWizardApplyPhasePreparing
 		m.immediateStep = fmt.Sprintf("%s (%s)", msg.Task.RepoName, fixActionLabel(msg.Task.Action))

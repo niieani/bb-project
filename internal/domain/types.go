@@ -75,6 +75,7 @@ type ConfigFile struct {
 	Sync           SyncConfig      `yaml:"sync"`
 	Scheduler      SchedulerConfig `yaml:"scheduler"`
 	Notify         NotifyConfig    `yaml:"notify"`
+	Integrations   Integrations    `yaml:"integrations"`
 }
 
 type StateTransport struct {
@@ -123,6 +124,15 @@ type NotifyConfig struct {
 	Enabled         bool `yaml:"enabled"`
 	Dedupe          bool `yaml:"dedupe"`
 	ThrottleMinutes int  `yaml:"throttle_minutes"`
+}
+
+type Integrations struct {
+	Lumen LumenIntegrationConfig `yaml:"lumen"`
+}
+
+type LumenIntegrationConfig struct {
+	Enabled        bool `yaml:"enabled"`
+	ShowInstallTip bool `yaml:"show_install_tip"`
 }
 
 type RepoMetadataFile struct {

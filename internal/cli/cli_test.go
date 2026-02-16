@@ -16,17 +16,21 @@ import (
 type fakeApp struct {
 	verbose bool
 
-	initOpts   app.InitOptions
-	scanOpts   app.ScanOptions
-	syncOpts   app.SyncOptions
-	fixOpts    app.FixOptions
-	cloneOpts  app.CloneOptions
-	linkOpts   app.LinkOptions
-	infoOpts   app.InfoOptions
-	statusJSON bool
-	statusIncl []string
-	doctorIncl []string
-	ensureIncl []string
+	initOpts    app.InitOptions
+	scanOpts    app.ScanOptions
+	syncOpts    app.SyncOptions
+	fixOpts     app.FixOptions
+	cloneOpts   app.CloneOptions
+	linkOpts    app.LinkOptions
+	infoOpts    app.InfoOptions
+	statusJSON  bool
+	statusIncl  []string
+	doctorIncl  []string
+	ensureIncl  []string
+	diffProj    string
+	diffArgs    []string
+	operateProj string
+	operateArgs []string
 
 	repoPolicySelector  string
 	repoPolicyAutoPush  domain.AutoPushMode
@@ -82,6 +86,10 @@ type fakeApp struct {
 	catalogListCode int
 	catalogListErr  error
 	configErr       error
+	diffCode        int
+	diffErr         error
+	operateCode     int
+	operateErr      error
 
 	schedulerInstallCode int
 	schedulerInstallErr  error
@@ -144,6 +152,18 @@ func (f *fakeApp) RunDoctor(include []string) (int, error) {
 func (f *fakeApp) RunEnsure(include []string) (int, error) {
 	f.ensureIncl = append([]string(nil), include...)
 	return f.ensureCode, f.ensureErr
+}
+
+func (f *fakeApp) RunDiff(project string, args []string) (int, error) {
+	f.diffProj = project
+	f.diffArgs = append([]string(nil), args...)
+	return f.diffCode, f.diffErr
+}
+
+func (f *fakeApp) RunOperate(project string, args []string) (int, error) {
+	f.operateProj = project
+	f.operateArgs = append([]string(nil), args...)
+	return f.operateCode, f.operateErr
 }
 
 func (f *fakeApp) RunRepoPolicy(repoSelector string, autoPushMode domain.AutoPushMode) (int, error) {
@@ -469,6 +489,33 @@ func TestRunFixForwardsOptions(t *testing.T) {
 		}
 	})
 
+	t.Run("forwards ai message", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"fix", "api", "stage-commit-push", "--ai-message"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if !fake.fixOpts.AIMessage {
+			t.Fatal("expected ai-message option to be forwarded")
+		}
+	})
+
+	t.Run("rejects message with ai-message", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, calls, _ := runCLI(t, fake, []string{"fix", "api", "stage-commit-push", "--message=manual", "--ai-message"})
+		if code != 2 {
+			t.Fatalf("exit code = %d, want 2", code)
+		}
+		if calls != 0 {
+			t.Fatalf("app factory calls = %d, want 0", calls)
+		}
+		mustContain(t, stderr, "--ai-message")
+		mustContain(t, stderr, "--message")
+	})
+
 	t.Run("forwards explicit sync strategy", func(t *testing.T) {
 		fake := &fakeApp{}
 		code, _, stderr, _, _ := runCLI(t, fake, []string{"fix", "api", "sync-with-upstream", "--sync-strategy=merge"})
@@ -515,6 +562,40 @@ func TestRunFixForwardsOptions(t *testing.T) {
 			t.Fatalf("app factory calls = %d, want 0", calls)
 		}
 		mustContain(t, stderr, "invalid --sync-strategy")
+	})
+}
+
+func TestRunDiffAndOperateForwardRawArgs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("diff forwards project and passthrough args", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"diff", "api", "--watch", "--focus", "pkg/"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.diffProj != "api" {
+			t.Fatalf("diff project = %q, want %q", fake.diffProj, "api")
+		}
+		mustEqualSlices(t, fake.diffArgs, []string{"--watch", "--focus", "pkg/"})
+	})
+
+	t.Run("operate forwards project and passthrough args", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"operate", "api", "--model", "gpt-5", "apply formatting"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.operateProj != "api" {
+			t.Fatalf("operate project = %q, want %q", fake.operateProj, "api")
+		}
+		mustEqualSlices(t, fake.operateArgs, []string{"--model", "gpt-5", "apply formatting"})
 	})
 }
 

@@ -9,6 +9,7 @@ bb fix [project] [action] [flags]
 ### Options
 
 ```
+      --ai-message                    Generate commit message with Lumen for commit-producing fix actions.
   -h, --help                          help for fix
       --include-catalog stringArray   Limit scope to selected catalogs (repeatable).
       --message string                Commit message for stage-commit-push/publish-new-branch/checkpoint-then-sync actions (or 'auto').

@@ -91,10 +91,16 @@ func (e *fixIneligibleError) Unwrap() error {
 
 func (a *App) runFix(opts FixOptions) (int, error) {
 	if strings.TrimSpace(opts.Project) == "" && strings.TrimSpace(opts.Action) == "" {
+		if opts.AIMessage {
+			return 2, errors.New("--ai-message requires an explicit action")
+		}
 		if a.IsInteractiveTerminal == nil || !a.IsInteractiveTerminal() {
 			return 2, errors.New("bb fix requires an interactive terminal")
 		}
 		return a.runFixInteractiveWithMutedLogs(opts.IncludeCatalogs, opts.NoRefresh)
+	}
+	if opts.AIMessage && strings.TrimSpace(opts.CommitMessage) != "" {
+		return 2, errors.New("--message and --ai-message are mutually exclusive")
 	}
 
 	refreshMode := scanRefreshIfStale
@@ -128,6 +134,11 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 	}
 
 	action := strings.TrimSpace(opts.Action)
+	if opts.AIMessage {
+		if !isCommitProducingFixAction(action) {
+			return 2, errors.New("--ai-message is only supported for stage-commit-push, publish-new-branch, and checkpoint-then-sync")
+		}
+	}
 	if action == FixActionIgnore {
 		return 2, errors.New("ignore action is interactive-only; use `bb fix`")
 	}
@@ -139,6 +150,14 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 			fmt.Fprintln(a.Stdout, reason)
 		}
 		return 1, nil
+	}
+
+	if opts.AIMessage {
+		message, err := a.generateLumenCommitMessage(target.Record.Path)
+		if err != nil {
+			return 2, err
+		}
+		opts.CommitMessage = message
 	}
 
 	updated, err := a.applyFixAction(opts.IncludeCatalogs, target.Record.Path, action, fixApplyOptions{
@@ -170,6 +189,15 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 		return 0, nil
 	}
 	return 1, nil
+}
+
+func isCommitProducingFixAction(action string) bool {
+	switch strings.TrimSpace(action) {
+	case FixActionStageCommitPush, FixActionPublishNewBranch, FixActionCheckpointThenSync:
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *App) runFixInteractiveWithMutedLogs(includeCatalogs []string, noRefresh bool) (int, error) {

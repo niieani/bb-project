@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"io"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -247,6 +248,7 @@ func newFixTUIModelForTest(repos []fixRepoState) *fixTUIModel {
 		ignored:               map[string]bool{},
 		actionCursor:          map[string]int{},
 		scheduled:             map[string][]string{},
+		execProcessFn:         tea.ExecProcess,
 		repoList:              newFixRepoListModel(),
 		keys:                  defaultFixTUIKeyMap(),
 		help:                  help.New(),
@@ -1463,6 +1465,78 @@ func TestFixTUIWizardCommitInputStartsEmptyWithPlaceholder(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardCommitGenerateButtonIsSymbolic(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	view := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(view, "✨") {
+		t.Fatalf("expected symbolic commit generation button, got %q", view)
+	}
+}
+
+func TestFixTUIWizardCommitGenerateButtonRunsImmediatelyAndReplacesMessage(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	m.generateCommitMessageFn = func(repoPath string) (string, error) {
+		if repoPath != "/repos/api" {
+			t.Fatalf("generate repo path = %q, want %q", repoPath, "/repos/api")
+		}
+		return "feat: generated message", nil
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if !m.wizard.CommitButtonFocused {
+		t.Fatal("expected commit button focus after right key")
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.wizard.CommitGenerating {
+		t.Fatal("expected commit generation to start immediately on enter")
+	}
+	if cmd == nil {
+		t.Fatal("expected async commit generation command")
+	}
+	_, _ = m.Update(fixWizardCommitGeneratedMsg{Message: "feat: generated message"})
+
+	if m.wizard.CommitGenerating {
+		t.Fatal("expected commit generation spinner to stop after completion")
+	}
+	if got := m.wizard.CommitMessage.Value(); got != "feat: generated message" {
+		t.Fatalf("commit input value = %q, want %q", got, "feat: generated message")
+	}
+	if m.wizard.CommitButtonFocused {
+		t.Fatal("expected focus to return to commit input after generation")
+	}
+}
+
 func TestFixTUIWizardViewShowsActionButtons(t *testing.T) {
 	t.Parallel()
 
@@ -2309,6 +2383,71 @@ func TestFixTUIWizardChangedFilesRenderAsListWithStats(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardVisualDiffButtonLaunchesAndReturnsToSameWizardState(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
+			Risk: fixRiskSnapshot{
+				ChangedFiles: []fixChangedFile{
+					{Path: "src/main.go", Added: 2, Deleted: 1},
+				},
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+
+	view := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(view, "◫") {
+		t.Fatalf("expected symbolic visual diff button, got %q", view)
+	}
+
+	m.wizard.FocusArea = fixWizardFocusDiff
+	execCalled := false
+	m.prepareVisualDiffCmdFn = func(repoPath string, args []string) (*exec.Cmd, func(error) error, error) {
+		if repoPath != "/repos/api" {
+			t.Fatalf("visual diff repo path = %q, want %q", repoPath, "/repos/api")
+		}
+		if len(args) != 0 {
+			t.Fatalf("visual diff args = %v, want empty", args)
+		}
+		return &exec.Cmd{}, func(err error) error { return err }, nil
+	}
+	m.execProcessFn = func(_ *exec.Cmd, fn tea.ExecCallback) tea.Cmd {
+		execCalled = true
+		return func() tea.Msg {
+			return fn(nil)
+		}
+	}
+
+	focusBefore := m.wizard.FocusArea
+	indexBefore := m.wizard.Index
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !execCalled {
+		t.Fatal("expected visual diff exec process to be launched")
+	}
+	if cmd == nil {
+		t.Fatal("expected exec callback command after launching visual diff")
+	}
+	_, _ = m.Update(cmd())
+
+	if got := m.wizard.FocusArea; got != focusBefore {
+		t.Fatalf("focus area after returning from visual diff = %v, want %v", got, focusBefore)
+	}
+	if got := m.wizard.Index; got != indexBefore {
+		t.Fatalf("wizard index after returning from visual diff = %d, want %d", got, indexBefore)
+	}
+}
+
 func TestFixTUIWizardChangedFilesTrimIndicator(t *testing.T) {
 	t.Parallel()
 
@@ -2988,9 +3127,14 @@ func TestFixTUIWizardDownMovesFocusAtViewportBottom(t *testing.T) {
 		t.Fatal("expected wizard viewport to be at bottom")
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // should move to actions at bottom edge
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // should move to visual diff at bottom edge when changed files are shown
+	if m.wizard.FocusArea != fixWizardFocusDiff {
+		t.Fatalf("focus area after down at bottom = %v, want visual diff", m.wizard.FocusArea)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // visual diff -> actions
 	if m.wizard.FocusArea != fixWizardFocusActions {
-		t.Fatalf("focus area after down at bottom = %v, want actions", m.wizard.FocusArea)
+		t.Fatalf("focus area after second down at bottom = %v, want actions", m.wizard.FocusArea)
 	}
 }
 

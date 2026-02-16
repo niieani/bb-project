@@ -221,6 +221,12 @@ func TestDefaultConfigCloneLinkDefaults(t *testing.T) {
 	if cfg.Link.Absolute {
 		t.Fatal("link.absolute = true, want false")
 	}
+	if !cfg.Integrations.Lumen.Enabled {
+		t.Fatal("integrations.lumen.enabled = false, want true")
+	}
+	if !cfg.Integrations.Lumen.ShowInstallTip {
+		t.Fatal("integrations.lumen.show_install_tip = false, want true")
+	}
 }
 
 func TestLoadConfigAllowsEmptyCloneCatalogPresetOverride(t *testing.T) {
@@ -240,4 +246,83 @@ func TestLoadConfigAllowsEmptyCloneCatalogPresetOverride(t *testing.T) {
 	if len(loaded.Clone.CatalogPreset) != 0 {
 		t.Fatalf("clone.catalog_preset = %#v, want empty map", loaded.Clone.CatalogPreset)
 	}
+}
+
+func TestLoadConfigLumenIntegrationDefaultsAndOverrides(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing integration fields keep defaults", func(t *testing.T) {
+		paths := NewPaths(t.TempDir())
+		raw := strings.TrimSpace(`
+version: 1
+state_transport:
+  mode: external
+github:
+  owner: alice
+  default_visibility: private
+  remote_protocol: ssh
+clone:
+  default_catalog: ""
+  shallow: false
+  filter: ""
+  presets: {}
+  catalog_preset: {}
+link:
+  target_dir: references
+  absolute: false
+sync:
+  auto_discover: true
+  include_untracked_as_dirty: true
+  default_auto_push_private: true
+  default_auto_push_public: false
+  fetch_prune: true
+  pull_ff_only: true
+  scan_freshness_seconds: 60
+scheduler:
+  interval_minutes: 60
+notify:
+  enabled: true
+  dedupe: true
+  throttle_minutes: 60
+`) + "\n"
+		if err := os.MkdirAll(paths.ConfigRoot(), 0o755); err != nil {
+			t.Fatalf("mkdir config root: %v", err)
+		}
+		if err := os.WriteFile(paths.ConfigPath(), []byte(raw), 0o644); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+
+		cfg, err := LoadConfig(paths)
+		if err != nil {
+			t.Fatalf("load config: %v", err)
+		}
+		if !cfg.Integrations.Lumen.Enabled {
+			t.Fatal("integrations.lumen.enabled = false, want true")
+		}
+		if !cfg.Integrations.Lumen.ShowInstallTip {
+			t.Fatal("integrations.lumen.show_install_tip = false, want true")
+		}
+	})
+
+	t.Run("explicit false values persist", func(t *testing.T) {
+		paths := NewPaths(t.TempDir())
+		cfg := DefaultConfig()
+		cfg.GitHub.Owner = "alice"
+		cfg.Integrations.Lumen.Enabled = false
+		cfg.Integrations.Lumen.ShowInstallTip = false
+		if err := SaveConfig(paths, cfg); err != nil {
+			t.Fatalf("save config: %v", err)
+		}
+
+		loaded, err := LoadConfig(paths)
+		if err != nil {
+			t.Fatalf("load config: %v", err)
+		}
+		if loaded.Integrations.Lumen.Enabled {
+			t.Fatal("integrations.lumen.enabled = true, want false")
+		}
+		if loaded.Integrations.Lumen.ShowInstallTip {
+			t.Fatal("integrations.lumen.show_install_tip = true, want false")
+		}
+	})
 }

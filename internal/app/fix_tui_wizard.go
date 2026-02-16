@@ -50,9 +50,12 @@ type fixWizardState struct {
 	SyncStrategy     FixSyncStrategy
 	Risk             fixRiskSnapshot
 
-	EnableCommitMessage bool
-	CommitMessage       textinput.Model
-	CommitFocused       bool
+	EnableCommitMessage   bool
+	CommitMessage         textinput.Model
+	CommitFocused         bool
+	CommitButtonFocused   bool
+	CommitGenerating      bool
+	CommitGenerateSpinner spinner.Model
 
 	EnableProjectName bool
 	ProjectName       textinput.Model
@@ -113,6 +116,7 @@ type fixWizardFocusArea int
 const (
 	fixWizardFocusActions fixWizardFocusArea = iota
 	fixWizardFocusCommit
+	fixWizardFocusDiff
 	fixWizardFocusProjectName
 	fixWizardFocusForkBranch
 	fixWizardFocusGitignore
@@ -145,6 +149,15 @@ type fixWizardApplyCompletedMsg struct {
 }
 
 type fixWizardApplyChannelClosedMsg struct{}
+
+type fixWizardCommitGeneratedMsg struct {
+	Message string
+	Err     error
+}
+
+type fixWizardDiffCompletedMsg struct {
+	Err error
+}
 
 func isRiskyFixAction(action string) bool {
 	spec, ok := fixActionSpecFor(action)
@@ -227,6 +240,8 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	showGitignoreToggle := m.shouldShowGitignoreToggle(decision.Action, repoRisk)
 	applySpinner := spinner.New(spinner.WithSpinner(spinner.Dot))
 	applySpinner.Style = lipgloss.NewStyle().Foreground(accentColor)
+	commitGenerateSpinner := spinner.New(spinner.WithSpinner(spinner.Dot))
+	commitGenerateSpinner.Style = lipgloss.NewStyle().Foreground(accentColor)
 
 	m.wizard.RepoPath = decision.RepoPath
 	m.wizard.RepoName = repoName
@@ -244,6 +259,9 @@ func (m *fixTUIModel) loadWizardCurrent() {
 		decision.Action == FixActionCheckpointThenSync
 	m.wizard.CommitMessage = commitInput
 	m.wizard.CommitFocused = false
+	m.wizard.CommitButtonFocused = false
+	m.wizard.CommitGenerating = false
+	m.wizard.CommitGenerateSpinner = commitGenerateSpinner
 	m.wizard.EnableProjectName = decision.Action == FixActionCreateProject
 	m.wizard.ProjectName = projectNameInput
 	m.wizard.ShowGitignoreToggle = showGitignoreToggle
@@ -332,6 +350,57 @@ func (m *fixTUIModel) advanceWizard() {
 func (m *fixTUIModel) skipWizardCurrent() {
 	m.appendSummaryResult(m.wizard.Action, "skipped", "skipped by user")
 	m.advanceWizard()
+}
+
+func (m *fixTUIModel) generateWizardCommitMessage() tea.Cmd {
+	if m.wizard.CommitGenerating || m.wizard.Applying {
+		return nil
+	}
+	generate := m.generateCommitMessageFn
+	if generate == nil {
+		if m.app == nil {
+			m.errText = "internal: app is not configured"
+			return nil
+		}
+		generate = m.app.generateLumenCommitMessage
+	}
+	repoPath := m.wizard.RepoPath
+	repoName := m.wizard.RepoName
+	m.errText = ""
+	m.status = fmt.Sprintf("generating commit message for %s", repoName)
+	m.wizard.CommitGenerating = true
+	return tea.Batch(m.wizard.CommitGenerateSpinner.Tick, func() tea.Msg {
+		message, err := generate(repoPath)
+		return fixWizardCommitGeneratedMsg{Message: message, Err: err}
+	})
+}
+
+func (m *fixTUIModel) launchWizardVisualDiff() tea.Cmd {
+	if m.wizard.Applying || m.wizard.CommitGenerating {
+		return nil
+	}
+	prepare := m.prepareVisualDiffCmdFn
+	if prepare == nil {
+		if m.app == nil {
+			m.errText = "internal: app is not configured"
+			return nil
+		}
+		prepare = m.app.prepareLumenDiffExecCommand
+	}
+	cmd, wrapErr, err := prepare(m.wizard.RepoPath, nil)
+	if err != nil {
+		m.errText = err.Error()
+		return nil
+	}
+	m.errText = ""
+	m.status = fmt.Sprintf("opening visual diff for %s", m.wizard.RepoName)
+	execProcess := m.execProcessFn
+	if execProcess == nil {
+		execProcess = tea.ExecProcess
+	}
+	return execProcess(cmd, func(runErr error) tea.Msg {
+		return fixWizardDiffCompletedMsg{Err: wrapErr(runErr)}
+	})
 }
 
 func (m *fixTUIModel) applyWizardCurrent() tea.Cmd {
@@ -508,6 +577,33 @@ func (m *fixTUIModel) handleWizardApplyCompleted(msg fixWizardApplyCompletedMsg)
 	return nil
 }
 
+func (m *fixTUIModel) handleWizardCommitGenerated(msg fixWizardCommitGeneratedMsg) tea.Cmd {
+	m.wizard.CommitGenerating = false
+	if msg.Err != nil {
+		m.errText = msg.Err.Error()
+		m.status = fmt.Sprintf("commit message generation failed for %s", m.wizard.RepoName)
+		return nil
+	}
+	m.wizard.CommitMessage.SetValue(strings.TrimSpace(msg.Message))
+	m.wizard.FocusArea = fixWizardFocusCommit
+	m.wizard.CommitButtonFocused = false
+	m.syncWizardFieldFocus()
+	m.errText = ""
+	m.status = fmt.Sprintf("generated commit message for %s", m.wizard.RepoName)
+	return nil
+}
+
+func (m *fixTUIModel) handleWizardDiffCompleted(msg fixWizardDiffCompletedMsg) tea.Cmd {
+	if msg.Err != nil {
+		m.errText = msg.Err.Error()
+		m.status = fmt.Sprintf("visual diff exited with error for %s", m.wizard.RepoName)
+		return nil
+	}
+	m.errText = ""
+	m.status = fmt.Sprintf("returned from visual diff for %s", m.wizard.RepoName)
+	return nil
+}
+
 func (m *fixTUIModel) updateRepoAfterWizardApply(updated fixRepoState) {
 	path := strings.TrimSpace(updated.Record.Path)
 	if path == "" {
@@ -581,8 +677,10 @@ func (m *fixTUIModel) syncWizardFieldFocus() {
 	m.wizard.ForkBranchName.Blur()
 	switch m.wizard.FocusArea {
 	case fixWizardFocusCommit:
-		m.wizard.CommitFocused = true
-		m.wizard.CommitMessage.Focus()
+		m.wizard.CommitFocused = !m.wizard.CommitButtonFocused
+		if m.wizard.CommitFocused {
+			m.wizard.CommitMessage.Focus()
+		}
 	case fixWizardFocusProjectName:
 		m.wizard.ProjectName.Focus()
 	case fixWizardFocusForkBranch:
@@ -591,7 +689,7 @@ func (m *fixTUIModel) syncWizardFieldFocus() {
 }
 
 func (m *fixTUIModel) wizardFocusOrder() []fixWizardFocusArea {
-	order := make([]fixWizardFocusArea, 0, 6)
+	order := make([]fixWizardFocusArea, 0, 7)
 	if m.wizard.EnableCommitMessage {
 		order = append(order, fixWizardFocusCommit)
 	}
@@ -607,8 +705,15 @@ func (m *fixTUIModel) wizardFocusOrder() []fixWizardFocusArea {
 	if m.wizard.Action == FixActionCreateProject {
 		order = append(order, fixWizardFocusVisibility)
 	}
+	if m.wizardHasVisualDiffButton() {
+		order = append(order, fixWizardFocusDiff)
+	}
 	order = append(order, fixWizardFocusActions)
 	return order
+}
+
+func (m *fixTUIModel) wizardHasVisualDiffButton() bool {
+	return len(m.wizard.Risk.ChangedFiles) > 0
 }
 
 func (m *fixTUIModel) shouldShowGitignoreToggle(action string, risk fixRiskSnapshot) bool {
@@ -726,7 +831,7 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.syncWizardViewport()
 		return m, nil
 	}
-	if m.wizard.Applying {
+	if m.wizard.Applying || m.wizard.CommitGenerating {
 		return m, nil
 	}
 	switch msg.String() {
@@ -745,6 +850,9 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "enter":
+			if m.wizard.CommitButtonFocused {
+				return m, m.generateWizardCommitMessage()
+			}
 			m.wizardMoveFocus(1, false)
 			return m, nil
 		case "down":
@@ -759,11 +867,47 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.scrollWizardUp(1)
 			return m, nil
+		case "left":
+			if m.wizard.CommitButtonFocused {
+				m.wizard.CommitButtonFocused = false
+				m.syncWizardFieldFocus()
+			}
+			return m, nil
+		case "right":
+			m.wizard.CommitButtonFocused = true
+			m.syncWizardFieldFocus()
+			return m, nil
+		}
+		if m.wizard.CommitButtonFocused {
+			return m, nil
 		}
 		var cmd tea.Cmd
 		m.wizard.CommitMessage, cmd = m.wizard.CommitMessage.Update(msg)
 		m.errText = ""
 		return m, cmd
+	}
+	if m.wizard.FocusArea == fixWizardFocusDiff {
+		if key.Matches(msg, m.keys.Cancel) {
+			m.viewMode = fixViewList
+			m.status = "cancelled remaining risky confirmations"
+			return m, nil
+		}
+		switch msg.String() {
+		case "enter":
+			return m, m.launchWizardVisualDiff()
+		case "down":
+			if m.wizardMoveFocus(1, false) {
+				return m, nil
+			}
+			m.scrollWizardDown(1)
+			return m, nil
+		case "up":
+			if m.wizardMoveFocus(-1, false) {
+				return m, nil
+			}
+			m.scrollWizardUp(1)
+			return m, nil
+		}
 	}
 	if m.wizard.FocusArea == fixWizardFocusProjectName {
 		if key.Matches(msg, m.keys.Cancel) {
@@ -899,6 +1043,12 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case fixWizardFocusVisibility:
 			m.shiftWizardVisibility(-1)
 			return m, nil
+		case fixWizardFocusCommit:
+			if m.wizard.CommitButtonFocused {
+				m.wizard.CommitButtonFocused = false
+				m.syncWizardFieldFocus()
+			}
+			return m, nil
 		case fixWizardFocusActions:
 			m.wizard.ActionFocus--
 			if m.wizard.ActionFocus < fixWizardActionCancel {
@@ -913,6 +1063,10 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch m.wizard.FocusArea {
 		case fixWizardFocusVisibility:
 			m.shiftWizardVisibility(+1)
+			return m, nil
+		case fixWizardFocusCommit:
+			m.wizard.CommitButtonFocused = true
+			m.syncWizardFieldFocus()
 			return m, nil
 		case fixWizardFocusActions:
 			m.wizard.ActionFocus++
@@ -1067,6 +1221,11 @@ func (m *fixTUIModel) viewWizardContent() string {
 	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus), m.wizardBodyLineWidth())
 	if m.wizard.Applying {
 		actions = hintStyle.Render(m.clampSingleLine(m.wizardApplyingStatusLine(), m.wizardBodyLineWidth()))
+	} else if m.wizard.CommitGenerating {
+		actions = hintStyle.Render(m.clampSingleLine(
+			fmt.Sprintf("%s Generating commit message... controls are locked until completion.", m.wizard.CommitGenerateSpinner.View()),
+			m.wizardBodyLineWidth(),
+		))
 	}
 	topIndicator := m.wizardScrollIndicatorTop()
 	bottomIndicator := m.wizardScrollIndicatorBottom()
@@ -1132,7 +1291,7 @@ func (m *fixTUIModel) viewWizardStaticControls() string {
 			m.wizard.FocusArea == fixWizardFocusCommit,
 			"Commit message",
 			"Leave empty to auto-generate.",
-			renderInputContainer(m.wizard.CommitMessage.View(), m.wizard.FocusArea == fixWizardFocusCommit),
+			m.renderWizardCommitInputWithGenerateButton(),
 			"",
 		))
 	}
@@ -1178,6 +1337,29 @@ func (m *fixTUIModel) viewWizardStaticControls() string {
 		))
 	}
 	return strings.Join(controls, "\n\n")
+}
+
+func (m *fixTUIModel) renderWizardCommitInputWithGenerateButton() string {
+	inputFocused := m.wizard.FocusArea == fixWizardFocusCommit && !m.wizard.CommitButtonFocused
+	input := renderInputContainer(m.wizard.CommitMessage.View(), inputFocused)
+
+	buttonLabel := "✨"
+	if m.wizard.CommitGenerating {
+		buttonLabel = m.wizard.CommitGenerateSpinner.View()
+	}
+	buttonFocused := m.wizard.FocusArea == fixWizardFocusCommit && m.wizard.CommitButtonFocused && !m.wizard.CommitGenerating
+	button := buttonStyle
+	if m.wizard.CommitGenerating {
+		button = buttonDisabledStyle
+	} else if buttonFocused {
+		button = buttonFocusStyle
+	}
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		input,
+		" ",
+		button.Render(renderButtonLabel(buttonLabel, buttonFocused)),
+	)
 }
 
 func (m *fixTUIModel) viewWizardTopLine() string {
@@ -1386,7 +1568,21 @@ func (m *fixTUIModel) renderWizardChangedFilesBlock() string {
 		return ""
 	}
 	title, description := m.wizardChangedFilesFieldMeta()
-	return renderFieldBlock(false, title, description, m.renderChangedFilesList(), "")
+	value := m.renderChangedFilesList()
+	if m.wizardHasVisualDiffButton() {
+		value += "\n\n" + m.renderWizardVisualDiffButton()
+	}
+	return renderFieldBlock(m.wizard.FocusArea == fixWizardFocusDiff, title, description, value, "")
+}
+
+func (m *fixTUIModel) renderWizardVisualDiffButton() string {
+	focused := m.wizard.FocusArea == fixWizardFocusDiff
+	style := buttonStyle
+	if focused {
+		style = buttonFocusStyle
+	}
+	button := style.Render(renderButtonLabel("◫", focused))
+	return button + "\n" + hintStyle.Render("Open visual diff viewer (Lumen).")
 }
 
 func renderWizardCommandLine(command string) string {

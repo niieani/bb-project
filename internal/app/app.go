@@ -19,18 +19,21 @@ import (
 )
 
 type App struct {
-	Paths          state.Paths
-	Stdout         io.Writer
-	Stderr         io.Writer
-	Verbose        bool
-	Now            func() time.Time
-	Hostname       func() (string, error)
-	Getwd          func() (string, error)
-	Getenv         func(string) string
-	Git            gitx.Runner
-	RunCommand     func(name string, args ...string) (string, error)
-	GOOS           func() string
-	ExecutablePath func() (string, error)
+	Paths              state.Paths
+	Stdout             io.Writer
+	Stderr             io.Writer
+	Verbose            bool
+	Now                func() time.Time
+	Hostname           func() (string, error)
+	Getwd              func() (string, error)
+	Getenv             func(string) string
+	Git                gitx.Runner
+	RunCommand         func(name string, args ...string) (string, error)
+	RunCommandInDir    func(dir string, name string, args ...string) (string, error)
+	RunCommandAttached func(dir string, name string, args ...string) error
+	LookPath           func(file string) (string, error)
+	GOOS               func() string
+	ExecutablePath     func() (string, error)
 
 	IsInteractiveTerminal func() bool
 	RunConfigWizard       ConfigWizardRunner
@@ -73,6 +76,7 @@ type FixOptions struct {
 	Project                       string
 	Action                        string
 	CommitMessage                 string
+	AIMessage                     bool
 	PublishBranch                 string
 	ReturnToOriginalBranchAndSync bool
 	SyncStrategy                  FixSyncStrategy
@@ -133,6 +137,9 @@ func New(paths state.Paths, stdout io.Writer, stderr io.Writer) *App {
 		Getenv:                os.Getenv,
 		Git:                   gitx.Runner{Now: nowFn},
 		RunCommand:            defaultRunCommand,
+		RunCommandInDir:       defaultRunCommandInDir,
+		RunCommandAttached:    defaultRunCommandAttached,
+		LookPath:              exec.LookPath,
 		GOOS:                  func() string { return runtime.GOOS },
 		ExecutablePath:        os.Executable,
 		IsInteractiveTerminal: defaultIsInteractiveTerminal,
@@ -1660,4 +1667,12 @@ func (a *App) RunLink(opts LinkOptions) (int, error) {
 
 func (a *App) RunInfo(opts InfoOptions) (int, error) {
 	return a.runInfo(opts)
+}
+
+func (a *App) RunDiff(project string, args []string) (int, error) {
+	return a.runDiff(project, args)
+}
+
+func (a *App) RunOperate(project string, args []string) (int, error) {
+	return a.runOperate(project, args)
 }

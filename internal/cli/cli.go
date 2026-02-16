@@ -22,6 +22,8 @@ type appRunner interface {
 	RunScan(opts app.ScanOptions) (int, error)
 	RunSync(opts app.SyncOptions) (int, error)
 	RunFix(opts app.FixOptions) (int, error)
+	RunDiff(project string, args []string) (int, error)
+	RunOperate(project string, args []string) (int, error)
 	RunStatus(jsonOut bool, include []string) (int, error)
 	RunDoctor(include []string) (int, error)
 	RunEnsure(include []string) (int, error)
@@ -168,6 +170,8 @@ func newRootCommand(runtime *runtimeState) *cobra.Command {
 		newCloneCommand(runtime),
 		newLinkCommand(runtime),
 		newInfoCommand(runtime),
+		newDiffCommand(runtime),
+		newOperateCommand(runtime),
 		newScanCommand(runtime),
 		newSyncCommand(runtime),
 		newFixCommand(runtime),
@@ -434,6 +438,7 @@ func newStatusCommand(runtime *runtimeState) *cobra.Command {
 func newFixCommand(runtime *runtimeState) *cobra.Command {
 	var includeCatalogs []string
 	var message string
+	var aiMessage bool
 	var publishBranch string
 	var returnToOriginalSync bool
 	var syncStrategy string
@@ -444,6 +449,10 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 		Short: "Inspect repositories and apply context-aware fixes.",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
+			if strings.TrimSpace(message) != "" && aiMessage {
+				return withExitCode(2, errors.New("--message and --ai-message are mutually exclusive"))
+			}
+
 			strategy, err := app.ParseFixSyncStrategy(syncStrategy)
 			if err != nil {
 				return withExitCode(2, fmt.Errorf("invalid --sync-strategy value %q: %w", syncStrategy, err))
@@ -456,6 +465,7 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 			opts := app.FixOptions{
 				IncludeCatalogs:               includeCatalogs,
 				CommitMessage:                 message,
+				AIMessage:                     aiMessage,
 				PublishBranch:                 publishBranch,
 				ReturnToOriginalBranchAndSync: returnToOriginalSync,
 				SyncStrategy:                  strategy,
@@ -474,11 +484,58 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 
 	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
 	cmd.Flags().StringVar(&message, "message", "", "Commit message for stage-commit-push/publish-new-branch/checkpoint-then-sync actions (or 'auto').")
+	cmd.Flags().BoolVar(&aiMessage, "ai-message", false, "Generate commit message with Lumen for commit-producing fix actions.")
 	cmd.Flags().StringVar(&publishBranch, "publish-branch", "", "Target branch name for publish-new-branch or optional publish-to-new-branch flows.")
 	cmd.Flags().BoolVar(&returnToOriginalSync, "return-to-original-sync", false, "After publish-new-branch, switch back to the original branch and run pull --ff-only.")
 	cmd.Flags().StringVar(&syncStrategy, "sync-strategy", string(app.FixSyncStrategyRebase), "Sync strategy for sync-with-upstream and pre-push validation (rebase|merge).")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Use current machine snapshot without running a refresh scan first.")
 
+	return cmd
+}
+
+func newDiffCommand(runtime *runtimeState) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:                "diff <project> ...args",
+		Short:              "Launch Lumen visual diff in repository context.",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
+				return withExitCode(0, cmd.Help())
+			}
+			if len(args) == 0 {
+				return withExitCode(2, fmt.Errorf("%s\naccepts at least 1 arg(s), received 0", cmd.CommandPath()))
+			}
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunDiff(args[0], args[1:])
+			return withExitCode(code, err)
+		},
+	}
+	return cmd
+}
+
+func newOperateCommand(runtime *runtimeState) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:                "operate <project> ...args",
+		Short:              "Launch Lumen operate flow in repository context.",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
+				return withExitCode(0, cmd.Help())
+			}
+			if len(args) == 0 {
+				return withExitCode(2, fmt.Errorf("%s\naccepts at least 1 arg(s), received 0", cmd.CommandPath()))
+			}
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunOperate(args[0], args[1:])
+			return withExitCode(code, err)
+		},
+	}
 	return cmd
 }
 

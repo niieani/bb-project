@@ -78,6 +78,9 @@ Top-level commands:
 - `init`
 - `clone`
 - `link`
+- `info`
+- `diff`
+- `operate`
 - `scan`
 - `sync`
 - `status`
@@ -164,6 +167,26 @@ Behavior:
 - If project exists in state but local git clone is missing, returns exit code `1`.
 - If selector cannot be resolved to a local project, returns exit code `1`.
 
+### `bb diff <project> ...args`
+
+Launches Lumen visual diff in the selected local repository.
+
+Behavior:
+
+- Uses local selector resolution (`path`, `repo_key`, unique repo name).
+- Forwards all args after `<project>` directly to `lumen diff`.
+- Fails fast if Lumen is unavailable or disabled.
+
+### `bb operate <project> ...args`
+
+Launches Lumen operate workflow in the selected local repository.
+
+Behavior:
+
+- Uses local selector resolution (`path`, `repo_key`, unique repo name).
+- Forwards all args after `<project>` directly to `lumen operate`.
+- Fails fast if Lumen is unavailable or disabled.
+
 ### `bb scan [--include-catalog <name> ...]`
 
 Discovers git repos under selected catalogs, observes git state, and writes machine observations.
@@ -237,7 +260,9 @@ Interactive apply behavior:
 
 - Risky fixes (`push`, `sync-with-upstream`, `set-upstream-push`, `stage-commit-push`, `create-project`) open a confirmation wizard before execution.
 - Wizard shows changed files with `+/-` stats, target branch context, and a per-repo skip option.
-- For `stage-commit-push`, wizard includes commit message input and can generate a minimal root `.gitignore` when missing.
+- For commit-producing actions, wizard includes commit message input with symbolic `✨` generation (Lumen draft).
+- When changed files are shown, wizard includes a symbolic `◫` button that launches Lumen visual diff and returns to the same wizard state.
+- Wizard can generate a minimal root `.gitignore` when missing.
 
 Selector resolution for `<project>`:
 
@@ -249,7 +274,10 @@ Flags:
 
 - `--include-catalog <name>` (repeatable)
 - `--message <text>` (used with `stage-commit-push`; pass `auto` for generated message)
+- `--ai-message` (generate commit message with Lumen for commit-producing actions)
 - `--sync-strategy <rebase|merge>` (used with `sync-with-upstream`; default `rebase`)
+
+`--message` and `--ai-message` are mutually exclusive.
 
 Actions:
 
@@ -360,6 +388,10 @@ notify:
   enabled: true
   dedupe: true
   throttle_minutes: 60
+integrations:
+  lumen:
+    enabled: true
+    show_install_tip: true
 ```
 
 Important notes:
@@ -367,6 +399,7 @@ Important notes:
 - v1 supports only `state_transport.mode: external`.
 - `github.owner` is required (`bb init` fails if blank).
 - `scheduler.interval_minutes` controls cadence used by `bb scheduler install`.
+- set `integrations.lumen.show_install_tip: false` to hide Lumen install/config tips.
 
 ## State Layout
 

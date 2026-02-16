@@ -156,6 +156,25 @@ func resolveLocalProjectSelector(records []domain.MachineRepoRecord, selector st
 		return domain.MachineRepoRecord{}, false, errors.New("selector is required")
 	}
 
+	selectorPath := filepath.Clean(selector)
+	byPath := make([]domain.MachineRepoRecord, 0, 2)
+	for _, rec := range records {
+		if filepath.Clean(strings.TrimSpace(rec.Path)) == selectorPath {
+			byPath = append(byPath, rec)
+		}
+	}
+	if len(byPath) == 1 {
+		return byPath[0], true, nil
+	}
+	if len(byPath) > 1 {
+		paths := make([]string, 0, len(byPath))
+		for _, rec := range byPath {
+			paths = append(paths, rec.Path)
+		}
+		sort.Strings(paths)
+		return domain.MachineRepoRecord{}, false, fmt.Errorf("selector %q is ambiguous; matches: %s", selector, strings.Join(paths, ", "))
+	}
+
 	byRepoKey := make([]domain.MachineRepoRecord, 0, 2)
 	for _, rec := range records {
 		if strings.TrimSpace(rec.RepoKey) == selector {
