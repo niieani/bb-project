@@ -32,6 +32,12 @@ func TestGenerateDocs(t *testing.T) {
 	if !strings.Contains(string(content), "completion") {
 		t.Fatalf("expected root markdown to document completion command, got:\n%s", string(content))
 	}
+	if !strings.Contains(string(content), "clone") {
+		t.Fatalf("expected root markdown to document clone command, got:\n%s", string(content))
+	}
+	if !strings.Contains(string(content), "link") {
+		t.Fatalf("expected root markdown to document link command, got:\n%s", string(content))
+	}
 }
 
 func TestGenerateDocsRequiresRoot(t *testing.T) {

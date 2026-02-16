@@ -247,3 +247,19 @@ func TestValidateMachineForSaveRejectsInvalidRepoPathDepth(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestValidateConfigForSaveRejectsLinkTargetTraversal(t *testing.T) {
+	t.Parallel()
+
+	cfg := state.DefaultConfig()
+	cfg.GitHub.Owner = "you"
+	cfg.Link.TargetDir = "../references"
+
+	err := validateConfigForSave(cfg)
+	if err == nil {
+		t.Fatal("expected validation error for link.target_dir")
+	}
+	if !strings.Contains(err.Error(), "link.target_dir") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

@@ -20,6 +20,8 @@ type fakeApp struct {
 	scanOpts   app.ScanOptions
 	syncOpts   app.SyncOptions
 	fixOpts    app.FixOptions
+	cloneOpts  app.CloneOptions
+	linkOpts   app.LinkOptions
 	statusJSON bool
 	statusIncl []string
 	doctorIncl []string
@@ -50,6 +52,10 @@ type fakeApp struct {
 	syncErr         error
 	fixCode         int
 	fixErr          error
+	cloneCode       int
+	cloneErr        error
+	linkCode        int
+	linkErr         error
 	statusCode      int
 	statusErr       error
 	doctorCode      int
@@ -104,6 +110,16 @@ func (f *fakeApp) RunSync(opts app.SyncOptions) (int, error) {
 func (f *fakeApp) RunFix(opts app.FixOptions) (int, error) {
 	f.fixOpts = opts
 	return f.fixCode, f.fixErr
+}
+
+func (f *fakeApp) RunClone(opts app.CloneOptions) (int, error) {
+	f.cloneOpts = opts
+	return f.cloneCode, f.cloneErr
+}
+
+func (f *fakeApp) RunLink(opts app.LinkOptions) (int, error) {
+	f.linkOpts = opts
+	return f.linkCode, f.linkErr
 }
 
 func (f *fakeApp) RunStatus(jsonOut bool, include []string) (int, error) {
@@ -694,6 +710,105 @@ func TestRunCatalogAndConfigCommands(t *testing.T) {
 			t.Fatalf("app factory calls = %d, want 0", calls)
 		}
 		mustContain(t, stderr, "unknown command")
+	})
+}
+
+func TestRunCloneAndLinkForwardOptions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("clone forwards flags", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{
+			"clone",
+			"https://github.com/openai/codex",
+			"--catalog", "references",
+			"--as", "openai/codex",
+			"--shallow",
+			"--filter", "blob:none",
+			"--only", "README.md",
+			"--only", "docs",
+		})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.cloneOpts.Repo != "https://github.com/openai/codex" {
+			t.Fatalf("repo = %q, want %q", fake.cloneOpts.Repo, "https://github.com/openai/codex")
+		}
+		if fake.cloneOpts.Catalog != "references" {
+			t.Fatalf("catalog = %q, want %q", fake.cloneOpts.Catalog, "references")
+		}
+		if fake.cloneOpts.As != "openai/codex" {
+			t.Fatalf("as = %q, want %q", fake.cloneOpts.As, "openai/codex")
+		}
+		if !fake.cloneOpts.ShallowSet || !fake.cloneOpts.Shallow {
+			t.Fatalf("shallow forwarding mismatch: %#v", fake.cloneOpts)
+		}
+		if !fake.cloneOpts.FilterSet || fake.cloneOpts.Filter != "blob:none" {
+			t.Fatalf("filter forwarding mismatch: %#v", fake.cloneOpts)
+		}
+		mustEqualSlices(t, fake.cloneOpts.Only, []string{"README.md", "docs"})
+	})
+
+	t.Run("clone rejects conflicting shallow flags", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, calls, _ := runCLI(t, fake, []string{"clone", "openai/codex", "--shallow", "--no-shallow"})
+		if code != 2 {
+			t.Fatalf("exit code = %d, want 2", code)
+		}
+		if calls != 0 {
+			t.Fatalf("app factory calls = %d, want 0", calls)
+		}
+		mustContain(t, stderr, "--shallow")
+		mustContain(t, stderr, "--no-shallow")
+	})
+
+	t.Run("clone rejects conflicting filter flags", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, calls, _ := runCLI(t, fake, []string{"clone", "openai/codex", "--filter", "blob:none", "--no-filter"})
+		if code != 2 {
+			t.Fatalf("exit code = %d, want 2", code)
+		}
+		if calls != 0 {
+			t.Fatalf("app factory calls = %d, want 0", calls)
+		}
+		mustContain(t, stderr, "--filter")
+		mustContain(t, stderr, "--no-filter")
+	})
+
+	t.Run("link forwards flags", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{
+			"link",
+			"software/codex",
+			"--as", "codex-link",
+			"--dir", "references",
+			"--absolute",
+			"--catalog", "references",
+		})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.linkOpts.Selector != "software/codex" {
+			t.Fatalf("selector = %q, want %q", fake.linkOpts.Selector, "software/codex")
+		}
+		if fake.linkOpts.As != "codex-link" {
+			t.Fatalf("as = %q, want %q", fake.linkOpts.As, "codex-link")
+		}
+		if fake.linkOpts.Dir != "references" {
+			t.Fatalf("dir = %q, want %q", fake.linkOpts.Dir, "references")
+		}
+		if !fake.linkOpts.Absolute {
+			t.Fatal("absolute = false, want true")
+		}
+		if fake.linkOpts.Catalog != "references" {
+			t.Fatalf("catalog = %q, want %q", fake.linkOpts.Catalog, "references")
+		}
 	})
 }
 

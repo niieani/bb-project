@@ -11,8 +11,10 @@ bb fix [project] [action] [flags]
 ```
   -h, --help                          help for fix
       --include-catalog stringArray   Limit scope to selected catalogs (repeatable).
-      --message string                Commit message for stage-commit-push action (or 'auto').
+      --message string                Commit message for stage-commit-push/publish-new-branch/checkpoint-then-sync actions (or 'auto').
       --no-refresh                    Use current machine snapshot without running a refresh scan first.
+      --publish-branch string         Target branch name for publish-new-branch or optional publish-to-new-branch flows.
+      --return-to-original-sync       After publish-new-branch, switch back to the original branch and run pull --ff-only.
       --sync-strategy string          Sync strategy for sync-with-upstream and pre-push validation (rebase|merge). (default "rebase")
 ```
 

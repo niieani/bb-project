@@ -23,11 +23,19 @@ Inspect repositories and apply context-aware fixes.
 
 .PP
 \fB--message\fP=""
-	Commit message for stage-commit-push action (or 'auto').
+	Commit message for stage-commit-push/publish-new-branch/checkpoint-then-sync actions (or 'auto').
 
 .PP
 \fB--no-refresh\fP[=false]
 	Use current machine snapshot without running a refresh scan first.
+
+.PP
+\fB--publish-branch\fP=""
+	Target branch name for publish-new-branch or optional publish-to-new-branch flows.
+
+.PP
+\fB--return-to-original-sync\fP[=false]
+	After publish-new-branch, switch back to the original branch and run pull --ff-only.
 
 .PP
 \fB--sync-strategy\fP="rebase"

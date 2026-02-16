@@ -76,6 +76,8 @@ Global flags:
 Top-level commands:
 
 - `init`
+- `clone`
+- `link`
 - `scan`
 - `sync`
 - `status`
@@ -109,6 +111,48 @@ Behavior:
 - Creates GitHub repo via `gh repo create` (unless running in test backend mode).
 - Sets/verifies `origin`.
 - Creates/updates repo metadata YAML.
+
+### `bb clone <repo> [flags]`
+
+Clone an existing repository into a configured catalog and immediately register metadata/state.
+
+Accepted `<repo>` forms:
+
+- `org/repo`
+- GitHub HTTP/HTTPS repository link (`https://github.com/org/repo`)
+- HTTPS/SSH git URL
+
+Flags:
+
+- `--catalog <name>` (overrides `clone.default_catalog`)
+- `--as <catalog-relative-path>`
+- `--shallow` / `--no-shallow`
+- `--filter <spec>` / `--no-filter`
+- `--only <path>` (repeatable sparse checkout paths)
+
+Behavior:
+
+- Uses clone defaults from `clone.*` config, then applies catalog preset mapping from `clone.catalog_preset`, then applies explicit CLI flags.
+- Fails when target path conflicts and no `--as` is provided.
+- If repository already exists locally (same origin identity), command is a no-op and prints existing location.
+
+### `bb link <project-or-repo> [flags]`
+
+Create a symlink to a project/repository under a target directory (defaults to `references`).
+
+Flags:
+
+- `--as <link-name>`
+- `--dir <target-dir>`
+- `--absolute`
+- `--catalog <name>` (used for auto-clone fallback)
+
+Behavior:
+
+- When run inside a git repo, anchors links at repo root; otherwise anchors at current directory.
+- Resolves local selectors first (`repo_key`, `catalog:project`, unique name).
+- If selector is a repo input and no local match exists, auto-clones first using clone defaults.
+- Existing same-target symlink is treated as no-op; conflicting existing paths fail.
 
 ### `bb scan [--include-catalog <name> ...]`
 
@@ -279,6 +323,19 @@ github:
   owner: your-github-username
   default_visibility: private
   remote_protocol: ssh
+clone:
+  default_catalog: ""
+  shallow: false
+  filter: ""
+  presets:
+    references:
+      shallow: true
+      filter: blob:none
+  catalog_preset:
+    references: references
+link:
+  target_dir: references
+  absolute: false
 sync:
   auto_discover: true
   include_untracked_as_dirty: true

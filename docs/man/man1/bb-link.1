@@ -1,0 +1,43 @@
+.nh
+.TH "BB" "1" "Feb 2026" "bb" ""
+
+.SH NAME
+bb-link - Create local reference symlink to a project or repository.
+
+
+.SH SYNOPSIS
+\fBbb link  [flags]\fP
+
+
+.SH DESCRIPTION
+Create local reference symlink to a project or repository.
+
+
+.SH OPTIONS
+\fB--absolute\fP[=false]
+	Create absolute symlink instead of relative.
+
+.PP
+\fB--as\fP=""
+	Link file/dir name override.
+
+.PP
+\fB--catalog\fP=""
+	Catalog override used for auto-clone fallback.
+
+.PP
+\fB--dir\fP=""
+	Target directory for the link.
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for link
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB-q\fP, \fB--quiet\fP[=false]
+	Suppress verbose bb logs.
+
+
+.SH SEE ALSO
+\fBbb(1)\fP

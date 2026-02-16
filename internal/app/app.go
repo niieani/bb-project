@@ -79,6 +79,25 @@ type FixOptions struct {
 	NoRefresh                     bool
 }
 
+type CloneOptions struct {
+	Repo       string
+	Catalog    string
+	As         string
+	ShallowSet bool
+	Shallow    bool
+	FilterSet  bool
+	Filter     string
+	Only       []string
+}
+
+type LinkOptions struct {
+	Selector string
+	As       string
+	Dir      string
+	Absolute bool
+	Catalog  string
+}
+
 type scanRefreshMode int
 
 const (
@@ -1625,4 +1644,12 @@ func (a *App) RunSync(opts SyncOptions) (int, error) {
 
 func (a *App) RunFix(opts FixOptions) (int, error) {
 	return a.runFix(opts)
+}
+
+func (a *App) RunClone(opts CloneOptions) (int, error) {
+	return a.runClone(opts)
+}
+
+func (a *App) RunLink(opts LinkOptions) (int, error) {
+	return a.runLink(opts)
 }

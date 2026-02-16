@@ -77,10 +77,30 @@ func EnsureDir(path string) error {
 }
 
 func DefaultConfig() domain.ConfigFile {
+	trueValue := true
+	blobNone := "blob:none"
 	return domain.ConfigFile{
 		Version:        1,
 		StateTransport: domain.StateTransport{Mode: "external"},
 		GitHub:         domain.GitHubConfig{Owner: "", DefaultVisibility: "private", RemoteProtocol: "ssh"},
+		Clone: domain.CloneConfig{
+			DefaultCatalog: "",
+			Shallow:        false,
+			Filter:         "",
+			Presets: map[string]domain.ClonePreset{
+				"references": {
+					Shallow: &trueValue,
+					Filter:  &blobNone,
+				},
+			},
+			CatalogPreset: map[string]string{
+				"references": "references",
+			},
+		},
+		Link: domain.LinkConfig{
+			TargetDir: "references",
+			Absolute:  false,
+		},
 		Sync: domain.SyncConfig{
 			AutoDiscover:            true,
 			IncludeUntrackedAsDirty: true,
@@ -108,6 +128,10 @@ func LoadConfig(paths Paths) (domain.ConfigFile, error) {
 	}
 
 	cfg := DefaultConfig()
+	// Clear map defaults before unmarshal so explicit empty maps in YAML remain empty
+	// instead of inheriting seeded defaults from the in-memory template.
+	cfg.Clone.Presets = nil
+	cfg.Clone.CatalogPreset = nil
 	if err := LoadYAML(cfgPath, &cfg); err != nil {
 		return domain.ConfigFile{}, fmt.Errorf("parse %s: %w", cfgPath, err)
 	}
@@ -122,6 +146,16 @@ func LoadConfig(paths Paths) (domain.ConfigFile, error) {
 	}
 	if cfg.GitHub.RemoteProtocol == "" {
 		cfg.GitHub.RemoteProtocol = "ssh"
+	}
+	if strings.TrimSpace(cfg.Link.TargetDir) == "" {
+		cfg.Link.TargetDir = "references"
+	}
+	defaults := DefaultConfig()
+	if cfg.Clone.Presets == nil {
+		cfg.Clone.Presets = defaults.Clone.Presets
+	}
+	if cfg.Clone.CatalogPreset == nil {
+		cfg.Clone.CatalogPreset = defaults.Clone.CatalogPreset
 	}
 	if cfg.Sync.ScanFreshnessSeconds < 0 {
 		cfg.Sync.ScanFreshnessSeconds = 0

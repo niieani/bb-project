@@ -23,6 +23,14 @@ type Result struct {
 	Stderr string
 }
 
+type CloneOptions struct {
+	Origin  string
+	Path    string
+	Shallow bool
+	Filter  string
+	Only    []string
+}
+
 type SyncProbeOutcome string
 
 const (
@@ -577,7 +585,51 @@ func (r Runner) CheckoutWithPreferredRemote(path, branch, preferredRemote string
 }
 
 func (r Runner) Clone(origin, path string) error {
-	_, err := r.RunGit("", "clone", origin, path)
+	return r.CloneWithOptions(CloneOptions{Origin: origin, Path: path})
+}
+
+func (r Runner) CloneWithOptions(opts CloneOptions) error {
+	origin := strings.TrimSpace(opts.Origin)
+	path := strings.TrimSpace(opts.Path)
+	if origin == "" {
+		return fmt.Errorf("clone origin is required")
+	}
+	if path == "" {
+		return fmt.Errorf("clone path is required")
+	}
+
+	args := []string{"clone"}
+	if opts.Shallow {
+		args = append(args, "--depth", "1")
+	}
+	if filter := strings.TrimSpace(opts.Filter); filter != "" {
+		args = append(args, "--filter="+filter)
+	}
+	only := make([]string, 0, len(opts.Only))
+	seen := map[string]struct{}{}
+	for _, raw := range opts.Only {
+		pathSpec := strings.TrimSpace(raw)
+		if pathSpec == "" {
+			continue
+		}
+		if _, ok := seen[pathSpec]; ok {
+			continue
+		}
+		seen[pathSpec] = struct{}{}
+		only = append(only, pathSpec)
+	}
+	if len(only) > 0 {
+		args = append(args, "--sparse")
+	}
+	args = append(args, origin, path)
+	if _, err := r.RunGit("", args...); err != nil {
+		return err
+	}
+	if len(only) == 0 {
+		return nil
+	}
+	sparseArgs := append([]string{"sparse-checkout", "set", "--no-cone"}, only...)
+	_, err := r.RunGit(path, sparseArgs...)
 	return err
 }
 

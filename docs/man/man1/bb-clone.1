@@ -1,0 +1,55 @@
+.nh
+.TH "BB" "1" "Feb 2026" "bb" ""
+
+.SH NAME
+bb-clone - Clone repository into a catalog and register metadata/state.
+
+
+.SH SYNOPSIS
+\fBbb clone  [flags]\fP
+
+
+.SH DESCRIPTION
+Clone repository into a catalog and register metadata/state.
+
+
+.SH OPTIONS
+\fB--as\fP=""
+	Catalog-relative target path override.
+
+.PP
+\fB--catalog\fP=""
+	Select catalog to clone into.
+
+.PP
+\fB--filter\fP=""
+	Partial clone filter value (for example blob:none).
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for clone
+
+.PP
+\fB--no-filter\fP[=false]
+	Disable partial clone filter.
+
+.PP
+\fB--no-shallow\fP[=false]
+	Disable shallow clone.
+
+.PP
+\fB--only\fP=[]
+	Sparse checkout path (repeatable).
+
+.PP
+\fB--shallow\fP[=false]
+	Force shallow clone (depth=1).
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB-q\fP, \fB--quiet\fP[=false]
+	Suppress verbose bb logs.
+
+
+.SH SEE ALSO
+\fBbb(1)\fP

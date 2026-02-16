@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"bb-project/internal/app"
 	"bb-project/internal/domain"
@@ -15,6 +16,8 @@ import (
 type appRunner interface {
 	SetVerbose(verbose bool)
 	RunInit(opts app.InitOptions) error
+	RunClone(opts app.CloneOptions) (int, error)
+	RunLink(opts app.LinkOptions) (int, error)
 	RunScan(opts app.ScanOptions) (int, error)
 	RunSync(opts app.SyncOptions) (int, error)
 	RunFix(opts app.FixOptions) (int, error)
@@ -161,6 +164,8 @@ func newRootCommand(runtime *runtimeState) *cobra.Command {
 
 	cmd.AddCommand(
 		newInitCommand(runtime),
+		newCloneCommand(runtime),
+		newLinkCommand(runtime),
 		newScanCommand(runtime),
 		newSyncCommand(runtime),
 		newFixCommand(runtime),
@@ -224,6 +229,94 @@ func newInitCommand(runtime *runtimeState) *cobra.Command {
 	cmd.Flags().BoolVar(&public, "public", false, "Create or register repository as public.")
 	cmd.Flags().BoolVar(&push, "push", false, "Allow initial push/upstream setup when local commits exist.")
 	cmd.Flags().BoolVar(&https, "https", false, "Use HTTPS remote protocol instead of SSH.")
+
+	return cmd
+}
+
+func newCloneCommand(runtime *runtimeState) *cobra.Command {
+	var catalog string
+	var as string
+	var shallow bool
+	var noShallow bool
+	var filter string
+	var noFilter bool
+	var only []string
+
+	cmd := &cobra.Command{
+		Use:   "clone <repo>",
+		Short: "Clone repository into a catalog and register metadata/state.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if shallow && noShallow {
+				return withExitCode(2, errors.New("--shallow and --no-shallow are mutually exclusive"))
+			}
+			if strings.TrimSpace(filter) != "" && noFilter {
+				return withExitCode(2, errors.New("--filter and --no-filter are mutually exclusive"))
+			}
+
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			opts := app.CloneOptions{
+				Repo:       args[0],
+				Catalog:    catalog,
+				As:         as,
+				ShallowSet: shallow || noShallow,
+				Shallow:    shallow && !noShallow,
+				FilterSet:  strings.TrimSpace(filter) != "" || noFilter,
+				Filter:     strings.TrimSpace(filter),
+				Only:       append([]string(nil), only...),
+			}
+			if noFilter {
+				opts.Filter = ""
+			}
+			code, err := runner.RunClone(opts)
+			return withExitCode(code, err)
+		},
+	}
+
+	cmd.Flags().StringVar(&catalog, "catalog", "", "Select catalog to clone into.")
+	cmd.Flags().StringVar(&as, "as", "", "Catalog-relative target path override.")
+	cmd.Flags().BoolVar(&shallow, "shallow", false, "Force shallow clone (depth=1).")
+	cmd.Flags().BoolVar(&noShallow, "no-shallow", false, "Disable shallow clone.")
+	cmd.Flags().StringVar(&filter, "filter", "", "Partial clone filter value (for example blob:none).")
+	cmd.Flags().BoolVar(&noFilter, "no-filter", false, "Disable partial clone filter.")
+	cmd.Flags().StringArrayVar(&only, "only", nil, "Sparse checkout path (repeatable).")
+
+	return cmd
+}
+
+func newLinkCommand(runtime *runtimeState) *cobra.Command {
+	var as string
+	var dir string
+	var absolute bool
+	var catalog string
+
+	cmd := &cobra.Command{
+		Use:   "link <project-or-repo>",
+		Short: "Create local reference symlink to a project or repository.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunLink(app.LinkOptions{
+				Selector: args[0],
+				As:       as,
+				Dir:      dir,
+				Absolute: absolute,
+				Catalog:  catalog,
+			})
+			return withExitCode(code, err)
+		},
+	}
+
+	cmd.Flags().StringVar(&as, "as", "", "Link file/dir name override.")
+	cmd.Flags().StringVar(&dir, "dir", "", "Target directory for the link.")
+	cmd.Flags().BoolVar(&absolute, "absolute", false, "Create absolute symlink instead of relative.")
+	cmd.Flags().StringVar(&catalog, "catalog", "", "Catalog override used for auto-clone fallback.")
 
 	return cmd
 }

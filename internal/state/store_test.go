@@ -188,3 +188,56 @@ func TestDefaultConfigSetsSchedulerInterval(t *testing.T) {
 		t.Fatalf("scheduler interval = %d, want 60", cfg.Scheduler.IntervalMinutes)
 	}
 }
+
+func TestDefaultConfigCloneLinkDefaults(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultConfig()
+	if cfg.Clone.DefaultCatalog != "" {
+		t.Fatalf("clone.default_catalog = %q, want empty", cfg.Clone.DefaultCatalog)
+	}
+	if cfg.Clone.Shallow {
+		t.Fatal("clone.shallow = true, want false")
+	}
+	if cfg.Clone.Filter != "" {
+		t.Fatalf("clone.filter = %q, want empty", cfg.Clone.Filter)
+	}
+	preset, ok := cfg.Clone.Presets["references"]
+	if !ok {
+		t.Fatal("clone.presets.references missing")
+	}
+	if preset.Shallow == nil || !*preset.Shallow {
+		t.Fatal("clone.presets.references.shallow missing or false")
+	}
+	if preset.Filter == nil || *preset.Filter != "blob:none" {
+		t.Fatalf("clone.presets.references.filter = %#v, want %q", preset.Filter, "blob:none")
+	}
+	if got := cfg.Clone.CatalogPreset["references"]; got != "references" {
+		t.Fatalf("clone.catalog_preset.references = %q, want %q", got, "references")
+	}
+	if cfg.Link.TargetDir != "references" {
+		t.Fatalf("link.target_dir = %q, want %q", cfg.Link.TargetDir, "references")
+	}
+	if cfg.Link.Absolute {
+		t.Fatal("link.absolute = true, want false")
+	}
+}
+
+func TestLoadConfigAllowsEmptyCloneCatalogPresetOverride(t *testing.T) {
+	t.Parallel()
+
+	paths := NewPaths(t.TempDir())
+	cfg := DefaultConfig()
+	cfg.GitHub.Owner = "you"
+	cfg.Clone.CatalogPreset = map[string]string{}
+	if err := SaveConfig(paths, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	loaded, err := LoadConfig(paths)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if len(loaded.Clone.CatalogPreset) != 0 {
+		t.Fatalf("clone.catalog_preset = %#v, want empty map", loaded.Clone.CatalogPreset)
+	}
+}

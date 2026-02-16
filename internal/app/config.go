@@ -194,6 +194,27 @@ func validateConfigForSave(cfg domain.ConfigFile) error {
 	if cfg.Scheduler.IntervalMinutes < 1 {
 		return fmt.Errorf("scheduler.interval_minutes must be >= 1")
 	}
+	targetDir := strings.TrimSpace(cfg.Link.TargetDir)
+	if targetDir == "" {
+		return fmt.Errorf("link.target_dir is required")
+	}
+	targetDir = filepath.ToSlash(filepath.Clean(targetDir))
+	if targetDir == ".." || strings.HasPrefix(targetDir, "../") || strings.Contains(targetDir, "/../") {
+		return fmt.Errorf("link.target_dir must not contain path traversal")
+	}
+	for catalog, preset := range cfg.Clone.CatalogPreset {
+		catalog = strings.TrimSpace(catalog)
+		if catalog == "" {
+			return fmt.Errorf("clone.catalog_preset keys must be non-empty")
+		}
+		preset = strings.TrimSpace(preset)
+		if preset == "" {
+			return fmt.Errorf("clone.catalog_preset[%q] must be non-empty", catalog)
+		}
+		if _, ok := cfg.Clone.Presets[preset]; !ok {
+			return fmt.Errorf("clone.catalog_preset[%q] references undefined preset %q", catalog, preset)
+		}
+	}
 	return nil
 }
 

@@ -70,6 +70,8 @@ type ConfigFile struct {
 	Version        int             `yaml:"version"`
 	StateTransport StateTransport  `yaml:"state_transport"`
 	GitHub         GitHubConfig    `yaml:"github"`
+	Clone          CloneConfig     `yaml:"clone"`
+	Link           LinkConfig      `yaml:"link"`
 	Sync           SyncConfig      `yaml:"sync"`
 	Scheduler      SchedulerConfig `yaml:"scheduler"`
 	Notify         NotifyConfig    `yaml:"notify"`
@@ -83,6 +85,24 @@ type GitHubConfig struct {
 	Owner             string `yaml:"owner"`
 	DefaultVisibility string `yaml:"default_visibility"`
 	RemoteProtocol    string `yaml:"remote_protocol"`
+}
+
+type CloneConfig struct {
+	DefaultCatalog string                 `yaml:"default_catalog"`
+	Shallow        bool                   `yaml:"shallow"`
+	Filter         string                 `yaml:"filter"`
+	Presets        map[string]ClonePreset `yaml:"presets"`
+	CatalogPreset  map[string]string      `yaml:"catalog_preset"`
+}
+
+type ClonePreset struct {
+	Shallow *bool   `yaml:"shallow,omitempty"`
+	Filter  *string `yaml:"filter,omitempty"`
+}
+
+type LinkConfig struct {
+	TargetDir string `yaml:"target_dir"`
+	Absolute  bool   `yaml:"absolute"`
 }
 
 type SyncConfig struct {
