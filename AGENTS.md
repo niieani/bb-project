@@ -10,6 +10,7 @@ After finishing making code changes:
 
 - update README.md and any related documentation
 - start your response with a semantic git commit message with details about the change, include motivation and a short summary of the user's request
+- never create branches or push automatically; only run branch creation/push when the user explicitly asks for it
 
 If user gives you UI/UX feedback, update it with a generalized rule.
 
