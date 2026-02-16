@@ -317,12 +317,15 @@ Forms:
 
 Interactive apply behavior:
 
-- Risky fixes (`push`, `sync-with-upstream`, `set-upstream-push`, `stage-commit-push`, `create-project`) open a confirmation wizard before execution.
+- Risky fixes (`push`, `sync-with-upstream`, `set-upstream-push`, `stage-commit-push`, `stash`, `create-project`) open a confirmation wizard before execution.
 - Wizard shows changed files with `+/-` stats, target branch context, and a per-repo skip option.
 - For commit-producing actions, wizard includes commit message input with symbolic `✨` generation (Lumen draft).
+- `create-project` wizard includes `Stage & commit before initial push` toggle (enabled by default) so local unstaged/uncommitted files can be included in the first remote push.
+- `stash` wizard includes `Stash mode` (`Staged + unstaged` or `Staged only`) and stash-name input with symbolic `✨` generation (Lumen draft).
 - When `Publish as new branch (optional)` is set, `bb fix` creates and switches to that branch before staging/committing, so the original branch ref is left unchanged.
 - When changed files are shown, press `⌥V` on macOS (or `alt+v` on other platforms) to launch Lumen visual diff and return to the same wizard state.
 - Wizard can generate a minimal root `.gitignore` when missing.
+- Wizard summary shows commits created by each applied step (short SHA + commit subject), including auto-generated commit messages.
 - In list mode, when repository details wrap (for example long paths or action-help text), `bb fix` shrinks the table viewport first so top chrome and footer help remain visible without truncating details text, and keeps one-row navigation stable (no sudden page jump when moving by one row).
 - In list mode, the primary panel uses a compact titled border (`bb fix · Interactive remediation for unsyncable repositories`) to preserve vertical space, and selected-repo metadata is rendered on one dot-separated line.
 - Busy list-mode states (for example `r` revalidation) now recolor the full primary-panel border consistently, including the titled top edge.
@@ -359,6 +362,7 @@ Actions:
 - `sync-with-upstream`
 - `create-project`
 - `stage-commit-push`
+- `stash`
 - `pull-ff-only`
 - `set-upstream-push`
 - `enable-auto-push`

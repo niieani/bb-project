@@ -62,6 +62,12 @@ type fixWizardState struct {
 	EnableProjectName bool
 	ProjectName       textinput.Model
 
+	EnableCreateProjectStageCommit bool
+	CreateProjectStageCommit       bool
+
+	EnableStashMode   bool
+	StashIncludeUnstaged bool
+
 	EnableForkBranchRename bool
 	ForkBranchName         textinput.Model
 
@@ -91,6 +97,12 @@ type fixSummaryResult struct {
 	Action   string
 	Status   string
 	Detail   string
+	Commits  []fixCreatedCommit
+}
+
+type fixCreatedCommit struct {
+	SHA     string
+	Message string
 }
 
 type fixSummaryFollowUpCandidate struct {
@@ -119,6 +131,7 @@ const (
 	fixWizardFocusActions fixWizardFocusArea = iota
 	fixWizardFocusCommit
 	fixWizardFocusProjectName
+	fixWizardFocusStashMode
 	fixWizardFocusForkBranch
 	fixWizardFocusGitignore
 	fixWizardFocusVisibility
@@ -216,7 +229,12 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	}
 
 	commitInput := textinput.New()
-	commitInput.Placeholder = DefaultFixCommitMessage
+	commitPlaceholder := DefaultFixCommitMessage
+	switch decision.Action {
+	case FixActionStash:
+		commitPlaceholder = DefaultFixStashMessage
+	}
+	commitInput.Placeholder = commitPlaceholder
 	commitInput.SetValue("")
 	commitInput.Blur()
 
@@ -257,7 +275,8 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	m.wizard.Risk = repoRisk
 	m.wizard.EnableCommitMessage = decision.Action == FixActionStageCommitPush ||
 		decision.Action == FixActionPublishNewBranch ||
-		decision.Action == FixActionCheckpointThenSync
+		decision.Action == FixActionCheckpointThenSync ||
+		decision.Action == FixActionStash
 	m.wizard.CommitMessage = commitInput
 	m.wizard.CommitFocused = false
 	m.wizard.CommitButtonFocused = false
@@ -265,6 +284,10 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	m.wizard.CommitGenerateSpinner = commitGenerateSpinner
 	m.wizard.EnableProjectName = decision.Action == FixActionCreateProject
 	m.wizard.ProjectName = projectNameInput
+	m.wizard.EnableCreateProjectStageCommit = decision.Action == FixActionCreateProject
+	m.wizard.CreateProjectStageCommit = m.wizard.EnableCreateProjectStageCommit
+	m.wizard.EnableStashMode = decision.Action == FixActionStash
+	m.wizard.StashIncludeUnstaged = m.wizard.EnableStashMode
 	m.wizard.ShowGitignoreToggle = showGitignoreToggle
 	m.wizard.GenerateGitignore = showGitignoreToggle
 	githubOwner, defaultVis, remoteProtocol, fetchPrune, lumenAutoCommit := m.detectWizardDefaults()
@@ -303,6 +326,9 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	if m.wizard.EnableForkBranchRename {
 		m.wizard.FocusArea = fixWizardFocusForkBranch
 	}
+	if m.wizard.EnableStashMode {
+		m.wizard.FocusArea = fixWizardFocusStashMode
+	}
 	m.syncWizardFieldFocus()
 	m.wizard.ActionFocus = fixWizardActionCancel
 	m.wizard.Applying = false
@@ -322,16 +348,21 @@ func (m *fixTUIModel) completeWizard() {
 }
 
 func (m *fixTUIModel) appendSummaryResult(action string, status string, detail string) {
-	m.appendSummaryResultForRepo(m.wizard.RepoName, m.wizard.RepoPath, action, status, detail)
+	m.appendSummaryResultWithCommits(action, status, detail, nil)
 }
 
-func (m *fixTUIModel) appendSummaryResultForRepo(repoName string, repoPath string, action string, status string, detail string) {
+func (m *fixTUIModel) appendSummaryResultWithCommits(action string, status string, detail string, commits []fixCreatedCommit) {
+	m.appendSummaryResultForRepo(m.wizard.RepoName, m.wizard.RepoPath, action, status, detail, commits)
+}
+
+func (m *fixTUIModel) appendSummaryResultForRepo(repoName string, repoPath string, action string, status string, detail string, commits []fixCreatedCommit) {
 	m.summaryResults = append(m.summaryResults, fixSummaryResult{
 		RepoName: strings.TrimSpace(repoName),
 		RepoPath: strings.TrimSpace(repoPath),
 		Action:   fixActionLabel(action),
 		Status:   status,
 		Detail:   detail,
+		Commits:  append([]fixCreatedCommit(nil), commits...),
 	})
 }
 
@@ -369,7 +400,11 @@ func (m *fixTUIModel) generateWizardCommitMessage() tea.Cmd {
 	repoPath := m.wizard.RepoPath
 	repoName := m.wizard.RepoName
 	m.errText = ""
-	m.status = fmt.Sprintf("generating commit message for %s", repoName)
+	if m.wizard.Action == FixActionStash {
+		m.status = fmt.Sprintf("generating stash name for %s", repoName)
+	} else {
+		m.status = fmt.Sprintf("generating commit message for %s", repoName)
+	}
 	m.wizard.CommitGenerating = true
 	return tea.Batch(m.wizard.CommitGenerateSpinner.Tick, func() tea.Msg {
 		message, err := generate(repoPath)
@@ -419,10 +454,20 @@ func (m *fixTUIModel) applyWizardCurrent() tea.Cmd {
 	}
 	if m.wizard.EnableCommitMessage {
 		raw := strings.TrimSpace(m.wizard.CommitMessage.Value())
-		if raw == "" || raw == DefaultFixCommitMessage {
+		if raw == "" || raw == m.wizard.CommitMessage.Placeholder || raw == DefaultFixCommitMessage {
 			raw = "auto"
 		}
-		opts.CommitMessage = raw
+		if m.wizard.Action == FixActionStash {
+			opts.StashMessage = raw
+		} else {
+			opts.CommitMessage = raw
+		}
+	}
+	if m.wizard.EnableCreateProjectStageCommit {
+		opts.CreateProjectStageCommit = boolPtr(m.wizard.CreateProjectStageCommit)
+	}
+	if m.wizard.EnableStashMode {
+		opts.StashIncludeUnstaged = boolPtr(m.wizard.StashIncludeUnstaged)
 	}
 	if m.wizard.ShowGitignoreToggle && m.wizard.GenerateGitignore {
 		patterns := m.wizardGitignoreTogglePatterns()
@@ -573,8 +618,9 @@ func (m *fixTUIModel) handleWizardApplyCompleted(msg fixWizardApplyCompletedMsg)
 	}
 
 	m.errText = ""
+	commits := m.collectCreatedCommits(m.wizard.RepoPath, m.wizard.HeadSHA, msg.Updated.Record.HeadSHA)
 	m.updateRepoAfterWizardApply(msg.Updated)
-	m.appendSummaryResult(m.wizard.Action, "applied", m.wizard.ApplyDetail)
+	m.appendSummaryResultWithCommits(m.wizard.Action, "applied", m.wizard.ApplyDetail, commits)
 	m.advanceWizard()
 	return nil
 }
@@ -591,7 +637,11 @@ func (m *fixTUIModel) handleWizardCommitGenerated(msg fixWizardCommitGeneratedMs
 	m.wizard.CommitButtonFocused = false
 	m.syncWizardFieldFocus()
 	m.errText = ""
-	m.status = fmt.Sprintf("generated commit message for %s", m.wizard.RepoName)
+	if m.wizard.Action == FixActionStash {
+		m.status = fmt.Sprintf("generated stash name for %s", m.wizard.RepoName)
+	} else {
+		m.status = fmt.Sprintf("generated commit message for %s", m.wizard.RepoName)
+	}
 	return nil
 }
 
@@ -625,6 +675,63 @@ func (m *fixTUIModel) updateRepoAfterWizardApply(updated fixRepoState) {
 		m.repos = append(m.repos, updated)
 	}
 	m.rebuildList(path)
+}
+
+func (m *fixTUIModel) collectCreatedCommits(repoPath string, beforeSHA string, afterSHA string) []fixCreatedCommit {
+	if m == nil || m.app == nil {
+		return nil
+	}
+	repoPath = strings.TrimSpace(repoPath)
+	if repoPath == "" {
+		return nil
+	}
+	beforeSHA = strings.TrimSpace(beforeSHA)
+	afterSHA = strings.TrimSpace(afterSHA)
+	if afterSHA == "" {
+		afterSHA, _ = m.app.Git.HeadSHA(repoPath)
+		afterSHA = strings.TrimSpace(afterSHA)
+	}
+	if afterSHA == "" || afterSHA == beforeSHA {
+		return nil
+	}
+
+	revRange := afterSHA
+	args := []string{"rev-list", "--reverse"}
+	if beforeSHA != "" {
+		revRange = beforeSHA + ".." + afterSHA
+	} else {
+		args = append(args, "--max-count", "1")
+	}
+	args = append(args, revRange)
+	raw, err := m.app.Git.RunGit(repoPath, args...)
+	if err != nil {
+		return nil
+	}
+
+	out := make([]fixCreatedCommit, 0, 2)
+	for _, line := range strings.Split(raw, "\n") {
+		sha := strings.TrimSpace(line)
+		if sha == "" {
+			continue
+		}
+		message, err := m.app.Git.RunGit(repoPath, "show", "-s", "--format=%s", sha)
+		if err != nil {
+			continue
+		}
+		out = append(out, fixCreatedCommit{
+			SHA:     sha,
+			Message: strings.TrimSpace(message),
+		})
+	}
+	return out
+}
+
+func shortCommitSHA(sha string) string {
+	sha = strings.TrimSpace(sha)
+	if len(sha) <= 7 {
+		return sha
+	}
+	return sha[:7]
 }
 
 func (m *fixTUIModel) detectWizardDefaults() (owner string, visibility domain.Visibility, remoteProtocol string, fetchPrune bool, lumenAutoCommit bool) {
@@ -693,12 +800,15 @@ func (m *fixTUIModel) syncWizardFieldFocus() {
 }
 
 func (m *fixTUIModel) wizardFocusOrder() []fixWizardFocusArea {
-	order := make([]fixWizardFocusArea, 0, 6)
+	order := make([]fixWizardFocusArea, 0, 7)
 	if m.wizard.EnableCommitMessage {
 		order = append(order, fixWizardFocusCommit)
 	}
 	if m.wizard.EnableProjectName {
 		order = append(order, fixWizardFocusProjectName)
+	}
+	if m.wizard.EnableStashMode {
+		order = append(order, fixWizardFocusStashMode)
 	}
 	if m.wizard.EnableForkBranchRename {
 		order = append(order, fixWizardFocusForkBranch)
@@ -950,6 +1060,36 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.errText = ""
 		return m, cmd
 	}
+	if m.wizard.FocusArea == fixWizardFocusStashMode {
+		if key.Matches(msg, m.keys.Cancel) {
+			m.viewMode = fixViewList
+			m.status = "cancelled remaining risky confirmations"
+			return m, nil
+		}
+		switch msg.String() {
+		case " ":
+			m.wizard.StashIncludeUnstaged = !m.wizard.StashIncludeUnstaged
+			return m, nil
+		case "left", "right":
+			m.wizard.StashIncludeUnstaged = !m.wizard.StashIncludeUnstaged
+			return m, nil
+		case "enter":
+			m.wizardMoveFocus(1, false)
+			return m, nil
+		case "down":
+			if m.wizardMoveFocus(1, false) {
+				return m, nil
+			}
+			m.scrollWizardDown(1)
+			return m, nil
+		case "up":
+			if m.wizardMoveFocus(-1, false) {
+				return m, nil
+			}
+			m.scrollWizardUp(1)
+			return m, nil
+		}
+	}
 	if m.wizard.FocusArea == fixWizardFocusGitignore {
 		if key.Matches(msg, m.keys.Cancel) {
 			m.viewMode = fixViewList
@@ -1067,9 +1207,15 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if msg.String() == " " && m.wizard.FocusArea == fixWizardFocusGitignore {
-		m.wizard.GenerateGitignore = !m.wizard.GenerateGitignore
-		return m, nil
+	if msg.String() == " " {
+		if m.wizard.FocusArea == fixWizardFocusGitignore {
+			m.wizard.GenerateGitignore = !m.wizard.GenerateGitignore
+			return m, nil
+		}
+		if m.wizard.FocusArea == fixWizardFocusVisibility && m.wizard.EnableCreateProjectStageCommit {
+			m.wizard.CreateProjectStageCommit = !m.wizard.CreateProjectStageCommit
+			return m, nil
+		}
 	}
 	return m, nil
 }
@@ -1136,7 +1282,7 @@ func (m *fixTUIModel) runSelectedSummaryFollowUps(candidates []fixSummaryFollowU
 	for _, candidate := range selected {
 		repo, ok := m.summaryRepoState(candidate.RepoPath)
 		if !ok {
-			m.appendSummaryResultForRepo(candidate.RepoName, candidate.RepoPath, candidate.Action, "failed", "repository state is unavailable after revalidation")
+			m.appendSummaryResultForRepo(candidate.RepoName, candidate.RepoPath, candidate.Action, "failed", "repository state is unavailable after revalidation", nil)
 			failed++
 			continue
 		}
@@ -1276,10 +1422,16 @@ func (m *fixTUIModel) wizardScrollIndicatorBottom() string {
 func (m *fixTUIModel) viewWizardStaticControls() string {
 	controls := make([]string, 0, 5)
 	if m.wizard.EnableCommitMessage {
+		title := "Commit message"
+		description := "Leave empty to auto-generate."
+		if m.wizard.Action == FixActionStash {
+			title = "Stash name"
+			description = "Leave empty to use the default stash name."
+		}
 		controls = append(controls, renderFieldBlock(
 			m.wizard.FocusArea == fixWizardFocusCommit,
-			"Commit message",
-			"Leave empty to auto-generate.",
+			title,
+			description,
 			m.renderWizardCommitInputWithGenerateButton(),
 			"",
 		))
@@ -1305,6 +1457,23 @@ func (m *fixTUIModel) viewWizardStaticControls() string {
 			branchTitle,
 			branchDescription,
 			renderInputContainer(m.wizard.ForkBranchName.View(), m.wizard.FocusArea == fixWizardFocusForkBranch),
+			"",
+		))
+	}
+	if m.wizard.EnableCreateProjectStageCommit {
+		controls = append(controls, renderToggleField(
+			m.wizard.FocusArea == fixWizardFocusVisibility,
+			"Stage & commit before initial push",
+			"",
+			m.wizard.CreateProjectStageCommit,
+		))
+	}
+	if m.wizard.EnableStashMode {
+		controls = append(controls, renderFieldBlock(
+			m.wizard.FocusArea == fixWizardFocusStashMode,
+			"Stash mode",
+			"Choose whether to stash only staged changes or stage all tracked/untracked changes first.",
+			renderStashModeLine(m.wizard.StashIncludeUnstaged),
 			"",
 		))
 	}
@@ -1488,6 +1657,8 @@ func (m *fixTUIModel) wizardActionPlanContext() fixActionPlanContext {
 		Upstream:                           strings.TrimSpace(m.wizard.Upstream),
 		HeadSHA:                            strings.TrimSpace(m.wizard.HeadSHA),
 		OriginURL:                          strings.TrimSpace(m.wizard.OriginURL),
+		HasDirtyTracked:                    m.wizard.Risk.hasTrackedChanges(),
+		HasUntracked:                       m.wizard.Risk.hasUntrackedChanges(),
 		SyncStrategy:                       m.wizard.SyncStrategy,
 		PreferredRemote:                    strings.TrimSpace(m.wizard.PreferredRemote),
 		GitHubOwner:                        strings.TrimSpace(m.wizard.GitHubOwner),
@@ -1504,10 +1675,20 @@ func (m *fixTUIModel) wizardActionPlanContext() fixActionPlanContext {
 	}
 	if m.wizard.EnableCommitMessage {
 		raw := strings.TrimSpace(m.wizard.CommitMessage.Value())
-		if raw == "" || raw == DefaultFixCommitMessage {
+		if raw == "" || raw == m.wizard.CommitMessage.Placeholder || raw == DefaultFixCommitMessage {
 			raw = "auto"
 		}
-		ctx.CommitMessage = raw
+		if m.wizard.Action == FixActionStash {
+			ctx.StashMessage = raw
+		} else {
+			ctx.CommitMessage = raw
+		}
+	}
+	if m.wizard.EnableCreateProjectStageCommit {
+		ctx.CreateProjectStageCommit = m.wizard.CreateProjectStageCommit
+	}
+	if m.wizard.EnableStashMode {
+		ctx.StashIncludeUnstaged = m.wizard.StashIncludeUnstaged
 	}
 	if m.wizard.EnableForkBranchRename {
 		ctx.ForkBranchRenameTo = strings.TrimSpace(m.wizard.ForkBranchName.Value())
@@ -1567,6 +1748,16 @@ func (m *fixTUIModel) wizardChangedFilesFieldMeta() (string, string) {
 	switch m.wizard.Action {
 	case FixActionStageCommitPush, FixActionPublishNewBranch, FixActionCheckpointThenSync:
 		return "Uncommitted changed files", "These uncommitted files will be staged and committed by this fix."
+	case FixActionStash:
+		if m.wizard.StashIncludeUnstaged {
+			return "Uncommitted changed files", "These changes will be staged and stashed by this fix."
+		}
+		return "Uncommitted changed files", "Only currently staged changes will be stashed by this fix."
+	case FixActionCreateProject:
+		if m.wizard.CreateProjectStageCommit {
+			return "Uncommitted changed files", "These uncommitted files will be staged and committed before the initial push."
+		}
+		return "Uncommitted changed files", "Shown for review only. Stage/commit is disabled for this create-project run."
 	default:
 		return "Uncommitted changed files", "Shown for review only. This fix does not stage or commit uncommitted files."
 	}
@@ -1878,6 +2069,16 @@ func (m *fixTUIModel) renderSummaryResultValue(item fixSummaryResult, candidates
 	if detail := strings.TrimSpace(item.Detail); detail != "" && item.Status != "failed" {
 		lines = append(lines, "Detail: "+detail)
 	}
+	if len(item.Commits) > 0 {
+		lines = append(lines, "Commits created:")
+		for _, commit := range item.Commits {
+			label := strings.TrimSpace(commit.Message)
+			if label == "" {
+				label = "(no subject)"
+			}
+			lines = append(lines, fmt.Sprintf("- %s %s", shortCommitSHA(commit.SHA), label))
+		}
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -1891,6 +2092,16 @@ func (m *fixTUIModel) renderSummaryRepoGroupValue(group fixSummaryRepoGroup, can
 				prefix = "Error"
 			}
 			lines = append(lines, "  "+prefix+": "+detail)
+		}
+		if len(item.Commits) > 0 {
+			lines = append(lines, "  Commits created:")
+			for _, commit := range item.Commits {
+				label := strings.TrimSpace(commit.Message)
+				if label == "" {
+					label = "(no subject)"
+				}
+				lines = append(lines, fmt.Sprintf("  - %s %s", shortCommitSHA(commit.SHA), label))
+			}
 		}
 	}
 
@@ -2312,6 +2523,25 @@ func renderCreateVisibilityLine(current domain.Visibility, defaultVis domain.Vis
 			style = enumOptionActiveStyle
 		}
 		parts = append(parts, style.Render(option.Label))
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+}
+
+func renderStashModeLine(includeUnstaged bool) string {
+	options := []struct {
+		includeUnstaged bool
+		label           string
+	}{
+		{includeUnstaged: true, label: "Staged + unstaged"},
+		{includeUnstaged: false, label: "Staged only"},
+	}
+	parts := make([]string, 0, len(options))
+	for _, option := range options {
+		style := enumOptionStyle
+		if option.includeUnstaged == includeUnstaged {
+			style = enumOptionActiveStyle
+		}
+		parts = append(parts, style.Render(option.label))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }

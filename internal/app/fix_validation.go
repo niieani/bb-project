@@ -114,6 +114,15 @@ func validateFixApplyOptions(action string, opts fixApplyOptions) error {
 			return fmt.Errorf("invalid repository name: %w", err)
 		}
 	}
+	if opts.CreateProjectStageCommit != nil && action != FixActionCreateProject {
+		return fmt.Errorf("invalid create-project stage/commit toggle: action %q does not support create-project stage/commit", action)
+	}
+	if strings.TrimSpace(opts.StashMessage) != "" && action != FixActionStash {
+		return fmt.Errorf("invalid stash message: action %q does not support stash naming", action)
+	}
+	if opts.StashIncludeUnstaged != nil && action != FixActionStash {
+		return fmt.Errorf("invalid stash mode: action %q does not support stash mode", action)
+	}
 	if strings.TrimSpace(opts.ForkBranchRenameTo) != "" {
 		if !actionSupportsPublishBranch(action) {
 			return fmt.Errorf("invalid publish branch target: action %q does not support publish-to-new-branch", action)

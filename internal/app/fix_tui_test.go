@@ -2164,8 +2164,8 @@ func TestFixTUIWizardChangedFilesDescriptionDependsOnAction(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
 	createProjectView := ansi.Strip(m.viewWizardContent())
-	if !strings.Contains(createProjectView, "Shown for review only. This fix does not stage or commit uncommitted files.") {
-		t.Fatalf("expected review-only changed-files description for create-project, got %q", createProjectView)
+	if !strings.Contains(createProjectView, "These uncommitted files will be staged and committed before the initial push.") {
+		t.Fatalf("expected stage/commit changed-files description for create-project, got %q", createProjectView)
 	}
 
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
@@ -5105,9 +5105,19 @@ func TestFixTUIScheduledQueueUsesExecutionOrderAndDeduplicatesRiskyActions(t *te
 	}
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
-	m.cycleCurrentAction(1) // stage-commit-push
+	for i := 0; i < 8 && actionForVisibleRepo(m, 0) != FixActionStageCommitPush; i++ {
+		m.cycleCurrentAction(1)
+	}
+	if got := actionForVisibleRepo(m, 0); got != FixActionStageCommitPush {
+		t.Fatalf("current action = %q, want %q before scheduling", got, FixActionStageCommitPush)
+	}
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
-	m.cycleCurrentAction(1) // push
+	for i := 0; i < 8 && actionForVisibleRepo(m, 0) != FixActionPush; i++ {
+		m.cycleCurrentAction(1)
+	}
+	if got := actionForVisibleRepo(m, 0); got != FixActionPush {
+		t.Fatalf("current action = %q, want %q before scheduling", got, FixActionPush)
+	}
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
 	m.applyCurrentSelection()
 	if m.viewMode != fixViewWizard {
@@ -5138,9 +5148,19 @@ func TestFixTUIApplyAllSelectionsUsesScheduledExecutionOrderPerRepo(t *testing.T
 	}
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
-	m.cycleCurrentAction(1) // stage-commit-push
+	for i := 0; i < 8 && actionForVisibleRepo(m, 0) != FixActionStageCommitPush; i++ {
+		m.cycleCurrentAction(1)
+	}
+	if got := actionForVisibleRepo(m, 0); got != FixActionStageCommitPush {
+		t.Fatalf("current action = %q, want %q before scheduling", got, FixActionStageCommitPush)
+	}
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
-	m.cycleCurrentAction(1) // push
+	for i := 0; i < 8 && actionForVisibleRepo(m, 0) != FixActionPush; i++ {
+		m.cycleCurrentAction(1)
+	}
+	if got := actionForVisibleRepo(m, 0); got != FixActionPush {
+		t.Fatalf("current action = %q, want %q before scheduling", got, FixActionPush)
+	}
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
 	m.applyAllSelections()
 	if m.viewMode != fixViewWizard {

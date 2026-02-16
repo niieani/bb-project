@@ -18,6 +18,7 @@ const (
 	FixActionIgnore             = "ignore"
 	FixActionAbortOperation     = "abort-operation"
 	FixActionClone              = "clone"
+	FixActionStash              = "stash"
 	FixActionCreateProject      = "create-project"
 	FixActionForkAndRetarget    = "fork-and-retarget"
 	FixActionSyncWithUpstream   = "sync-with-upstream"
@@ -29,7 +30,9 @@ const (
 	FixActionSetUpstreamPush    = "set-upstream-push"
 	FixActionEnableAutoPush     = "enable-auto-push"
 
-	DefaultFixCommitMessage = "bb: checkpoint local changes before sync"
+	DefaultFixCommitMessage              = "bb: checkpoint local changes before sync"
+	DefaultFixCreateProjectCommitMessage = "chore: bootstrap repository files"
+	DefaultFixStashMessage               = "bb: stash local changes"
 )
 
 var errFixActionNotEligible = errors.New("fix action not eligible")
@@ -48,10 +51,13 @@ type fixApplyOptions struct {
 	SyncStrategy                  FixSyncStrategy
 	CreateProjectName             string
 	CreateProjectVisibility       domain.Visibility
+	CreateProjectStageCommit      *bool
 	ForkBranchRenameTo            string
 	ReturnToOriginalBranchAndSync bool
 	GenerateGitignore             bool
 	GitignorePatterns             []string
+	StashMessage                  string
+	StashIncludeUnstaged          *bool
 }
 
 type fixApplyStepStatus string
@@ -201,6 +207,18 @@ func isCommitProducingFixAction(action string) bool {
 	}
 }
 
+func optionBoolOrDefault(value *bool, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+func boolPtr(value bool) *bool {
+	v := value
+	return &v
+}
+
 func (a *App) runFixInteractiveWithMutedLogs(includeCatalogs []string, noRefresh bool) (int, error) {
 	runInteractive := a.runFixInteractive
 	if a.runFixInteractiveFn != nil {
@@ -292,6 +310,9 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 		!ctx.Risk.hasSecretLikeChanges() &&
 		!(ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive) {
 		actions = append(actions, FixActionStageCommitPush)
+	}
+	if rec.HasDirtyTracked || rec.HasUntracked {
+		actions = append(actions, FixActionStash)
 	}
 	if (rec.HasDirtyTracked || rec.HasUntracked) &&
 		strings.TrimSpace(rec.OriginURL) != "" &&
@@ -426,6 +447,12 @@ func ineligibleFixReason(action string, rec domain.MachineRepoRecord, ctx fixEli
 		}
 		if ctx.Risk.hasNoisyChangesWithoutGitignore() && !ctx.Interactive {
 			return "checkpoint-then-sync is blocked: root .gitignore is missing and noisy uncommitted paths were detected; run interactive `bb fix` to review/generate .gitignore or add it manually"
+		}
+		return ""
+	}
+	if action == FixActionStash {
+		if !rec.HasDirtyTracked && !rec.HasUntracked {
+			return "stash is blocked: no local changes to stash"
 		}
 		return ""
 	}
@@ -1272,11 +1299,46 @@ func (a *App) executeFixAction(
 		return a.createProjectFromFix(
 			cfg,
 			target,
-			opts.CreateProjectName,
-			opts.CreateProjectVisibility,
+			opts,
 			observer,
 			planByID,
 		)
+	case FixActionStash:
+		includeUnstaged := optionBoolOrDefault(opts.StashIncludeUnstaged, true)
+		if !includeUnstaged {
+			hasStagedChanges, err := a.Git.HasStagedChanges(path)
+			if err != nil {
+				return err
+			}
+			if !hasStagedChanges {
+				return &fixIneligibleError{
+					Action: action,
+					Reason: "stash is blocked: no staged changes to stash; choose staged+unstaged mode or stage files first",
+				}
+			}
+		}
+		if includeUnstaged {
+			if err := runStep("stash-stage-all", fixActionPlanEntry{
+				ID:      "stash-stage-all",
+				Command: true,
+				Summary: "git add -A",
+			}, func() error {
+				return a.Git.AddAll(path)
+			}); err != nil {
+				return err
+			}
+		}
+		stashMessage := strings.TrimSpace(opts.StashMessage)
+		if stashMessage == "" || stashMessage == "auto" {
+			stashMessage = DefaultFixStashMessage
+		}
+		return runStep("stash-push", fixActionPlanEntry{
+			ID:      "stash-push",
+			Command: true,
+			Summary: fmt.Sprintf("git stash push --staged -m %q", stashMessage),
+		}, func() error {
+			return a.Git.StashStaged(path, stashMessage)
+		})
 	case FixActionForkAndRetarget:
 		return a.forkAndRetargetFromFix(cfg, target, opts, observer, planByID)
 	case FixActionStageCommitPush:
@@ -1744,6 +1806,8 @@ func (a *App) buildFixActionPlanContext(cfg domain.ConfigFile, target fixRepoSta
 		Upstream:                           strings.TrimSpace(target.Record.Upstream),
 		HeadSHA:                            strings.TrimSpace(target.Record.HeadSHA),
 		OriginURL:                          strings.TrimSpace(target.Record.OriginURL),
+		HasDirtyTracked:                    target.Record.HasDirtyTracked,
+		HasUntracked:                       target.Record.HasUntracked,
 		SyncStrategy:                       normalizeFixSyncStrategy(opts.SyncStrategy),
 		PreferredRemote:                    preferredRemote,
 		GitHubOwner:                        owner,
@@ -1751,8 +1815,11 @@ func (a *App) buildFixActionPlanContext(cfg domain.ConfigFile, target fixRepoSta
 		ForkRemoteExists:                   forkRemoteExists,
 		RepoName:                           strings.TrimSpace(target.Record.Name),
 		CommitMessage:                      strings.TrimSpace(opts.CommitMessage),
+		StashMessage:                       strings.TrimSpace(opts.StashMessage),
+		StashIncludeUnstaged:               optionBoolOrDefault(opts.StashIncludeUnstaged, true),
 		CreateProjectName:                  strings.TrimSpace(opts.CreateProjectName),
 		CreateProjectVisibility:            opts.CreateProjectVisibility,
+		CreateProjectStageCommit:           optionBoolOrDefault(opts.CreateProjectStageCommit, true),
 		ForkBranchRenameTo:                 strings.TrimSpace(opts.ForkBranchRenameTo),
 		ReturnToOriginalBranchAndSync:      opts.ReturnToOriginalBranchAndSync,
 		GenerateGitignore:                  opts.GenerateGitignore,
@@ -1968,8 +2035,7 @@ func (a *App) forkAndRetargetFromFix(
 func (a *App) createProjectFromFix(
 	cfg domain.ConfigFile,
 	target fixRepoState,
-	projectNameOverride string,
-	visibilityOverride domain.Visibility,
+	opts fixApplyOptions,
 	observer fixApplyStepObserver,
 	planByID map[string]fixActionPlanEntry,
 ) error {
@@ -1991,7 +2057,7 @@ func (a *App) createProjectFromFix(
 		return errors.New("catalog is required for create-project")
 	}
 
-	projectName := strings.TrimSpace(projectNameOverride)
+	projectName := strings.TrimSpace(opts.CreateProjectName)
 	if projectName == "" {
 		projectName = strings.TrimSpace(target.Record.Name)
 	}
@@ -2006,7 +2072,7 @@ func (a *App) createProjectFromFix(
 		return fmt.Errorf("invalid repository name: %w", err)
 	}
 
-	visibility := resolveCreateProjectVisibility(cfg, visibilityOverride)
+	visibility := resolveCreateProjectVisibility(cfg, opts.CreateProjectVisibility)
 	expectedOrigin, err := a.expectedOrigin(owner, projectName, cfg.GitHub.RemoteProtocol)
 	if err != nil {
 		return err
@@ -2080,6 +2146,34 @@ func (a *App) createProjectFromFix(
 		return err
 	}); err != nil {
 		return err
+	}
+
+	createProjectStageCommit := optionBoolOrDefault(opts.CreateProjectStageCommit, true)
+	if createProjectStageCommit && (target.Record.HasDirtyTracked || target.Record.HasUntracked) {
+		stageCommitOpts := opts
+		stageCommitOpts.GenerateGitignore = false
+		stageCommitOpts.GitignorePatterns = nil
+		stageCommitOpts.StashMessage = ""
+		stageCommitOpts.StashIncludeUnstaged = nil
+		commitMessage := strings.TrimSpace(stageCommitOpts.CommitMessage)
+		switch commitMessage {
+		case "":
+			if cfg.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty {
+				stageCommitOpts.CommitMessage = "auto"
+			} else {
+				stageCommitOpts.CommitMessage = DefaultFixCreateProjectCommitMessage
+			}
+		case "auto":
+			if !cfg.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty {
+				stageCommitOpts.CommitMessage = DefaultFixCreateProjectCommitMessage
+			}
+		}
+		if strings.TrimSpace(stageCommitOpts.CommitMessage) == "" {
+			stageCommitOpts.CommitMessage = DefaultFixCreateProjectCommitMessage
+		}
+		if err := a.runFixStageCommitSteps(cfg, target.Record.Path, target, stageCommitOpts, runStep); err != nil {
+			return err
+		}
 	}
 
 	branch, _ := a.Git.CurrentBranch(target.Record.Path)

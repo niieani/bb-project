@@ -20,6 +20,8 @@ type fixActionPlanContext struct {
 	Upstream                           string
 	HeadSHA                            string
 	OriginURL                          string
+	HasDirtyTracked                    bool
+	HasUntracked                       bool
 	SyncStrategy                       FixSyncStrategy
 	PreferredRemote                    string
 	GitHubOwner                        string
@@ -27,8 +29,11 @@ type fixActionPlanContext struct {
 	ForkRemoteExists                   bool
 	RepoName                           string
 	CommitMessage                      string
+	StashMessage                       string
+	StashIncludeUnstaged               bool
 	CreateProjectName                  string
 	CreateProjectVisibility            domain.Visibility
+	CreateProjectStageCommit           bool
 	ForkBranchRenameTo                 string
 	ReturnToOriginalBranchAndSync      bool
 	GenerateGitignore                  bool
@@ -65,9 +70,15 @@ var fixActionSpecs = map[string]fixActionSpec{
 		Risky:       false,
 		BuildPlan:   planFixActionClone,
 	},
+	FixActionStash: {
+		Label:       "Stash changes",
+		Description: "Stash local changes without committing so your working tree becomes clean.",
+		Risky:       true,
+		BuildPlan:   planFixActionStash,
+	},
 	FixActionCreateProject: {
 		Label:       "Create project & push",
-		Description: "Create remote project, set origin, register metadata, and push current branch.",
+		Description: "Create remote project, set origin, register metadata, optionally stage+commit local changes, and push current branch.",
 		Risky:       true,
 		BuildPlan:   planFixActionCreateProject,
 	},
@@ -196,6 +207,27 @@ func planFixActionClone(ctx fixActionPlanContext) []fixActionPlanEntry {
 		})
 	}
 	entries = append(entries, fixActionPlanEntry{ID: "clone-pull-ff-only", Command: true, Summary: "git pull --ff-only"})
+	return entries
+}
+
+func planFixActionStash(ctx fixActionPlanContext) []fixActionPlanEntry {
+	entries := make([]fixActionPlanEntry, 0, 2)
+	if ctx.StashIncludeUnstaged {
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "stash-stage-all",
+			Command: true,
+			Summary: "git add -A",
+		})
+	}
+	msg := strings.TrimSpace(ctx.StashMessage)
+	if msg == "" || msg == "auto" {
+		msg = DefaultFixStashMessage
+	}
+	entries = append(entries, fixActionPlanEntry{
+		ID:      "stash-push",
+		Command: true,
+		Summary: fmt.Sprintf("git stash push --staged -m %q", msg),
+	})
 	return entries
 }
 
@@ -448,7 +480,7 @@ func planFixActionSetUpstreamPush(ctx fixActionPlanContext) []fixActionPlanEntry
 }
 
 func planFixActionCreateProject(ctx fixActionPlanContext) []fixActionPlanEntry {
-	entries := make([]fixActionPlanEntry, 0, 5)
+	entries := make([]fixActionPlanEntry, 0, 7)
 	projectName := plannedProjectName(ctx.CreateProjectName, ctx.RepoName)
 	owner := strings.TrimSpace(ctx.GitHubOwner)
 	if owner == "" {
@@ -491,8 +523,25 @@ func planFixActionCreateProject(ctx fixActionPlanContext) []fixActionPlanEntry {
 		Command: false,
 		Summary: "Write/update repo metadata (origin URL, visibility, default auto-push policy).",
 	})
+	if ctx.CreateProjectStageCommit && (ctx.HasDirtyTracked || ctx.HasUntracked) {
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "stage-git-add",
+			Command: true,
+			Summary: "git add -A",
+		})
+		msg := strings.TrimSpace(ctx.CommitMessage)
+		if msg == "" || msg == "auto" {
+			msg = DefaultFixCreateProjectCommitMessage
+		}
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "stage-git-commit",
+			Command: true,
+			Summary: fmt.Sprintf("git commit -m %q", msg),
+		})
+	}
 	if strings.TrimSpace(ctx.Upstream) == "" {
-		if strings.TrimSpace(ctx.HeadSHA) != "" {
+		willHaveCommit := strings.TrimSpace(ctx.HeadSHA) != "" || (ctx.CreateProjectStageCommit && (ctx.HasDirtyTracked || ctx.HasUntracked))
+		if willHaveCommit {
 			entries = append(entries, fixActionPlanEntry{
 				ID:      "create-initial-push",
 				Command: true,

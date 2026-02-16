@@ -2,6 +2,7 @@ package gitx
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -581,6 +582,27 @@ func (r Runner) pushUpstream(path, branch, preferredRemote string, force bool) e
 
 func (r Runner) AddAll(path string) error {
 	_, err := r.RunGit(path, "add", "-A")
+	return err
+}
+
+func (r Runner) HasStagedChanges(path string) (bool, error) {
+	_, err := r.run(path, "git", "diff", "--cached", "--quiet", "--exit-code")
+	if err == nil {
+		return false, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return true, nil
+	}
+	return false, err
+}
+
+func (r Runner) StashStaged(path string, message string) error {
+	args := []string{"stash", "push", "--staged"}
+	if strings.TrimSpace(message) != "" {
+		args = append(args, "-m", strings.TrimSpace(message))
+	}
+	_, err := r.RunGit(path, args...)
 	return err
 }
 

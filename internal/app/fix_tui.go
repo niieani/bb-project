@@ -268,6 +268,15 @@ func (m *fixTUIModel) wizardHelpMap() fixTUIHelpMap {
 		b := newHelpBinding([]string{"left", "right"}, "←/→", "change visibility")
 		short = append(short, b)
 		primary = append(primary, b)
+		if m.wizard.EnableCreateProjectStageCommit {
+			toggle := newHelpBinding([]string{" "}, "space", "toggle stage+commit")
+			short = append(short, toggle)
+			primary = append(primary, toggle)
+		}
+	case fixWizardFocusStashMode:
+		b := newHelpBinding([]string{"left", "right"}, "←/→", "change stash mode")
+		short = append(short, b)
+		primary = append(primary, b)
 	case fixWizardFocusActions:
 		b := newHelpBinding([]string{"left", "right"}, "←/→", "select button")
 		short = append(short, b)
@@ -744,6 +753,9 @@ var (
 
 	fixActionStageStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("214"))
+
+	fixActionStashStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("178"))
 
 	fixActionPullStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("81"))
@@ -1958,7 +1970,8 @@ func (m *fixTUIModel) beginImmediateApply(tasks []fixImmediateActionTask, queue 
 				continue
 			}
 
-			_, err := app.applyFixActionWithObserver(includeCatalogs, task.RepoPath, task.Action, fixApplyOptions{
+			beforeHead, _ := app.Git.HeadSHA(task.RepoPath)
+			updated, err := app.applyFixActionWithObserver(includeCatalogs, task.RepoPath, task.Action, fixApplyOptions{
 				Interactive:  true,
 				SyncStrategy: FixSyncStrategyRebase,
 			}, func(event fixApplyStepEvent) {
@@ -1981,6 +1994,7 @@ func (m *fixTUIModel) beginImmediateApply(tasks []fixImmediateActionTask, queue 
 				RepoPath: task.RepoPath,
 				Action:   fixActionLabel(task.Action),
 				Status:   "applied",
+				Commits:  m.collectCreatedCommits(task.RepoPath, beforeHead, updated.Record.HeadSHA),
 			})
 			applied++
 		}
@@ -2736,6 +2750,7 @@ func fixActionsForAllExecution(actions []string) []string {
 		return nil
 	}
 	stageCommitSelected := containsAction(actions, FixActionStageCommitPush)
+	stashSelected := containsAction(actions, FixActionStash)
 	publishNewBranchSelected := containsAction(actions, FixActionPublishNewBranch)
 	checkpointThenSyncSelected := containsAction(actions, FixActionCheckpointThenSync)
 	seen := make(map[string]struct{}, len(actions))
@@ -2746,6 +2761,9 @@ func fixActionsForAllExecution(actions []string) []string {
 		}
 		seen[action] = struct{}{}
 		if stageCommitSelected && (action == FixActionPush || action == FixActionSetUpstreamPush) {
+			continue
+		}
+		if stashSelected && (action == FixActionStageCommitPush || action == FixActionPublishNewBranch || action == FixActionCheckpointThenSync) {
 			continue
 		}
 		if publishNewBranchSelected && (action == FixActionPush || action == FixActionSetUpstreamPush || action == FixActionStageCommitPush) {
@@ -2773,6 +2791,8 @@ func fixActionSelectionPriority(action string) int {
 		return 38
 	case FixActionStageCommitPush:
 		return 40
+	case FixActionStash:
+		return 72
 	case FixActionClone:
 		return 45
 	case FixActionCreateProject:
@@ -2964,6 +2984,8 @@ func fixActionStyleFor(action string) lipgloss.Style {
 		return fixActionPushStyle
 	case FixActionStageCommitPush:
 		return fixActionStageStyle
+	case FixActionStash:
+		return fixActionStashStyle
 	case FixActionPublishNewBranch:
 		return fixActionStageStyle
 	case FixActionCheckpointThenSync:
@@ -3152,7 +3174,7 @@ func fixReasonCoveredByActions(reason domain.UnsyncableReason, has map[string]bo
 	case domain.ReasonOperationInProgress:
 		return has[FixActionAbortOperation]
 	case domain.ReasonDirtyTracked, domain.ReasonDirtyUntracked:
-		return has[FixActionStageCommitPush] || has[FixActionCheckpointThenSync]
+		return has[FixActionStageCommitPush] || has[FixActionCheckpointThenSync] || has[FixActionStash]
 	case domain.ReasonMissingUpstream:
 		return has[FixActionSetUpstreamPush] || has[FixActionStageCommitPush] || has[FixActionCreateProject]
 	case domain.ReasonDiverged:

@@ -96,6 +96,25 @@ func (r fixRiskSnapshot) hasNoisyChangesWithoutGitignore() bool {
 	return r.MissingRootGitignore && len(r.NoisyChangedPaths) > 0
 }
 
+func (r fixRiskSnapshot) hasTrackedChanges() bool {
+	for _, file := range r.ChangedFiles {
+		if strings.TrimSpace(file.Status) == "untracked" {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func (r fixRiskSnapshot) hasUntrackedChanges() bool {
+	for _, file := range r.ChangedFiles {
+		if strings.TrimSpace(file.Status) == "untracked" {
+			return true
+		}
+	}
+	return false
+}
+
 type statusEntry struct {
 	Path   string
 	Status string

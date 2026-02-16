@@ -43,7 +43,7 @@ func TestEligibleFixActions(t *testing.T) {
 			name:    "dirty allows stage commit push",
 			rec:     func() domain.MachineRepoRecord { r := base; r.HasDirtyTracked = true; return r }(),
 			ctx:     fixEligibilityContext{},
-			actions: []string{FixActionStageCommitPush, FixActionPublishNewBranch},
+			actions: []string{FixActionStageCommitPush, FixActionStash, FixActionPublishNewBranch},
 		},
 		{
 			name: "dirty diverged allows publish new branch",
@@ -56,7 +56,7 @@ func TestEligibleFixActions(t *testing.T) {
 				return r
 			}(),
 			ctx:     fixEligibilityContext{},
-			actions: []string{FixActionPublishNewBranch},
+			actions: []string{FixActionStash, FixActionPublishNewBranch},
 		},
 		{
 			name: "dirty behind branch offers checkpoint then sync",
@@ -67,7 +67,7 @@ func TestEligibleFixActions(t *testing.T) {
 				return r
 			}(),
 			ctx:     fixEligibilityContext{},
-			actions: []string{FixActionCheckpointThenSync, FixActionPublishNewBranch},
+			actions: []string{FixActionCheckpointThenSync, FixActionStash, FixActionPublishNewBranch},
 		},
 		{
 			name:    "behind allows pull ff only",
@@ -158,7 +158,7 @@ func TestEligibleFixActions(t *testing.T) {
 				return r
 			}(),
 			ctx:     fixEligibilityContext{},
-			actions: []string{FixActionCreateProject, FixActionStageCommitPush},
+			actions: []string{FixActionCreateProject, FixActionStageCommitPush, FixActionStash},
 		},
 		{
 			name:    "auto push disabled allows enable action",
@@ -193,7 +193,7 @@ func TestEligibleFixActions(t *testing.T) {
 				PushAccess: domain.PushAccessReadOnly,
 			},
 			ctx:     fixEligibilityContext{},
-			actions: []string{FixActionForkAndRetarget},
+			actions: []string{FixActionStash, FixActionForkAndRetarget},
 		},
 		{
 			name: "unknown push access blocks push-related fixes",
@@ -209,7 +209,7 @@ func TestEligibleFixActions(t *testing.T) {
 				PushAccess: domain.PushAccessUnknown,
 			},
 			ctx:     fixEligibilityContext{},
-			actions: []string{},
+			actions: []string{FixActionStash},
 		},
 		{
 			name: "default-branch push-policy-blocked with true mode offers enable auto push",
@@ -240,7 +240,7 @@ func TestEligibleFixActions(t *testing.T) {
 					SecretLikeChangedPaths: []string{".env"},
 				},
 			},
-			actions: []string{},
+			actions: []string{FixActionStash},
 		},
 		{
 			name: "noisy paths with missing root gitignore block stage commit push in non-interactive mode",
@@ -256,7 +256,7 @@ func TestEligibleFixActions(t *testing.T) {
 					NoisyChangedPaths:    []string{"node_modules/pkg/index.js"},
 				},
 			},
-			actions: []string{},
+			actions: []string{FixActionStash},
 		},
 		{
 			name: "noisy paths do not block stage commit push in interactive mode",
@@ -272,7 +272,7 @@ func TestEligibleFixActions(t *testing.T) {
 					NoisyChangedPaths:    []string{"node_modules/pkg/index.js"},
 				},
 			},
-			actions: []string{FixActionStageCommitPush, FixActionPublishNewBranch},
+			actions: []string{FixActionStageCommitPush, FixActionStash, FixActionPublishNewBranch},
 		},
 	}
 

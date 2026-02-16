@@ -289,6 +289,8 @@ Empty states should never be blank. Include:
 - Use tabs or a clear step header when steps are non-trivial.
 - Place progress on the title line and align it to the top-right when possible (for example `1/3`).
 - Budget height from full chrome (header + borders + footer) so the top panel border is never clipped off-screen.
+- When a wizard step can include or skip a mutation-critical prerequisite (for example staging/committing before a first push), expose an explicit toggle and default it to the complete/safest path.
+- Wizard summaries for mutating flows must include concrete artifacts created by the step (for example created commits with short SHA + subject), not just high-level action status.
 
 ## Copy (Language)
 

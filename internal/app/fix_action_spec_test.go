@@ -13,6 +13,7 @@ func TestFixActionSpecsHaveCoreMetadata(t *testing.T) {
 	actions := []string{
 		FixActionIgnore,
 		FixActionAbortOperation,
+		FixActionStash,
 		FixActionCreateProject,
 		FixActionForkAndRetarget,
 		FixActionSyncWithUpstream,
@@ -56,6 +57,7 @@ func TestFixActionRiskUsesSharedSpec(t *testing.T) {
 	}{
 		{action: FixActionPush, risky: true},
 		{action: FixActionStageCommitPush, risky: true},
+		{action: FixActionStash, risky: true},
 		{action: FixActionPublishNewBranch, risky: true},
 		{action: FixActionCheckpointThenSync, risky: true},
 		{action: FixActionSyncWithUpstream, risky: true},
@@ -140,12 +142,14 @@ func TestFixActionPlanCreateProjectIncludesGhAndMetadataWrite(t *testing.T) {
 		Branch:                  "main",
 		Upstream:                "",
 		OriginURL:               "",
+		HasDirtyTracked:         true,
 		GitHubOwner:             "acme",
 		RemoteProtocol:          "https",
 		RepoName:                "api",
 		PreferredRemote:         "origin",
 		CreateProjectName:       "api",
 		CreateProjectVisibility: domain.VisibilityPublic,
+		CreateProjectStageCommit: true,
 		GenerateGitignore:       true,
 		GitignorePatterns:       []string{"node_modules/"},
 		MissingRootGitignore:    true,
@@ -166,8 +170,65 @@ func TestFixActionPlanCreateProjectIncludesGhAndMetadataWrite(t *testing.T) {
 	if !planContains(plan, false, "Write/update repo metadata") {
 		t.Fatalf("expected metadata write effect in plan, got %#v", plan)
 	}
+	if !planContains(plan, true, "git add -A") {
+		t.Fatalf("expected stage-all command in create-project plan when stage/commit toggle is enabled, got %#v", plan)
+	}
+	if !planContains(plan, true, "git commit -m") {
+		t.Fatalf("expected commit command in create-project plan when stage/commit toggle is enabled, got %#v", plan)
+	}
 	if planContains(plan, false, ".gitignore") {
 		t.Fatalf("did not expect gitignore side effects in create-project plan, got %#v", plan)
+	}
+}
+
+func TestFixActionPlanCreateProjectSkipsStageCommitWhenToggleDisabled(t *testing.T) {
+	t.Parallel()
+
+	plan := fixActionPlanFor(FixActionCreateProject, fixActionPlanContext{
+		Branch:                  "main",
+		Upstream:                "",
+		OriginURL:               "",
+		HasDirtyTracked:         true,
+		GitHubOwner:             "acme",
+		RemoteProtocol:          "https",
+		RepoName:                "api",
+		PreferredRemote:         "origin",
+		CreateProjectName:       "api",
+		CreateProjectVisibility: domain.VisibilityPublic,
+		CreateProjectStageCommit: false,
+	})
+
+	if planContains(plan, true, "git add -A") {
+		t.Fatalf("did not expect stage-all command when create-project stage/commit toggle is disabled, got %#v", plan)
+	}
+	if planContains(plan, true, "git commit -m") {
+		t.Fatalf("did not expect commit command when create-project stage/commit toggle is disabled, got %#v", plan)
+	}
+}
+
+func TestFixActionPlanStashSupportsStagedOnlyAndStagedPlusUnstagedModes(t *testing.T) {
+	t.Parallel()
+
+	stagedOnly := fixActionPlanFor(FixActionStash, fixActionPlanContext{
+		StashMessage:           "checkpoint staged only",
+		StashIncludeUnstaged:   false,
+	})
+	if planContains(stagedOnly, true, "git add -A") {
+		t.Fatalf("did not expect stage-all command in staged-only stash plan, got %#v", stagedOnly)
+	}
+	if !planContains(stagedOnly, true, "git stash push --staged -m") {
+		t.Fatalf("expected stash command in staged-only stash plan, got %#v", stagedOnly)
+	}
+
+	stageAll := fixActionPlanFor(FixActionStash, fixActionPlanContext{
+		StashMessage:           "checkpoint all dirty changes",
+		StashIncludeUnstaged:   true,
+	})
+	if !planContains(stageAll, true, "git add -A") {
+		t.Fatalf("expected stage-all command in staged+unstaged stash plan, got %#v", stageAll)
+	}
+	if !planContains(stageAll, true, "git stash push --staged -m") {
+		t.Fatalf("expected stash command in staged+unstaged stash plan, got %#v", stageAll)
 	}
 }
 
@@ -538,6 +599,10 @@ func TestFixActionPlanCommandSummariesAreConcreteCommands(t *testing.T) {
 		Upstream:      "",
 		OriginURL:     "git@github.com:you/api.git",
 		CommitMessage: "auto",
+	}))
+	check(FixActionStash, fixActionPlanFor(FixActionStash, fixActionPlanContext{
+		StashMessage:         "stash local changes",
+		StashIncludeUnstaged: true,
 	}))
 	check(FixActionCheckpointThenSync, fixActionPlanFor(FixActionCheckpointThenSync, fixActionPlanContext{
 		Branch:        "main",
