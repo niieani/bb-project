@@ -232,6 +232,10 @@ Behavior:
 
 Discovers git repos under selected catalogs, observes git state, and writes machine observations.
 
+Behavior:
+
+- Repositories with cached `push_access=unknown` (or unset legacy values) are re-probed during scan, even when the local branch is not ahead.
+
 Exit code is `1` when at least one observed repo is unsyncable.
 
 ### `bb sync [flags]`

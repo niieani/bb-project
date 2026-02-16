@@ -690,7 +690,8 @@ func (a *App) loadRepoMetadataWithPushAccess(repoPath string, repoKey string, or
 	changed := normalized != loaded
 
 	updated := normalized
-	if shouldProbe {
+	shouldProbeUnknown := domain.NormalizePushAccess(normalized.PushAccess) == domain.PushAccessUnknown
+	if shouldProbe || shouldProbeUnknown {
 		var probeChanged bool
 		updated, probeChanged, err = a.probeAndUpdateRepoPushAccess(repoPath, originURL, normalized, false)
 		if err != nil {
