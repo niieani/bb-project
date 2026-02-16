@@ -11,6 +11,10 @@ After finishing making code changes:
 - update README.md and any related documentation
 - start your response with a semantic git commit message with details about the change, include motivation and a short summary of the user's request
 
+If user gives you UI/UX feedback, update it with a generalized rule.
+
+In non-interactive commands, whenever functionality demands running a subcommand (e.g. `git` or `gh` CLI), always passthrough stdio.
+
 For interactive commands, use the charmbracelet ecosystem: [bubbletea](https://pkg.go.dev/github.com/charmbracelet/bubbletea) with [bubbles](https://github.com/charmbracelet/bubbles) component library and lipgloss for forms. Refer to full source code, READMEs and examples in:
 
 - `references/vendor/bubbles`
@@ -18,4 +22,3 @@ For interactive commands, use the charmbracelet ecosystem: [bubbletea](https://p
 - `references/vendor/lipgloss`
 
 Read ./docs/CLI-STYLE.md guide whenever touching any UI or interactive elements.
-If user gives you UI/UX feedback, update it with a generalized rule.
