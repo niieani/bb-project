@@ -4399,25 +4399,31 @@ func TestFixTUIViewportTopDoesNotJumpUpWhenMovingDownOneRow(t *testing.T) {
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 118, Height: 22})
 	m.setCursor(3)
 	_ = m.View()
-
-	ordered := make([]string, 0, len(m.visible))
-	for _, repo := range m.visible {
-		ordered = append(ordered, repo.Record.Name)
+	beforeItems := m.repoList.Items()
+	beforeStart, beforeEnd := m.repoList.Paginator.GetSliceBounds(len(beforeItems))
+	beforeSelected := m.repoList.Index()
+	beforeHeight := m.repoList.Height()
+	if beforeEnd <= beforeStart {
+		t.Fatalf("invalid initial list bounds: start=%d end=%d", beforeStart, beforeEnd)
 	}
-
-	beforeTop, ok := firstVisibleRepoIndex(ansi.Strip(m.viewRepoList()), ordered)
-	if !ok {
-		t.Fatalf("could not determine first visible repo before move: %q", m.viewRepoList())
+	beforePos := beforeSelected - beforeStart
+	if beforePos < 0 || beforePos >= (beforeEnd-beforeStart)-1 {
+		t.Fatalf("fixture should place selection away from viewport end: selected=%d start=%d end=%d", beforeSelected, beforeStart, beforeEnd)
 	}
 
 	m.moveRepoCursor(1)
 	_ = m.View()
-	afterTop, found := firstVisibleRepoIndex(ansi.Strip(m.viewRepoList()), ordered)
-	if !found {
-		t.Fatalf("could not determine first visible repo after move: %q", m.viewRepoList())
+	afterItems := m.repoList.Items()
+	afterStart, afterEnd := m.repoList.Paginator.GetSliceBounds(len(afterItems))
+	afterHeight := m.repoList.Height()
+	if afterEnd <= afterStart {
+		t.Fatalf("invalid post-move list bounds: start=%d end=%d", afterStart, afterEnd)
 	}
-	if afterTop < beforeTop {
-		t.Fatalf("viewport top jumped upward after moving down one row: beforeTop=%d afterTop=%d", beforeTop, afterTop)
+	if afterHeight != beforeHeight {
+		t.Fatalf("list height changed after one-row down move: beforeHeight=%d afterHeight=%d", beforeHeight, afterHeight)
+	}
+	if afterStart != beforeStart {
+		t.Fatalf("viewport page start jumped after one-row down move: beforeStart=%d afterStart=%d beforeSelected=%d afterSelected=%d", beforeStart, afterStart, beforeSelected, m.repoList.Index())
 	}
 }
 
@@ -4923,18 +4929,6 @@ func firstNonEmptyLine(lines []string) string {
 		}
 	}
 	return ""
-}
-
-func firstVisibleRepoIndex(listView string, ordered []string) (int, bool) {
-	lines := strings.Split(listView, "\n")
-	for _, line := range lines {
-		for i, name := range ordered {
-			if strings.Contains(line, name) {
-				return i, true
-			}
-		}
-	}
-	return 0, false
 }
 
 func shortHelpEntries(bindings []key.Binding) []string {

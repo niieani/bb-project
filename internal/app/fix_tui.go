@@ -1234,30 +1234,13 @@ func (m *fixTUIModel) View() string {
 	helpBlock := helpPanel.Render(helpView)
 
 	body := m.viewBodyForMode(m.viewMode)
-	spacer := ""
+	doc := body + "\n" + helpBlock
 	if m.height > 0 {
-		if m.viewMode == fixViewList && len(m.visible) > 0 {
-			prevHeight := -1
-			for i := 0; i < 3; i++ {
-				baseDoc := body + "\n" + helpBlock
-				baseHeight := lipgloss.Height(fixPageStyle.Render(baseDoc))
-				gap := m.height - baseHeight
-				if gap <= 0 || baseHeight == prevHeight {
-					break
-				}
-				prevHeight = baseHeight
-				m.repoList.SetSize(m.repoList.Width(), m.repoList.Height()+gap)
-				body = m.viewBodyForMode(m.viewMode)
-			}
-		}
-
-		baseDoc := body + "\n" + helpBlock
-		baseHeight := lipgloss.Height(fixPageStyle.Render(baseDoc))
+		baseHeight := lipgloss.Height(fixPageStyle.Render(doc))
 		if gap := m.height - baseHeight; gap > 0 {
-			spacer = strings.Repeat("\n", gap)
+			doc = strings.Repeat("\n", gap) + doc
 		}
 	}
-	doc := body + spacer + "\n" + helpBlock
 	return fixPageStyle.Render(doc)
 }
 
