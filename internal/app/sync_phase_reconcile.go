@@ -19,6 +19,7 @@ func (a *App) ensureFromWinners(
 	opts SyncOptions,
 ) error {
 	a.logf("sync: reconciling %d repo metadata entries", len(repoMetas))
+	warnedUnmappedCatalogs := map[string]bool{}
 	for _, meta := range repoMetas {
 		if strings.TrimSpace(meta.RepoKey) == "" || strings.TrimSpace(meta.OriginURL) == "" {
 			continue
@@ -27,12 +28,19 @@ func (a *App) ensureFromWinners(
 		if err != nil {
 			continue
 		}
-		if meta.PreferredCatalog != "" {
-			if _, existsOnMachine := domain.FindCatalog(*machine, meta.PreferredCatalog); existsOnMachine {
-				if _, ok := selectedCatalogMap[meta.PreferredCatalog]; !ok {
-					continue
+		targetCatalog, ok := selectedCatalogMap[keyCatalog]
+		if !ok {
+			if _, existsOnMachine := domain.FindCatalog(*machine, keyCatalog); !existsOnMachine {
+				if !warnedUnmappedCatalogs[keyCatalog] {
+					a.logf(
+						"warning: repo %s references catalog %q that is not configured locally; run bb config to map catalogs",
+						meta.RepoKey,
+						keyCatalog,
+					)
+					warnedUnmappedCatalogs[keyCatalog] = true
 				}
 			}
+			continue
 		}
 
 		matches := findLocalMatches(machine.Repos, meta.RepoKey, selectedCatalogMap)
@@ -51,10 +59,6 @@ func (a *App) ensureFromWinners(
 			}
 		}
 
-		targetCatalog, ok := chooseTargetCatalog(*machine, keyCatalog, meta, selectedCatalogMap)
-		if !ok {
-			continue
-		}
 		targetPath := filepath.Join(targetCatalog.Root, filepath.FromSlash(keyRelativePath))
 		a.logf("sync: repo %s winner=%s branch=%s target=%s", meta.RepoKey, winner.MachineID, winner.Record.Branch, targetPath)
 
@@ -121,7 +125,17 @@ func (a *App) ensureFromWinners(
 			continue
 		}
 		a.logf("sync: ensuring local copy at %s", targetPath)
-		if err := a.ensureLocalCopy(cfg, machine, meta, winner, targetCatalog, targetPath, keyRepoName, opts); err != nil {
+		if err := a.ensureLocalCopy(
+			cfg,
+			machine,
+			meta,
+			winner,
+			targetCatalog,
+			targetPath,
+			keyRepoName,
+			opts,
+			targetCatalog.AllowsAutoCloneOnSync(),
+		); err != nil {
 			return err
 		}
 	}
@@ -170,31 +184,6 @@ func findLocalMatches(records []domain.MachineRepoRecord, repoKey string, select
 	return idx
 }
 
-func chooseTargetCatalog(machine domain.MachineFile, keyCatalog string, meta domain.RepoMetadataFile, selected map[string]domain.Catalog) (domain.Catalog, bool) {
-	if keyCatalog != "" {
-		if _, existsOnMachine := domain.FindCatalog(machine, keyCatalog); existsOnMachine {
-			if c, ok := selected[keyCatalog]; ok {
-				return c, true
-			}
-			return domain.Catalog{}, false
-		}
-	}
-	if meta.PreferredCatalog != "" {
-		if c, ok := selected[meta.PreferredCatalog]; ok {
-			return c, true
-		}
-	}
-	if machine.DefaultCatalog != "" {
-		if c, ok := selected[machine.DefaultCatalog]; ok {
-			return c, true
-		}
-	}
-	for _, c := range selected {
-		return c, true
-	}
-	return domain.Catalog{}, false
-}
-
 func validateTargetPath(g gitx.Runner, targetPath string, expectedOriginURL string, preferredRemote string) (domain.UnsyncableReason, error) {
 	info, err := os.Stat(targetPath)
 	if os.IsNotExist(err) {
@@ -240,8 +229,13 @@ func (a *App) ensureLocalCopy(
 	targetPath string,
 	repoName string,
 	opts SyncOptions,
+	allowClone bool,
 ) error {
 	if info, err := os.Stat(targetPath); os.IsNotExist(err) {
+		if !allowClone {
+			a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCloneRequired)
+			return nil
+		}
 		a.logf("sync: cloning %s into %s", winner.Record.OriginURL, targetPath)
 		if err := a.Git.Clone(winner.Record.OriginURL, targetPath); err != nil {
 			a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCheckoutFailed)
@@ -259,6 +253,10 @@ func (a *App) ensureLocalCopy(
 			return err
 		}
 		if len(entries) == 0 {
+			if !allowClone {
+				a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCloneRequired)
+				return nil
+			}
 			a.logf("sync: cloning into empty directory %s", targetPath)
 			if err := a.Git.Clone(winner.Record.OriginURL, targetPath); err != nil {
 				a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCheckoutFailed)

@@ -56,6 +56,8 @@ const (
 	ReasonCheckoutFailed         UnsyncableReason = "checkout_failed"
 	ReasonTargetPathNonRepo      UnsyncableReason = "target_path_nonempty_not_repo"
 	ReasonTargetPathRepoMismatch UnsyncableReason = "target_path_repo_mismatch"
+	ReasonCloneRequired          UnsyncableReason = "clone_required"
+	ReasonCatalogNotMapped       UnsyncableReason = "catalog_not_mapped"
 )
 
 type Catalog struct {
@@ -64,6 +66,7 @@ type Catalog struct {
 	RepoPathDepth                     int    `yaml:"repo_path_depth,omitempty"`
 	AllowAutoPushDefaultBranchPrivate *bool  `yaml:"allow_auto_push_default_branch_private,omitempty"`
 	AllowAutoPushDefaultBranchPublic  *bool  `yaml:"allow_auto_push_default_branch_public,omitempty"`
+	AutoCloneOnSync                   *bool  `yaml:"auto_clone_on_sync,omitempty"`
 }
 
 type ConfigFile struct {

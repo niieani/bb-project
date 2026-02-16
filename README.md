@@ -242,7 +242,7 @@ Performs full convergence flow:
 2. publish machine observations
 3. load all machine and repo metadata state
 4. reconcile by winner
-5. pull/checkout/clone when safe
+5. pull/checkout and clone only when safe and allowed
 6. optionally emit notifications
 
 Flags:
@@ -253,7 +253,15 @@ Flags:
 - `--notify-backend <stdout|osascript>` (override notification backend; falls back to `BB_NOTIFY_BACKEND`, then `stdout`)
 - `--dry-run` (observe/reconcile decisions without write-side sync actions)
 
-Exit code is `1` when selected catalogs still contain unsyncable repos after sync.
+Additional behavior:
+
+- Reconcile target catalog is strict: `repo_key` catalog must match a local catalog mapping.
+- Missing local mapping for a remote-known catalog is skipped with warning (no cross-catalog fallback).
+- `--include-catalog` for a catalog known on other machines but missing locally returns a hint to map catalogs via `bb config`.
+- Clone during sync is controlled per catalog by `auto_clone_on_sync` (default off).
+
+Exit code is `1` only when selected catalogs still contain **blocking** unsyncable repos after sync.
+Non-blocking reasons (`clone_required`, `catalog_not_mapped`) do not force exit code `1`.
 
 ### `bb status [--json] [--include-catalog <name> ...]`
 
@@ -323,6 +331,7 @@ Flags:
 
 Actions:
 
+- `clone`
 - `push`
 - `sync-with-upstream`
 - `create-project`
@@ -368,9 +377,14 @@ Sets the repo-level preferred remote used when `bb` needs to choose a remote for
 Launches an interactive Bubble Tea wizard for onboarding and reconfiguration.
 
 - edits all `config.yaml` keys
-- edits this machine's catalogs (including layout depth, clone preset mapping, and default branch auto-push defaults) and default catalog
+- edits this machine's catalogs (including layout depth, clone preset mapping, default branch auto-push defaults, and per-catalog sync clone policy via `auto_clone_on_sync`) and default catalog
 - can be rerun to change existing values
 - requires an interactive terminal
+
+Onboarding support:
+
+- catalogs known from other machines are shown as remote-only rows
+- selecting a remote-only row and choosing Add prefills catalog name and suggested root path(s)
 
 ### `bb completion [bash|zsh|fish|powershell]`
 
@@ -499,12 +513,15 @@ Unsyncable reasons include:
 - `checkout_failed`
 - `target_path_nonempty_not_repo`
 - `target_path_repo_mismatch`
+- `clone_required` (non-blocking)
+- `catalog_not_mapped` (non-blocking)
 
 ## Notification Behavior
 
 When `sync --notify` is used:
 
 - only unsyncable repos are considered
+- repos with only non-blocking unsyncable reasons are skipped
 - notifications are deduplicated by reason fingerprint per repo cache key
 - backend selection priority: `--notify-backend` > `BB_NOTIFY_BACKEND` > `stdout`
 - `stdout` backend writes `notify <repo>: <fingerprint>`
@@ -515,6 +532,8 @@ When `sync --notify` is used:
 - No writes into non-empty non-repo target paths during ensure/sync.
 - Existing conflicting target paths are marked unsyncable instead of overwritten.
 - Branch switching follows winner only when local repo is syncable.
+- No cross-catalog fallback during reconcile (`repo_key` catalog is authoritative).
+- Sync does not auto-clone by default (`auto_clone_on_sync` must be enabled per catalog).
 - Global per-machine lock prevents concurrent `bb` processes from racing local state writes.
 
 ## Practical Workflow
@@ -630,6 +649,8 @@ Used primarily by test harness:
   - `bb catalog add <name> <root>`
 - Or verify selection:
   - `bb catalog list`
+- If the catalog exists on other machines but not locally:
+  - run `bb config` and add a local mapping for that catalog
 
 ### `init` fails around GitHub repo creation
 
@@ -650,5 +671,6 @@ Used primarily by test harness:
 ## Related Docs
 
 - Spec: `docs/SPEC.md`
+- Safe syncing plan/spec: `docs/013-SAFE-SYNCING.md`
 - Prompt/build notes: `docs/PROMPT.md`
 - v1.1 hardening plan: `docs/PLAN-V1.1.md`

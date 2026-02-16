@@ -59,6 +59,12 @@ var fixActionSpecs = map[string]fixActionSpec{
 		Risky:       true,
 		BuildPlan:   planFixActionAbortOperation,
 	},
+	FixActionClone: {
+		Label:       "Clone locally",
+		Description: "Clone or adopt this repository locally at its catalog path and align it to the winner branch.",
+		Risky:       false,
+		BuildPlan:   planFixActionClone,
+	},
 	FixActionCreateProject: {
 		Label:       "Create project & push",
 		Description: "Create remote project, set origin, register metadata, and push current branch.",
@@ -172,6 +178,25 @@ func planFixActionAbortOperation(ctx fixActionPlanContext) []fixActionPlanEntry 
 			{ID: "abort-noop", Command: false, Summary: "No merge/rebase/cherry-pick/bisect operation is currently active."},
 		}
 	}
+}
+
+func planFixActionClone(ctx fixActionPlanContext) []fixActionPlanEntry {
+	entries := []fixActionPlanEntry{
+		{ID: "clone-ensure-parent-dir", Command: false, Summary: "Create parent directory for clone target if missing."},
+		{ID: "clone-repo", Command: true, Summary: fmt.Sprintf("git clone %s <target-path>", plannedCloneOrigin(ctx.OriginURL))},
+		{ID: "clone-checkout-branch", Command: true, Summary: "git checkout <winner-branch>"},
+	}
+	if ctx.FetchPrune {
+		entries = append(entries, fixActionPlanEntry{ID: "clone-fetch-prune", Command: true, Summary: "git fetch --prune"})
+	} else {
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "clone-fetch-prune",
+			Command: false,
+			Summary: "Skip fetch prune because sync.fetch_prune is disabled.",
+		})
+	}
+	entries = append(entries, fixActionPlanEntry{ID: "clone-pull-ff-only", Command: true, Summary: "git pull --ff-only"})
+	return entries
 }
 
 func planFixActionPush(ctx fixActionPlanContext) []fixActionPlanEntry {
@@ -629,6 +654,13 @@ func plannedOriginURL(owner string, projectName string, protocol string) string 
 		return fmt.Sprintf("https://github.com/%s/%s.git", owner, projectName)
 	}
 	return fmt.Sprintf("git@github.com:%s/%s.git", owner, projectName)
+}
+
+func plannedCloneOrigin(originURL string) string {
+	if trimmed := strings.TrimSpace(originURL); trimmed != "" {
+		return trimmed
+	}
+	return "<origin-url>"
 }
 
 func plannedVisibilityFlag(visibility domain.Visibility) string {

@@ -2212,6 +2212,10 @@ func summaryUnsyncableReasonLabel(reason domain.UnsyncableReason) string {
 		return "Target path is not an initialized git repository"
 	case domain.ReasonTargetPathRepoMismatch:
 		return "Target path points to a different repository"
+	case domain.ReasonCloneRequired:
+		return "Repository is known but not cloned locally"
+	case domain.ReasonCatalogNotMapped:
+		return "Catalog exists on other machines but is not mapped locally"
 	default:
 		return string(reason)
 	}
@@ -2247,6 +2251,10 @@ func summaryManualGuidanceForReason(reason domain.UnsyncableReason) string {
 		return "Repair branch checkout manually and rerun revalidation."
 	case domain.ReasonTargetPathNonRepo, domain.ReasonTargetPathRepoMismatch:
 		return "Fix the target path mismatch manually, then rerun revalidation."
+	case domain.ReasonCloneRequired:
+		return "Run the clone fix action to create a local copy."
+	case domain.ReasonCatalogNotMapped:
+		return "Open `bb config` and map this catalog to a local root path."
 	default:
 		return "Review this blocker manually, then rerun revalidation."
 	}

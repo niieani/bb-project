@@ -730,6 +730,9 @@ var (
 	fixActionCreateProjectStyle = lipgloss.NewStyle().
 					Foreground(lipgloss.Color("113"))
 
+	fixActionCloneStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("120"))
+
 	fixActionForkStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("99"))
 
@@ -2536,6 +2539,8 @@ func fixActionSelectionPriority(action string) int {
 		return 38
 	case FixActionStageCommitPush:
 		return 40
+	case FixActionClone:
+		return 45
 	case FixActionCreateProject:
 		return 50
 	case FixActionSetUpstreamPush:
@@ -2720,6 +2725,8 @@ func fixActionStyleFor(action string) lipgloss.Style {
 		return fixActionUpstreamStyle
 	case FixActionCreateProject:
 		return fixActionCreateProjectStyle
+	case FixActionClone:
+		return fixActionCloneStyle
 	case FixActionForkAndRetarget:
 		return fixActionForkStyle
 	case FixActionSyncWithUpstream:
@@ -2901,6 +2908,10 @@ func fixReasonCoveredByActions(reason domain.UnsyncableReason, has map[string]bo
 		return has[FixActionForkAndRetarget]
 	case domain.ReasonPullFailed:
 		return has[FixActionPullFFOnly]
+	case domain.ReasonCloneRequired:
+		return has[FixActionClone]
+	case domain.ReasonCatalogNotMapped:
+		return false
 	default:
 		return false
 	}

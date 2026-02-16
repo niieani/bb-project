@@ -3,6 +3,7 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,11 +100,18 @@ func TestCatalogCases(t *testing.T) {
 		}
 
 		h.ExternalSync("a-machine", "b-machine")
-		if out, err := mB.RunBB(now.Add(1*time.Minute), "sync"); err != nil {
+		out, err := mB.RunBB(now.Add(1*time.Minute), "sync")
+		if err != nil {
 			t.Fatalf("sync on B failed: %v\n%s", err, out)
 		}
-		if _, err := os.Stat(filepath.Join(rootB, "api", ".git")); err != nil {
-			t.Fatalf("expected fallback to default catalog on B: %v", err)
+		if strings.Contains(out, "invalid catalog") {
+			t.Fatalf("unexpected include validation error: %s", out)
+		}
+		if !strings.Contains(out, `warning: repo references/api references catalog "references" that is not configured locally`) {
+			t.Fatalf("expected missing-catalog warning, got: %s", out)
+		}
+		if _, err := os.Stat(filepath.Join(rootB, "api", ".git")); err == nil {
+			t.Fatal("did not expect cross-catalog fallback clone into software on B")
 		}
 	})
 

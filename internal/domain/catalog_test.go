@@ -81,3 +81,24 @@ func TestCatalogAllowsDefaultBranchAutoPush(t *testing.T) {
 		}
 	})
 }
+
+func TestCatalogAllowsAutoCloneOnSync(t *testing.T) {
+	t.Parallel()
+
+	t.Run("defaults to false when unset", func(t *testing.T) {
+		t.Parallel()
+		c := Catalog{}
+		if c.AllowsAutoCloneOnSync() {
+			t.Fatal("expected auto-clone-on-sync to default to false")
+		}
+	})
+
+	t.Run("honors explicit true", func(t *testing.T) {
+		t.Parallel()
+		trueValue := true
+		c := Catalog{AutoCloneOnSync: &trueValue}
+		if !c.AllowsAutoCloneOnSync() {
+			t.Fatal("expected explicit true auto-clone-on-sync to be honored")
+		}
+	})
+}

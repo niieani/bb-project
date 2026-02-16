@@ -146,17 +146,32 @@ func defaultConfigWizardKeyMap() configWizardKeyMap {
 }
 
 type catalogEditor struct {
-	mode          catalogEditorMode
-	inputs        []textinput.Model
-	presetOptions []string
-	presetValue   string
-	focus         int
-	row           int
-	err           string
-	confirmDelete bool
-	repoPathDepth int
-	privatePush   bool
-	publicPush    bool
+	mode            catalogEditorMode
+	inputs          []textinput.Model
+	presetOptions   []string
+	presetValue     string
+	rootSuggestions []string
+	rootSuggestion  int
+	focus           int
+	row             int
+	err             string
+	confirmDelete   bool
+	repoPathDepth   int
+	privatePush     bool
+	publicPush      bool
+	autoCloneOnSync bool
+}
+
+type catalogTableRow struct {
+	Name           string
+	Root           string
+	Preset         string
+	Layout         string
+	Default        string
+	PrivatePush    string
+	PublicPush     string
+	RemoteOnly     bool
+	SuggestedRoots []string
 }
 
 type configWizardModel struct {
@@ -196,6 +211,7 @@ type configWizardModel struct {
 	lumenAvailable bool
 
 	catalogTable table.Model
+	catalogRows  []catalogTableRow
 	catalogEdit  *catalogEditor
 	catalogFocus catalogFocusArea
 	catalogBtn   int
@@ -409,6 +425,9 @@ func newConfigWizardModel(input ConfigWizardInput) *configWizardModel {
 		catalogBtn:         0,
 		createMissingRoots: true,
 		lumenAvailable:     input.LumenAvailable,
+	}
+	if m.input.KnownCatalogRoots == nil {
+		m.input.KnownCatalogRoots = map[string][]string{}
 	}
 	if m.machine.Catalogs == nil {
 		m.machine.Catalogs = []domain.Catalog{}
@@ -884,7 +903,7 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focusTabs {
 				return m, nil
 			}
-			if len(m.machine.Catalogs) == 0 {
+			if len(m.catalogRows) == 0 {
 				m.focusTabs = true
 				m.catalogTable.Blur()
 				m.applyCatalogTableStyles(false)
@@ -893,6 +912,7 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cur := m.catalogTable.Cursor()
 			if cur > 0 {
 				m.catalogTable.SetCursor(cur - 1)
+				m.normalizeCatalogButtonForSelection()
 				return m, nil
 			}
 			m.focusTabs = true
@@ -902,7 +922,7 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down":
 			if m.focusTabs {
 				m.focusTabs = false
-				if len(m.machine.Catalogs) == 0 {
+				if len(m.catalogRows) == 0 {
 					m.catalogFocus = catalogFocusButtons
 					m.catalogBtn = m.catalogButtonMin()
 					m.catalogTable.Blur()
@@ -915,15 +935,16 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if len(m.machine.Catalogs) > 0 {
+			if len(m.catalogRows) > 0 {
 				cur := m.catalogTable.Cursor()
-				if cur < len(m.machine.Catalogs)-1 {
+				if cur < len(m.catalogRows)-1 {
 					m.catalogTable.SetCursor(cur + 1)
+					m.normalizeCatalogButtonForSelection()
 				}
 				return m, nil
 			}
 		case " ":
-			if !m.focusTabs && len(m.machine.Catalogs) > 0 {
+			if !m.focusTabs && m.selectedLocalCatalogIndex() >= 0 {
 				if err := m.setDefaultFromSelection(); err != nil {
 					m.errorText = err.Error()
 				} else {
@@ -945,17 +966,21 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.focusTabs {
 				switch m.catalogBtn {
 				case 0: // edit
-					if len(m.machine.Catalogs) == 0 {
+					if m.selectedLocalCatalogIndex() < 0 {
 						m.errorText = "select a catalog to edit"
 						return m, nil
 					}
 					m.startCatalogEditRootEditor()
 					return m, nil
 				case 1: // add
-					m.startCatalogAddEditor()
+					if row, ok := m.selectedCatalogTableRow(); ok && row.RemoteOnly {
+						m.startCatalogAddEditorWithTemplate(row.Name, row.SuggestedRoots)
+					} else {
+						m.startCatalogAddEditor()
+					}
 					return m, nil
 				case 2: // set default
-					if len(m.machine.Catalogs) == 0 {
+					if m.selectedLocalCatalogIndex() < 0 {
 						m.errorText = "select a catalog to set default"
 						return m, nil
 					}
@@ -966,7 +991,7 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.recomputeDirty()
 					return m, nil
 				case 3: // toggle repo path layout depth
-					if len(m.machine.Catalogs) == 0 {
+					if m.selectedLocalCatalogIndex() < 0 {
 						m.errorText = "select a catalog to toggle layout"
 						return m, nil
 					}
@@ -977,7 +1002,7 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.recomputeDirty()
 					return m, nil
 				case 4: // toggle private default-branch auto-push
-					if len(m.machine.Catalogs) == 0 {
+					if m.selectedLocalCatalogIndex() < 0 {
 						m.errorText = "select a catalog to toggle private auto-push"
 						return m, nil
 					}
@@ -988,7 +1013,7 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.recomputeDirty()
 					return m, nil
 				case 5: // toggle public default-branch auto-push
-					if len(m.machine.Catalogs) == 0 {
+					if m.selectedLocalCatalogIndex() < 0 {
 						m.errorText = "select a catalog to toggle public auto-push"
 						return m, nil
 					}
@@ -1047,6 +1072,10 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 			m.updateCatalogEditorFocus()
 			return m, nil
 		case "right":
+			if editor.mode == catalogEditorAdd && editor.focus == 1 {
+				m.shiftCatalogAddRootSuggestion(+1)
+				return m, nil
+			}
 			if editor.mode == catalogEditorEditRoot && editor.focus >= len(editor.inputs) && editor.focus < actionStart {
 				if err := m.shiftCatalogEditorOption(editor.focus-len(editor.inputs), 1); err != nil {
 					editor.err = err.Error()
@@ -1066,6 +1095,10 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 				return m, nil
 			}
 		case "left":
+			if editor.mode == catalogEditorAdd && editor.focus == 1 {
+				m.shiftCatalogAddRootSuggestion(-1)
+				return m, nil
+			}
 			if editor.mode == catalogEditorEditRoot && editor.focus >= len(editor.inputs) && editor.focus < actionStart {
 				if err := m.shiftCatalogEditorOption(editor.focus-len(editor.inputs), -1); err != nil {
 					editor.err = err.Error()
@@ -1082,6 +1115,10 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 				return m, nil
 			}
 		case " ":
+			if editor.mode == catalogEditorAdd && editor.focus == 1 {
+				m.shiftCatalogAddRootSuggestion(+1)
+				return m, nil
+			}
 			if editor.mode == catalogEditorEditRoot && editor.focus >= len(editor.inputs) && editor.focus < actionStart {
 				if err := m.shiftCatalogEditorOption(editor.focus-len(editor.inputs), 1); err != nil {
 					editor.err = err.Error()
@@ -1329,7 +1366,7 @@ func (m *configWizardModel) resizeCatalogTable() {
 		maxVisibleHeight = 6
 	}
 	// Keep the table compact for small catalog counts instead of filling the viewport.
-	preferredHeight := len(m.machine.Catalogs) + 3
+	preferredHeight := len(m.catalogRows) + 3
 	if preferredHeight < 6 {
 		preferredHeight = 6
 	}
@@ -1404,7 +1441,7 @@ func (m *configWizardModel) catalogEditorToggleCount() int {
 		return 0
 	}
 	if m.catalogEdit.mode == catalogEditorEditRoot {
-		return 4
+		return 5
 	}
 	return 0
 }
@@ -1473,7 +1510,7 @@ func (m *configWizardModel) updateCatalogFocus() {
 		m.applyCatalogTableStyles(false)
 		return
 	}
-	if len(m.machine.Catalogs) == 0 {
+	if len(m.catalogRows) == 0 {
 		m.catalogFocus = catalogFocusButtons
 		m.catalogBtn = m.catalogButtonMin()
 		m.catalogTable.Blur()
@@ -1481,9 +1518,7 @@ func (m *configWizardModel) updateCatalogFocus() {
 		return
 	}
 	m.catalogFocus = catalogFocusButtons
-	if m.catalogBtn < m.catalogButtonMin() || m.catalogBtn > m.catalogButtonMax() {
-		m.catalogBtn = m.catalogButtonMin()
-	}
+	m.normalizeCatalogButtonForSelection()
 	m.catalogTable.Focus()
 	m.applyCatalogTableStyles(true)
 }
@@ -1492,11 +1527,14 @@ func (m *configWizardModel) catalogButtonMin() int {
 	if len(m.machine.Catalogs) == 0 {
 		return 1 // Add
 	}
+	if m.selectedLocalCatalogIndex() < 0 {
+		return 1 // Add only when remote-only row selected
+	}
 	return 0 // Edit
 }
 
 func (m *configWizardModel) catalogButtonMax() int {
-	if len(m.machine.Catalogs) == 0 {
+	if len(m.machine.Catalogs) == 0 || m.selectedLocalCatalogIndex() < 0 {
 		return 1 // Add
 	}
 	return 6 // Edit, Add, Set Default, Toggle Layout, Toggle Private, Toggle Public, Continue
@@ -1751,13 +1789,17 @@ func (m *configWizardModel) viewCatalogs() string {
 	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Catalogs define root folders where bb discovers repositories."))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Use Edit to configure root path, clone preset mapping, layout depth, and default-branch auto-push policy for the selected catalog."))
+	b.WriteString(hintStyle.Render("Use Edit to configure root path, clone preset mapping, layout depth, default-branch auto-push policy, and sync clone behavior for the selected catalog."))
+	if len(m.input.KnownCatalogRoots) > 0 {
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render("Remote-known catalogs are listed as read-only rows; select one and choose Add to prefill local mapping."))
+	}
 	b.WriteString("\n\n")
 	if m.catalogEdit != nil {
 		b.WriteString(panelStyle.Render(m.viewCatalogEditor()))
 		return b.String()
 	}
-	if len(m.machine.Catalogs) == 0 {
+	if len(m.catalogRows) == 0 {
 		emptyState := strings.Join([]string{
 			labelStyle.Render("No catalogs configured yet"),
 			hintStyle.Render("Use Add to define your first catalog."),
@@ -1806,10 +1848,16 @@ func (m *configWizardModel) viewCatalogEditor() string {
 		b.WriteString(renderFieldBlock(
 			m.catalogEdit.focus == 1,
 			"Catalog root path",
-			"Absolute path where repositories should be discovered.",
+			"Absolute path where repositories should be discovered. Use Left/Right to cycle suggested roots when available.",
 			renderInputContainer(m.catalogEdit.inputs[1].View(), m.catalogEdit.focus == 1),
 			"",
 		))
+		if len(m.catalogEdit.rootSuggestions) > 0 {
+			b.WriteString("\n")
+			b.WriteString(hintStyle.Render("Suggested roots from other machines:"))
+			b.WriteString("\n")
+			b.WriteString(hintStyle.Render(strings.Join(m.catalogEdit.rootSuggestions, "  |  ")))
+		}
 		b.WriteString("\n\n")
 		b.WriteString(renderEditorActions(
 			false,
@@ -1859,12 +1907,20 @@ func (m *configWizardModel) viewCatalogEditor() string {
 			renderCheckbox(m.catalogEdit.publicPush),
 			"",
 		))
+		b.WriteString("\n")
+		b.WriteString(renderFieldBlock(
+			m.catalogEdit.focus == 5,
+			"Auto clone during sync",
+			"When enabled, bb sync can clone missing local copies for this catalog.\nWhen disabled, missing copies are marked clone_required and should be handled via bb fix clone.",
+			renderCheckbox(m.catalogEdit.autoCloneOnSync),
+			"",
+		))
 		b.WriteString("\n\n")
 		b.WriteString(renderEditorActions(
 			true,
-			m.catalogEdit.focus == 5,
 			m.catalogEdit.focus == 6,
 			m.catalogEdit.focus == 7,
+			m.catalogEdit.focus == 8,
 		))
 	}
 	if m.catalogEdit.err != "" {
@@ -2177,24 +2233,100 @@ func renderEnumLine(current string, options []string) string {
 }
 
 func (m *configWizardModel) rebuildCatalogRows() {
-	rows := make([]table.Row, 0, len(m.machine.Catalogs))
+	m.catalogRows = make([]catalogTableRow, 0, len(m.machine.Catalogs))
+	localCatalogNames := map[string]struct{}{}
 	for _, c := range m.machine.Catalogs {
 		def := ""
 		if c.Name == m.machine.DefaultCatalog {
 			def = "yes"
 		}
+		localCatalogNames[c.Name] = struct{}{}
+		m.catalogRows = append(m.catalogRows, catalogTableRow{
+			Name:        c.Name,
+			Root:        c.Root,
+			Preset:      strings.TrimSpace(m.config.Clone.CatalogPreset[c.Name]),
+			Layout:      repoPathDepthLabel(c),
+			Default:     def,
+			PrivatePush: onOffLabel(c.AllowsDefaultBranchAutoPush(domain.VisibilityPrivate)),
+			PublicPush:  onOffLabel(c.AllowsDefaultBranchAutoPush(domain.VisibilityPublic)),
+		})
+	}
+	remoteCatalogNames := make([]string, 0, len(m.input.KnownCatalogRoots))
+	for name := range m.input.KnownCatalogRoots {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := localCatalogNames[trimmed]; exists {
+			continue
+		}
+		remoteCatalogNames = append(remoteCatalogNames, trimmed)
+	}
+	sort.Strings(remoteCatalogNames)
+	for _, name := range remoteCatalogNames {
+		roots := sanitizeCatalogRootSuggestions(m.input.KnownCatalogRoots[name])
+		rootDisplay := "(unknown root)"
+		if len(roots) > 0 {
+			rootDisplay = roots[0]
+			if len(roots) > 1 {
+				rootDisplay = fmt.Sprintf("%s (+%d alt)", roots[0], len(roots)-1)
+			}
+		}
+		m.catalogRows = append(m.catalogRows, catalogTableRow{
+			Name:           name,
+			Root:           rootDisplay,
+			Preset:         "-",
+			Layout:         "-",
+			Default:        "remote-only",
+			PrivatePush:    "-",
+			PublicPush:     "-",
+			RemoteOnly:     true,
+			SuggestedRoots: roots,
+		})
+	}
+	rows := make([]table.Row, 0, len(m.catalogRows))
+	for _, row := range m.catalogRows {
+		name := row.Name
+		if row.RemoteOnly {
+			name = "remote: " + name
+		}
 		rows = append(rows, table.Row{
-			c.Name,
-			c.Root,
-			strings.TrimSpace(m.config.Clone.CatalogPreset[c.Name]),
-			repoPathDepthLabel(c),
-			def,
-			onOffLabel(c.AllowsDefaultBranchAutoPush(domain.VisibilityPrivate)),
-			onOffLabel(c.AllowsDefaultBranchAutoPush(domain.VisibilityPublic)),
+			name,
+			row.Root,
+			row.Preset,
+			row.Layout,
+			row.Default,
+			row.PrivatePush,
+			row.PublicPush,
 		})
 	}
 	m.catalogTable.SetRows(rows)
+	if cursor := m.catalogTable.Cursor(); cursor >= len(rows) && len(rows) > 0 {
+		m.catalogTable.SetCursor(len(rows) - 1)
+	}
+	m.normalizeCatalogButtonForSelection()
 	m.resizeCatalogTable()
+}
+
+func sanitizeCatalogRootSuggestions(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(in))
+	for _, item := range in {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func onOffLabel(v bool) string {
@@ -2245,25 +2377,49 @@ func builtinReferencesClonePreset() domain.ClonePreset {
 }
 
 func (m *configWizardModel) startCatalogAddEditor() {
+	m.startCatalogAddEditorWithTemplate("", nil)
+}
+
+func (m *configWizardModel) startCatalogAddEditorWithTemplate(nameValue string, rootSuggestions []string) {
 	name := textinput.New()
 	name.Prompt = ""
 	name.Placeholder = "catalog name"
-	name.Focus()
+	name.SetValue(strings.TrimSpace(nameValue))
+	if strings.TrimSpace(name.Value()) == "" {
+		name.Focus()
+	} else {
+		name.Blur()
+	}
 	root := textinput.New()
 	root.Prompt = ""
 	root.Placeholder = "/absolute/path"
-	root.Blur()
+	rootSuggestions = sanitizeCatalogRootSuggestions(rootSuggestions)
+	if len(rootSuggestions) > 0 {
+		root.SetValue(rootSuggestions[0])
+	}
+	if strings.TrimSpace(name.Value()) == "" {
+		root.Blur()
+	} else {
+		root.Focus()
+	}
+	initialFocus := 0
+	if strings.TrimSpace(name.Value()) != "" {
+		initialFocus = 1
+	}
 	m.catalogEdit = &catalogEditor{
-		mode:   catalogEditorAdd,
-		inputs: []textinput.Model{name, root},
-		focus:  0,
-		row:    -1,
+		mode:            catalogEditorAdd,
+		inputs:          []textinput.Model{name, root},
+		rootSuggestions: rootSuggestions,
+		rootSuggestion:  0,
+		focus:           initialFocus,
+		row:             -1,
 	}
 	m.catalogTable.Blur()
+	m.updateCatalogEditorFocus()
 }
 
 func (m *configWizardModel) startCatalogEditRootEditor() {
-	idx := m.catalogTable.Cursor()
+	idx := m.selectedLocalCatalogIndex()
 	if idx < 0 || idx >= len(m.machine.Catalogs) {
 		m.errorText = "select a catalog first"
 		return
@@ -2291,15 +2447,16 @@ func (m *configWizardModel) startCatalogEditRootEditor() {
 		sort.Strings(presetOptions[1:])
 	}
 	m.catalogEdit = &catalogEditor{
-		mode:          catalogEditorEditRoot,
-		inputs:        []textinput.Model{root},
-		presetOptions: presetOptions,
-		presetValue:   presetValue,
-		focus:         0,
-		row:           idx,
-		repoPathDepth: domain.EffectiveRepoPathDepth(catalog),
-		privatePush:   catalog.AllowsDefaultBranchAutoPush(domain.VisibilityPrivate),
-		publicPush:    catalog.AllowsDefaultBranchAutoPush(domain.VisibilityPublic),
+		mode:            catalogEditorEditRoot,
+		inputs:          []textinput.Model{root},
+		presetOptions:   presetOptions,
+		presetValue:     presetValue,
+		focus:           0,
+		row:             idx,
+		repoPathDepth:   domain.EffectiveRepoPathDepth(catalog),
+		privatePush:     catalog.AllowsDefaultBranchAutoPush(domain.VisibilityPrivate),
+		publicPush:      catalog.AllowsDefaultBranchAutoPush(domain.VisibilityPublic),
+		autoCloneOnSync: catalog.AllowsAutoCloneOnSync(),
 	}
 	m.catalogTable.Blur()
 }
@@ -2371,8 +2528,10 @@ func (m *configWizardModel) commitCatalogEditor() error {
 		}
 		privatePush := editor.privatePush
 		publicPush := editor.publicPush
+		autoCloneOnSync := editor.autoCloneOnSync
 		m.machine.Catalogs[editor.row].AllowAutoPushDefaultBranchPrivate = &privatePush
 		m.machine.Catalogs[editor.row].AllowAutoPushDefaultBranchPublic = &publicPush
+		m.machine.Catalogs[editor.row].AutoCloneOnSync = &autoCloneOnSync
 
 		name := m.machine.Catalogs[editor.row].Name
 		if m.config.Clone.CatalogPreset == nil {
@@ -2392,7 +2551,7 @@ func (m *configWizardModel) commitCatalogEditor() error {
 }
 
 func (m *configWizardModel) deleteSelectedCatalog() error {
-	idx := m.catalogTable.Cursor()
+	idx := m.selectedLocalCatalogIndex()
 	return m.deleteCatalogAt(idx)
 }
 
@@ -2426,7 +2585,7 @@ func (m *configWizardModel) deleteCatalogAt(idx int) error {
 }
 
 func (m *configWizardModel) setDefaultFromSelection() error {
-	idx := m.catalogTable.Cursor()
+	idx := m.selectedLocalCatalogIndex()
 	if idx < 0 || idx >= len(m.machine.Catalogs) {
 		return fmt.Errorf("select a catalog first")
 	}
@@ -2436,7 +2595,7 @@ func (m *configWizardModel) setDefaultFromSelection() error {
 }
 
 func (m *configWizardModel) toggleRepoPathDepthFromSelection() error {
-	idx := m.catalogTable.Cursor()
+	idx := m.selectedLocalCatalogIndex()
 	if idx < 0 || idx >= len(m.machine.Catalogs) {
 		return fmt.Errorf("select a catalog first")
 	}
@@ -2452,7 +2611,7 @@ func (m *configWizardModel) toggleRepoPathDepthFromSelection() error {
 }
 
 func (m *configWizardModel) toggleDefaultBranchAutoPushFromSelection(visibility domain.Visibility) error {
-	idx := m.catalogTable.Cursor()
+	idx := m.selectedLocalCatalogIndex()
 	if idx < 0 || idx >= len(m.machine.Catalogs) {
 		return fmt.Errorf("select a catalog first")
 	}
@@ -2490,6 +2649,8 @@ func (m *configWizardModel) shiftCatalogEditorOption(toggleIndex int, delta int)
 		editor.privatePush = !editor.privatePush
 	case 3:
 		editor.publicPush = !editor.publicPush
+	case 4:
+		editor.autoCloneOnSync = !editor.autoCloneOnSync
 	default:
 		return fmt.Errorf("invalid editor toggle selection")
 	}
@@ -2497,7 +2658,18 @@ func (m *configWizardModel) shiftCatalogEditorOption(toggleIndex int, delta int)
 }
 
 func (m *configWizardModel) selectedCatalogPolicySummary() string {
-	idx := m.catalogTable.Cursor()
+	row, ok := m.selectedCatalogTableRow()
+	if !ok {
+		return "Select a catalog to change default-branch auto-push policy."
+	}
+	if row.RemoteOnly {
+		suggestion := "(no known roots)"
+		if len(row.SuggestedRoots) > 0 {
+			suggestion = strings.Join(row.SuggestedRoots, ", ")
+		}
+		return fmt.Sprintf("Selected remote-only %q. Use Add to create local mapping. Suggested roots: %s", row.Name, suggestion)
+	}
+	idx := m.selectedLocalCatalogIndex()
 	if idx < 0 || idx >= len(m.machine.Catalogs) {
 		return "Select a catalog to change default-branch auto-push policy."
 	}
@@ -2507,11 +2679,55 @@ func (m *configWizardModel) selectedCatalogPolicySummary() string {
 		preset = "-"
 	}
 	return fmt.Sprintf(
-		"Selected %q: preset=%s, layout=%s, private=%s, public=%s",
+		"Selected %q: preset=%s, layout=%s, private=%s, public=%s, auto_clone_sync=%s",
 		c.Name,
 		preset,
 		repoPathDepthLabel(c),
 		onOffLabel(c.AllowsDefaultBranchAutoPush(domain.VisibilityPrivate)),
 		onOffLabel(c.AllowsDefaultBranchAutoPush(domain.VisibilityPublic)),
+		onOffLabel(c.AllowsAutoCloneOnSync()),
 	)
+}
+
+func (m *configWizardModel) selectedCatalogTableRow() (catalogTableRow, bool) {
+	idx := m.catalogTable.Cursor()
+	if idx < 0 || idx >= len(m.catalogRows) {
+		return catalogTableRow{}, false
+	}
+	return m.catalogRows[idx], true
+}
+
+func (m *configWizardModel) selectedLocalCatalogIndex() int {
+	row, ok := m.selectedCatalogTableRow()
+	if !ok || row.RemoteOnly {
+		return -1
+	}
+	for i, catalog := range m.machine.Catalogs {
+		if strings.TrimSpace(catalog.Name) == strings.TrimSpace(row.Name) {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m *configWizardModel) normalizeCatalogButtonForSelection() {
+	min := m.catalogButtonMin()
+	max := m.catalogButtonMax()
+	if m.catalogBtn < min || m.catalogBtn > max {
+		m.catalogBtn = min
+	}
+}
+
+func (m *configWizardModel) shiftCatalogAddRootSuggestion(delta int) {
+	editor := m.catalogEdit
+	if editor == nil || editor.mode != catalogEditorAdd || len(editor.rootSuggestions) == 0 {
+		return
+	}
+	next := editor.rootSuggestion + delta
+	for next < 0 {
+		next += len(editor.rootSuggestions)
+	}
+	next = next % len(editor.rootSuggestions)
+	editor.rootSuggestion = next
+	editor.inputs[1].SetValue(editor.rootSuggestions[next])
 }

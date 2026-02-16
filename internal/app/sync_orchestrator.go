@@ -1,6 +1,10 @@
 package app
 
 import (
+	"fmt"
+	"sort"
+	"strings"
+
 	"bb-project/internal/domain"
 	"bb-project/internal/state"
 )
@@ -22,7 +26,7 @@ func (a *App) runSync(opts SyncOptions) (int, error) {
 	}
 	a.logf("sync: start push=%t notify=%t dry-run=%t", opts.Push, opts.Notify, opts.DryRun)
 
-	selectedCatalogs, selectedCatalogMap, err := selectSyncCatalogs(machine, opts.IncludeCatalogs)
+	selectedCatalogs, selectedCatalogMap, err := selectSyncCatalogs(a.Paths, machine, opts.IncludeCatalogs)
 	if err != nil {
 		return 2, err
 	}
@@ -69,10 +73,10 @@ func (a *App) runSync(opts SyncOptions) (int, error) {
 	return 0, nil
 }
 
-func selectSyncCatalogs(machine domain.MachineFile, include []string) ([]domain.Catalog, map[string]domain.Catalog, error) {
+func selectSyncCatalogs(paths state.Paths, machine domain.MachineFile, include []string) ([]domain.Catalog, map[string]domain.Catalog, error) {
 	selectedCatalogs, err := domain.SelectCatalogs(machine, include)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, annotateRemoteCatalogSelectionError(paths, machine, include, err)
 	}
 
 	selectedCatalogMap := map[string]domain.Catalog{}
@@ -81,6 +85,54 @@ func selectSyncCatalogs(machine domain.MachineFile, include []string) ([]domain.
 	}
 
 	return selectedCatalogs, selectedCatalogMap, nil
+}
+
+func annotateRemoteCatalogSelectionError(paths state.Paths, machine domain.MachineFile, include []string, selectErr error) error {
+	if selectErr == nil || len(include) == 0 {
+		return selectErr
+	}
+	knownCatalogRoots, err := loadKnownCatalogRoots(paths, machine.MachineID)
+	if err != nil {
+		return selectErr
+	}
+	localCatalogs := map[string]struct{}{}
+	for _, catalog := range machine.Catalogs {
+		name := strings.TrimSpace(catalog.Name)
+		if name == "" {
+			continue
+		}
+		localCatalogs[name] = struct{}{}
+	}
+
+	remoteOnlySelections := []string{}
+	seen := map[string]struct{}{}
+	for _, item := range include {
+		name := strings.TrimSpace(item)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+
+		if _, ok := localCatalogs[name]; ok {
+			continue
+		}
+		if _, ok := knownCatalogRoots[name]; !ok {
+			continue
+		}
+		remoteOnlySelections = append(remoteOnlySelections, name)
+	}
+	if len(remoteOnlySelections) == 0 {
+		return selectErr
+	}
+	sort.Strings(remoteOnlySelections)
+	return fmt.Errorf(
+		"%w; catalog(s) %s are known on other machines but not mapped locally; run bb config to add local catalog mappings",
+		selectErr,
+		strings.Join(remoteOnlySelections, ", "),
+	)
 }
 
 func previousRepoRecords(repos []domain.MachineRepoRecord) map[string]domain.MachineRepoRecord {
@@ -111,7 +163,9 @@ func anyUnsyncableInSelectedCatalogs(repos []domain.MachineRepoRecord, selectedC
 			continue
 		}
 		if !rec.Syncable {
-			return true
+			if len(rec.UnsyncableReasons) == 0 || domain.HasBlockingUnsyncableReason(rec.UnsyncableReasons) {
+				return true
+			}
 		}
 	}
 	return false

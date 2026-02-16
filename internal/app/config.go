@@ -17,11 +17,12 @@ import (
 )
 
 type ConfigWizardInput struct {
-	Config         domain.ConfigFile
-	Machine        domain.MachineFile
-	ConfigPath     string
-	MachinePath    string
-	LumenAvailable bool
+	Config            domain.ConfigFile
+	Machine           domain.MachineFile
+	ConfigPath        string
+	MachinePath       string
+	LumenAvailable    bool
+	KnownCatalogRoots map[string][]string
 }
 
 type ConfigWizardResult struct {
@@ -54,6 +55,10 @@ func (a *App) RunConfig() error {
 	if err != nil {
 		return err
 	}
+	knownCatalogRoots, err := loadKnownCatalogRoots(a.Paths, machineID)
+	if err != nil {
+		return err
+	}
 	configPath := a.Paths.ConfigPath()
 	machinePath := a.Paths.MachinePath(machineID)
 
@@ -67,11 +72,12 @@ func (a *App) RunConfig() error {
 	}
 
 	result, err := a.RunConfigWizard(ConfigWizardInput{
-		Config:         cfg,
-		Machine:        machine,
-		ConfigPath:     configPath,
-		MachinePath:    machinePath,
-		LumenAvailable: a.isLumenAvailableForConfigWizard(),
+		Config:            cfg,
+		Machine:           machine,
+		ConfigPath:        configPath,
+		MachinePath:       machinePath,
+		LumenAvailable:    a.isLumenAvailableForConfigWizard(),
+		KnownCatalogRoots: knownCatalogRoots,
 	})
 	if err != nil {
 		return err
@@ -130,6 +136,40 @@ func (a *App) RunConfig() error {
 		return err
 	}
 	return nil
+}
+
+func loadKnownCatalogRoots(paths state.Paths, currentMachineID string) (map[string][]string, error) {
+	machines, err := state.LoadAllMachineFiles(paths)
+	if err != nil {
+		return nil, err
+	}
+	rootsByCatalog := map[string]map[string]struct{}{}
+	for _, machine := range machines {
+		if strings.TrimSpace(machine.MachineID) == strings.TrimSpace(currentMachineID) {
+			continue
+		}
+		for _, catalog := range machine.Catalogs {
+			name := strings.TrimSpace(catalog.Name)
+			root := strings.TrimSpace(catalog.Root)
+			if name == "" || root == "" {
+				continue
+			}
+			if _, ok := rootsByCatalog[name]; !ok {
+				rootsByCatalog[name] = map[string]struct{}{}
+			}
+			rootsByCatalog[name][root] = struct{}{}
+		}
+	}
+	out := map[string][]string{}
+	for name, roots := range rootsByCatalog {
+		items := make([]string, 0, len(roots))
+		for root := range roots {
+			items = append(items, root)
+		}
+		sort.Strings(items)
+		out[name] = items
+	}
+	return out, nil
 }
 
 func (a *App) isLumenAvailableForConfigWizard() bool {

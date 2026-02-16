@@ -50,6 +50,10 @@ func (c Catalog) AllowsDefaultBranchAutoPush(visibility Visibility) bool {
 	}
 }
 
+func (c Catalog) AllowsAutoCloneOnSync() bool {
+	return boolOrDefault(c.AutoCloneOnSync, false)
+}
+
 func boolOrDefault(value *bool, def bool) bool {
 	if value == nil {
 		return def

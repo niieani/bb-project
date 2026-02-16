@@ -17,6 +17,7 @@ import (
 const (
 	FixActionIgnore             = "ignore"
 	FixActionAbortOperation     = "abort-operation"
+	FixActionClone              = "clone"
 	FixActionCreateProject      = "create-project"
 	FixActionForkAndRetarget    = "fork-and-retarget"
 	FixActionSyncWithUpstream   = "sync-with-upstream"
@@ -266,6 +267,9 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	if rec.OriginURL == "" {
 		actions = append(actions, FixActionCreateProject)
 	}
+	if containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonCloneRequired) {
+		actions = append(actions, FixActionClone)
+	}
 	if rec.OriginURL != "" &&
 		rec.Upstream != "" &&
 		rec.Diverged &&
@@ -505,10 +509,9 @@ func (a *App) loadFixRepos(includeCatalogs []string, refreshMode scanRefreshMode
 	if err != nil {
 		return nil, err
 	}
-	metaByRepoKey := make(map[string]*domain.RepoMetadataFile, len(metas))
-	for i := range metas {
-		meta := metas[i]
-		metaByRepoKey[meta.RepoKey] = &meta
+	metaByRepoKey := repoMetadataByKey(metas)
+	if err := a.augmentFixMachineWithKnownRepos(&machine, includeCatalogs, metaByRepoKey); err != nil {
+		return nil, err
 	}
 
 	out := make([]fixRepoState, 0, len(machine.Repos))
@@ -764,13 +767,26 @@ func (a *App) applyFixActionWithObserver(
 	if err != nil {
 		return fixRepoState{}, err
 	}
-	if err := a.refreshFixRepoSnapshotLocked(cfg, &machine, repoPath); err != nil {
+	if err := a.refreshFixRepoSnapshotLocked(cfg, &machine, repoPath); err != nil && !isFixProjectNotFoundInSnapshot(err) {
 		return fixRepoState{}, err
 	}
-
 	target, err := a.loadFixRepoByPathUnlocked(machine, repoPath)
-	if err != nil {
+	if err != nil && action != FixActionClone {
 		return fixRepoState{}, err
+	}
+	if err != nil {
+		metas, loadErr := state.LoadAllRepoMetadata(a.Paths)
+		if loadErr != nil {
+			return fixRepoState{}, loadErr
+		}
+		metaByRepoKey := repoMetadataByKey(metas)
+		if augmentErr := a.augmentFixMachineWithKnownRepos(&machine, includeCatalogs, metaByRepoKey); augmentErr != nil {
+			return fixRepoState{}, augmentErr
+		}
+		target, err = a.loadFixRepoByPathUnlocked(machine, repoPath)
+		if err != nil {
+			return fixRepoState{}, err
+		}
 	}
 	eligibility := fixEligibilityContext{
 		Interactive:     opts.Interactive,
@@ -813,11 +829,7 @@ func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, 
 	if err != nil {
 		return nil, err
 	}
-	metaByRepoKey := make(map[string]*domain.RepoMetadataFile, len(metas))
-	for i := range metas {
-		meta := metas[i]
-		metaByRepoKey[meta.RepoKey] = &meta
-	}
+	metaByRepoKey := repoMetadataByKey(metas)
 
 	out := make([]fixRepoState, 0, len(machine.Repos))
 	for _, rec := range machine.Repos {
@@ -835,6 +847,68 @@ func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, 
 		})
 	}
 	return out, nil
+}
+
+func repoMetadataByKey(metas []domain.RepoMetadataFile) map[string]*domain.RepoMetadataFile {
+	metaByRepoKey := make(map[string]*domain.RepoMetadataFile, len(metas))
+	for i := range metas {
+		meta := metas[i]
+		metaByRepoKey[meta.RepoKey] = &meta
+	}
+	return metaByRepoKey
+}
+
+func (a *App) augmentFixMachineWithKnownRepos(
+	machine *domain.MachineFile,
+	includeCatalogs []string,
+	metaByRepoKey map[string]*domain.RepoMetadataFile,
+) error {
+	if machine == nil {
+		return errors.New("machine snapshot is required")
+	}
+	selectedCatalogs, err := domain.SelectCatalogs(*machine, includeCatalogs)
+	if err != nil {
+		return err
+	}
+	selectedCatalogMap := map[string]domain.Catalog{}
+	for _, catalog := range selectedCatalogs {
+		selectedCatalogMap[catalog.Name] = catalog
+	}
+	keys := make([]string, 0, len(metaByRepoKey))
+	for key := range metaByRepoKey {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, repoKey := range keys {
+		meta := metaByRepoKey[repoKey]
+		if meta == nil {
+			continue
+		}
+		keyCatalog, keyRelativePath, keyRepoName, err := domain.ParseRepoKey(meta.RepoKey)
+		if err != nil {
+			continue
+		}
+		targetCatalog, ok := selectedCatalogMap[keyCatalog]
+		if !ok {
+			continue
+		}
+		if len(findLocalMatches(machine.Repos, meta.RepoKey, selectedCatalogMap)) > 0 {
+			continue
+		}
+		targetPath := filepath.Join(targetCatalog.Root, filepath.FromSlash(keyRelativePath))
+		pathConflictReason, err := validateTargetPath(a.Git, targetPath, meta.OriginURL, meta.PreferredRemote)
+		if err != nil {
+			return err
+		}
+		if pathConflictReason != "" {
+			a.addOrUpdateSyntheticUnsyncable(machine, *meta, targetCatalog.Name, targetPath, keyRepoName, pathConflictReason)
+			continue
+		}
+		if !targetCatalog.AllowsAutoCloneOnSync() {
+			a.addOrUpdateSyntheticUnsyncable(machine, *meta, targetCatalog.Name, targetPath, keyRepoName, domain.ReasonCloneRequired)
+		}
+	}
+	return nil
 }
 
 func (a *App) loadFixRepoByPathUnlocked(machine domain.MachineFile, repoPath string) (fixRepoState, error) {
@@ -889,6 +963,12 @@ func (a *App) refreshFixRepoSnapshotLocked(cfg domain.ConfigFile, machine *domai
 	if index < 0 {
 		return fmt.Errorf("project %q not found in machine snapshot", repoPath)
 	}
+	if strings.TrimSpace(previous.Path) == "" {
+		return nil
+	}
+	if containsUnsyncableReason(previous.UnsyncableReasons, domain.ReasonCloneRequired) && !a.Git.IsGitRepo(previous.Path) {
+		return nil
+	}
 
 	catalog := domain.Catalog{Name: previous.Catalog}
 	for _, candidate := range machine.Catalogs {
@@ -919,6 +999,13 @@ func (a *App) refreshFixRepoSnapshotLocked(cfg domain.ConfigFile, machine *domai
 
 	machine.UpdatedAt = a.Now()
 	return state.SaveMachine(a.Paths, *machine)
+}
+
+func isFixProjectNotFoundInSnapshot(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "not found in machine snapshot")
 }
 
 func (a *App) executeFixAction(
@@ -1370,6 +1457,121 @@ func (a *App) executeFixAction(
 			}
 			meta.AutoPush = targetMode
 			return state.SaveRepoMetadata(a.Paths, meta)
+		})
+	case FixActionClone:
+		if strings.TrimSpace(target.Record.RepoKey) == "" {
+			return errors.New("repo_key is required for clone")
+		}
+		if target.Meta == nil {
+			return errors.New("repo metadata is required for clone")
+		}
+		if strings.TrimSpace(path) == "" {
+			return errors.New("target path is required for clone")
+		}
+
+		allMachines, _, err := loadSyncReconcileInputs(a.Paths)
+		if err != nil {
+			return err
+		}
+		winner, ok := selectWinnerForRepo(allMachines, target.Record.RepoKey)
+		if !ok {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "clone is blocked: no syncable winner is available for this repository yet",
+			}
+		}
+
+		pathConflictReason, err := validateTargetPath(a.Git, path, target.Meta.OriginURL, preferredRemote)
+		if err != nil {
+			return err
+		}
+		if pathConflictReason != "" {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: fmt.Sprintf("clone is blocked: %s", pathConflictReason),
+			}
+		}
+
+		shouldClone := false
+		if info, err := os.Stat(path); os.IsNotExist(err) {
+			shouldClone = true
+		} else if err != nil {
+			return err
+		} else if info.IsDir() {
+			entries, err := os.ReadDir(path)
+			if err != nil {
+				return err
+			}
+			shouldClone = len(entries) == 0
+		}
+		if shouldClone {
+			if err := runStep("clone-ensure-parent-dir", fixActionPlanEntry{
+				ID:      "clone-ensure-parent-dir",
+				Command: false,
+				Summary: "Create parent directory for clone target if missing.",
+			}, func() error {
+				return os.MkdirAll(filepath.Dir(path), 0o755)
+			}); err != nil {
+				return err
+			}
+			if err := runStep("clone-repo", fixActionPlanEntry{
+				ID:      "clone-repo",
+				Command: true,
+				Summary: fmt.Sprintf("git clone %s %s", target.Meta.OriginURL, path),
+			}, func() error {
+				return a.Git.Clone(target.Meta.OriginURL, path)
+			}); err != nil {
+				return err
+			}
+		} else {
+			markSkipped("clone-repo", fixActionPlanEntry{
+				ID:      "clone-repo",
+				Command: true,
+				Summary: fmt.Sprintf("git clone %s %s", target.Meta.OriginURL, path),
+			})
+		}
+
+		if !a.Git.IsGitRepo(path) {
+			return fmt.Errorf("clone failed: %s is not a git repository", path)
+		}
+		origin, _ := a.Git.RepoOriginWithPreferredRemote(path, preferredRemote)
+		matches, _ := originsMatchNormalized(origin, target.Meta.OriginURL)
+		if !matches {
+			return fmt.Errorf("clone failed: target path origin does not match repo metadata")
+		}
+
+		if err := runStep("clone-checkout-branch", fixActionPlanEntry{
+			ID:      "clone-checkout-branch",
+			Command: true,
+			Summary: fmt.Sprintf("git checkout %s", winner.Record.Branch),
+		}, func() error {
+			return a.Git.EnsureBranchWithPreferredRemote(path, winner.Record.Branch, preferredRemote)
+		}); err != nil {
+			return err
+		}
+		if cfg.Sync.FetchPrune {
+			if err := runStep("clone-fetch-prune", fixActionPlanEntry{
+				ID:      "clone-fetch-prune",
+				Command: true,
+				Summary: "git fetch --prune",
+			}, func() error {
+				return a.Git.FetchPrune(path)
+			}); err != nil {
+				return err
+			}
+		} else {
+			markSkipped("clone-fetch-prune", fixActionPlanEntry{
+				ID:      "clone-fetch-prune",
+				Command: true,
+				Summary: "git fetch --prune",
+			})
+		}
+		return runStep("clone-pull-ff-only", fixActionPlanEntry{
+			ID:      "clone-pull-ff-only",
+			Command: true,
+			Summary: "git pull --ff-only",
+		}, func() error {
+			return a.Git.PullFFOnly(path)
 		})
 	default:
 		return fmt.Errorf("unknown fix action %q", action)

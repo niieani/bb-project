@@ -83,11 +83,8 @@ func TestAdoptCases(t *testing.T) {
 			t.Fatalf("expected custom path repo to remain independent, got %q", got)
 		}
 		defaultPath := filepath.Join(rootB, "api")
-		if _, err := os.Stat(filepath.Join(defaultPath, ".git")); err != nil {
-			t.Fatalf("expected additional clone at default path, stat err=%v", err)
-		}
-		if got := gitCurrentBranch(t, mB, defaultPath, now); got != "feature/adopt-2" {
-			t.Fatalf("expected default path clone to converge, got %q", got)
+		if _, err := os.Stat(filepath.Join(defaultPath, ".git")); err == nil {
+			t.Fatal("did not expect additional default-path clone when auto-clone-on-sync is disabled")
 		}
 	})
 

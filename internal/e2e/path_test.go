@@ -3,6 +3,7 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,8 +41,12 @@ func TestPathCases(t *testing.T) {
 		if out, err := mB.RunBB(now.Add(1*time.Minute), "sync"); err != nil {
 			t.Fatalf("sync failed: %v\n%s", err, out)
 		}
-		if _, err := os.Stat(filepath.Join(targetPath, ".git")); err != nil {
-			t.Fatalf("expected clone into empty target, stat .git: %v", err)
+		if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
+			t.Fatal("did not expect auto-clone into empty target by default")
+		}
+		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
+		if !containsReason(rec.UnsyncableReasons, domain.ReasonCloneRequired) {
+			t.Fatalf("expected clone_required reason, got %v", rec.UnsyncableReasons)
 		}
 	})
 
@@ -150,6 +155,29 @@ func TestPathCases(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
 			t.Fatal("expected no clone on path conflict")
+		}
+	})
+
+	t.Run("TC-PATH-007", func(t *testing.T) {
+		t.Parallel()
+		_, _, mB, _, targetPath, now := setupSourceRepoForClone(t)
+
+		if out, err := mB.RunBB(now.Add(1*time.Minute), "sync"); err != nil {
+			t.Fatalf("sync failed: %v\n%s", err, out)
+		}
+		out, err := mB.RunBB(now.Add(90*time.Second), "fix", "software/api")
+		if err == nil {
+			t.Fatalf("expected list mode exit 1 for clone-required state, output=%s", out)
+		}
+		if !strings.Contains(out, "clone") {
+			t.Fatalf("expected clone action in fix output, got: %s", out)
+		}
+
+		if out, err := mB.RunBB(now.Add(2*time.Minute), "fix", "software/api", "clone"); err != nil {
+			t.Fatalf("fix clone failed: %v\n%s", err, out)
+		}
+		if _, err := os.Stat(filepath.Join(targetPath, ".git")); err != nil {
+			t.Fatalf("expected clone after fix action, stat .git: %v", err)
 		}
 	})
 }

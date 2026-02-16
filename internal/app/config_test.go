@@ -325,3 +325,88 @@ func TestValidateConfigForSaveRejectsLinkTargetTraversal(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestLoadKnownCatalogRootsExcludesCurrentMachine(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	paths := state.NewPaths(home)
+	now := time.Date(2026, 2, 16, 12, 0, 0, 0, time.UTC)
+
+	local := state.BootstrapMachine("local-machine", "local-host", now)
+	local.Catalogs = []domain.Catalog{
+		{Name: "software", Root: "/Users/me/Software"},
+	}
+	if err := state.SaveMachine(paths, local); err != nil {
+		t.Fatalf("save local machine: %v", err)
+	}
+
+	remoteA := state.BootstrapMachine("remote-a", "remote-a-host", now)
+	remoteA.Catalogs = []domain.Catalog{
+		{Name: "software", Root: "/Volumes/Projects/Software"},
+		{Name: "references", Root: "/Volumes/Projects/References"},
+	}
+	if err := state.SaveMachine(paths, remoteA); err != nil {
+		t.Fatalf("save remote-a machine: %v", err)
+	}
+
+	remoteB := state.BootstrapMachine("remote-b", "remote-b-host", now)
+	remoteB.Catalogs = []domain.Catalog{
+		{Name: "references", Root: "/Users/other/References"},
+	}
+	if err := state.SaveMachine(paths, remoteB); err != nil {
+		t.Fatalf("save remote-b machine: %v", err)
+	}
+
+	known, err := loadKnownCatalogRoots(paths, "local-machine")
+	if err != nil {
+		t.Fatalf("loadKnownCatalogRoots failed: %v", err)
+	}
+
+	if got := known["software"]; len(got) != 1 || got[0] != "/Volumes/Projects/Software" {
+		t.Fatalf("software roots = %#v, want [/Volumes/Projects/Software]", got)
+	}
+	if got := known["references"]; len(got) != 2 || got[0] != "/Users/other/References" || got[1] != "/Volumes/Projects/References" {
+		t.Fatalf("references roots = %#v, want sorted two remote roots", got)
+	}
+}
+
+func TestRunConfigPassesKnownCatalogRootsToWizardInput(t *testing.T) {
+	home := t.TempDir()
+	paths := state.NewPaths(home)
+	now := time.Date(2026, 2, 16, 13, 0, 0, 0, time.UTC)
+	t.Setenv("BB_MACHINE_ID", "local-machine")
+
+	cfg := state.DefaultConfig()
+	cfg.GitHub.Owner = "you"
+	if err := state.SaveYAML(paths.ConfigPath(), cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	local := state.BootstrapMachine("local-machine", "local-host", now)
+	local.DefaultCatalog = "software"
+	local.Catalogs = []domain.Catalog{{Name: "software", Root: filepath.Join(home, "software")}}
+	if err := state.SaveMachine(paths, local); err != nil {
+		t.Fatalf("save local machine: %v", err)
+	}
+
+	remote := state.BootstrapMachine("remote-machine", "remote-host", now)
+	remote.Catalogs = []domain.Catalog{{Name: "references", Root: "/Volumes/Projects/References"}}
+	if err := state.SaveMachine(paths, remote); err != nil {
+		t.Fatalf("save remote machine: %v", err)
+	}
+
+	a := New(paths, &bytes.Buffer{}, &bytes.Buffer{})
+	a.IsInteractiveTerminal = func() bool { return true }
+	a.RunConfigWizard = func(input ConfigWizardInput) (ConfigWizardResult, error) {
+		got := input.KnownCatalogRoots["references"]
+		if len(got) != 1 || got[0] != "/Volumes/Projects/References" {
+			t.Fatalf("known references roots = %#v, want remote suggestion", got)
+		}
+		return ConfigWizardResult{Applied: false}, nil
+	}
+
+	if err := a.RunConfig(); err != nil {
+		t.Fatalf("RunConfig failed: %v", err)
+	}
+}

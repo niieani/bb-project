@@ -552,6 +552,9 @@ func TestWizardCatalogEditScreenIncludesPresetAndPushToggles(t *testing.T) {
 	if !strings.Contains(view, "Public default-branch auto-push") {
 		t.Fatalf("expected public auto-push toggle in editor view, got: %q", view)
 	}
+	if !strings.Contains(view, "Auto clone during sync") {
+		t.Fatalf("expected auto clone toggle in editor view, got: %q", view)
+	}
 }
 
 func TestWizardCatalogEditScreenCanSaveLayoutAndPushPolicy(t *testing.T) {
@@ -573,6 +576,9 @@ func TestWizardCatalogEditScreenCanSaveLayoutAndPushPolicy(t *testing.T) {
 	if m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPublic) {
 		t.Fatal("expected public auto-push default off")
 	}
+	if m.machine.Catalogs[0].AllowsAutoCloneOnSync() {
+		t.Fatal("expected auto-clone-on-sync default off")
+	}
 
 	m.catalogEdit.focus = 1 // preset enum (none -> references)
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -582,7 +588,12 @@ func TestWizardCatalogEditScreenCanSaveLayoutAndPushPolicy(t *testing.T) {
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m.catalogEdit.focus = 4 // public toggle
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m.catalogEdit.focus = 5 // save action
+	m.catalogEdit.focus = 5 // auto-clone toggle
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.catalogEdit == nil {
+		t.Fatal("expected editor to stay open while toggling auto-clone")
+	}
+	m.catalogEdit.focus = 6 // save action
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	if got := domain.EffectiveRepoPathDepth(m.machine.Catalogs[0]); got != 2 {
@@ -593,6 +604,9 @@ func TestWizardCatalogEditScreenCanSaveLayoutAndPushPolicy(t *testing.T) {
 	}
 	if !m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPublic) {
 		t.Fatal("expected public auto-push toggled on")
+	}
+	if !m.machine.Catalogs[0].AllowsAutoCloneOnSync() {
+		t.Fatal("expected auto-clone-on-sync toggled on")
 	}
 	if got := m.config.Clone.CatalogPreset["software"]; got != "references" {
 		t.Fatalf("clone.catalog_preset[software] = %q, want references", got)
@@ -665,7 +679,7 @@ func TestWizardCatalogEditorDeleteRequiresConfirmation(t *testing.T) {
 	}
 
 	// Focus Delete action directly.
-	m.catalogEdit.focus = 6
+	m.catalogEdit.focus = 7
 	m.updateCatalogEditorFocus()
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.catalogEdit == nil {
@@ -697,35 +711,35 @@ func TestWizardCatalogEditorActionButtonsNavigateWithLeftRight(t *testing.T) {
 	}
 
 	// Move from input to Save action.
-	for range 5 {
+	for range 6 {
 		_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	}
-	if m.catalogEdit.focus != 5 {
-		t.Fatalf("focus = %d, want 5 (Save)", m.catalogEdit.focus)
+	if m.catalogEdit.focus != 6 {
+		t.Fatalf("focus = %d, want 6 (Save)", m.catalogEdit.focus)
 	}
 	// Left from Save should stay.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	if m.catalogEdit.focus != 5 {
-		t.Fatalf("focus = %d, want 5 after left at first action", m.catalogEdit.focus)
+	if m.catalogEdit.focus != 6 {
+		t.Fatalf("focus = %d, want 6 after left at first action", m.catalogEdit.focus)
 	}
 	// Right to Delete then Cancel.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	if m.catalogEdit.focus != 6 {
-		t.Fatalf("focus = %d, want 6 (Delete)", m.catalogEdit.focus)
+	if m.catalogEdit.focus != 7 {
+		t.Fatalf("focus = %d, want 7 (Delete)", m.catalogEdit.focus)
 	}
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	if m.catalogEdit.focus != 7 {
-		t.Fatalf("focus = %d, want 7 (Cancel)", m.catalogEdit.focus)
+	if m.catalogEdit.focus != 8 {
+		t.Fatalf("focus = %d, want 8 (Cancel)", m.catalogEdit.focus)
 	}
 	// Right at end should stay.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	if m.catalogEdit.focus != 7 {
-		t.Fatalf("focus = %d, want 7 after right at last action", m.catalogEdit.focus)
+	if m.catalogEdit.focus != 8 {
+		t.Fatalf("focus = %d, want 8 after right at last action", m.catalogEdit.focus)
 	}
 	// Left back to Delete.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	if m.catalogEdit.focus != 6 {
-		t.Fatalf("focus = %d, want 6 after left from cancel", m.catalogEdit.focus)
+	if m.catalogEdit.focus != 7 {
+		t.Fatalf("focus = %d, want 7 after left from cancel", m.catalogEdit.focus)
 	}
 }
 
@@ -808,5 +822,64 @@ func TestWizardCatalogListShowsAddedCatalogValues(t *testing.T) {
 	}
 	if !strings.Contains(view, "1-level") {
 		t.Fatalf("expected catalog layout depth in view, got %q", view)
+	}
+}
+
+func TestWizardCatalogsShowRemoteKnownRows(t *testing.T) {
+	t.Parallel()
+
+	m := testConfigWizardModel(t)
+	m.input.KnownCatalogRoots = map[string][]string{
+		"references": {"/Volumes/Projects/References"},
+	}
+	m.rebuildCatalogRows()
+	m.step = stepCatalogs
+
+	if len(m.catalogRows) != 2 {
+		t.Fatalf("catalog row count = %d, want 2 (local + remote)", len(m.catalogRows))
+	}
+	if !m.catalogRows[1].RemoteOnly || m.catalogRows[1].Name != "references" {
+		t.Fatalf("unexpected remote row %#v", m.catalogRows[1])
+	}
+	view := ansi.Strip(m.viewCatalogs())
+	if !strings.Contains(view, "remote:") {
+		t.Fatalf("expected remote-known row in catalog table view, got %q", view)
+	}
+}
+
+func TestWizardCatalogAddPrefillsFromRemoteKnownRow(t *testing.T) {
+	t.Parallel()
+
+	m := testConfigWizardModel(t)
+	m.input.KnownCatalogRoots = map[string][]string{
+		"references": {
+			"/Volumes/Projects/References",
+			"/Users/me/References",
+		},
+	}
+	m.rebuildCatalogRows()
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.catalogFocus = catalogFocusButtons
+	m.catalogTable.SetCursor(1) // remote: references
+	m.normalizeCatalogButtonForSelection()
+	m.catalogBtn = 1 // Add
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.catalogEdit == nil || m.catalogEdit.mode != catalogEditorAdd {
+		t.Fatal("expected add editor to open from remote-known row")
+	}
+	if got := m.catalogEdit.inputs[0].Value(); got != "references" {
+		t.Fatalf("catalog name prefill = %q, want %q", got, "references")
+	}
+	if got := m.catalogEdit.inputs[1].Value(); got != "/Users/me/References" {
+		t.Fatalf("catalog root prefill = %q, want first sorted suggestion", got)
+	}
+
+	m.catalogEdit.focus = 1
+	m.updateCatalogEditorFocus()
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	if got := m.catalogEdit.inputs[1].Value(); got != "/Volumes/Projects/References" {
+		t.Fatalf("catalog root after cycling suggestions = %q, want next suggestion", got)
 	}
 }

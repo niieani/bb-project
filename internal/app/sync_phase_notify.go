@@ -39,6 +39,9 @@ func (a *App) notifyUnsyncable(cfg domain.ConfigFile, repos []domain.MachineRepo
 		if rec.Syncable {
 			continue
 		}
+		if len(rec.UnsyncableReasons) > 0 && !domain.HasBlockingUnsyncableReason(rec.UnsyncableReasons) {
+			continue
+		}
 		fingerprint := unsyncableFingerprint(rec.UnsyncableReasons)
 		cacheKey := notifyCacheKey(rec)
 		entry, ok := cache.LastSent[cacheKey]

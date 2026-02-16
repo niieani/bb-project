@@ -12,6 +12,8 @@ import (
 func bootstrapRepoAcrossTwoMachines(t *testing.T) (*testharness.Harness, *testharness.Machine, *testharness.Machine, string, string, time.Time) {
 	t.Helper()
 	h, mA, mB, rootA, rootB := setupTwoMachines(t)
+	setCatalogAutoCloneOnSync(t, mA, "software", true)
+	setCatalogAutoCloneOnSync(t, mB, "software", true)
 	now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 	if out, err := mA.RunBB(now, "init", "api"); err != nil {
 		t.Fatalf("init on A failed: %v\n%s", err, out)
@@ -285,6 +287,7 @@ func TestSyncBasicCases(t *testing.T) {
 	t.Run("TC-SYNC-014", func(t *testing.T) {
 		t.Parallel()
 		h, mA, mB, rootA, rootB := setupTwoMachines(t)
+		setCatalogAutoCloneOnSync(t, mB, "software", true)
 		now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 		if out, err := mA.RunBB(now, "init", "api", "--public"); err != nil {
 			t.Fatalf("init public failed: %v\n%s", err, out)
@@ -319,6 +322,7 @@ func TestSyncBasicCases(t *testing.T) {
 	t.Run("TC-SYNC-015", func(t *testing.T) {
 		t.Parallel()
 		h, mA, mB, _, rootB := setupTwoMachines(t)
+		setCatalogAutoCloneOnSync(t, mB, "software", true)
 		now := time.Date(2026, 2, 13, 20, 31, 0, 0, time.UTC)
 		if out, err := mA.RunBB(now, "init", "api", "--public"); err != nil {
 			t.Fatalf("init public failed: %v\n%s", err, out)
