@@ -1154,6 +1154,61 @@ func TestFixTUIApplyAllSkipsNoOpSelections(t *testing.T) {
 	}
 }
 
+func TestFixTUIEnterRunsCurrentFixWhenNothingSelected(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Behind:    1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected enter to run current fix even with no explicit selection")
+	}
+	if !m.immediateApplying {
+		t.Fatal("expected immediate apply state when running current non-risky fix")
+	}
+}
+
+func TestFixTUIEnterRunsCurrentRiskyFixWhenNothingSelected(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+	m.cycleCurrentAction(1) // push
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.viewMode != fixViewWizard {
+		t.Fatalf("view mode = %v, want wizard mode", m.viewMode)
+	}
+	if m.wizard.Action != FixActionPush {
+		t.Fatalf("wizard action = %q, want %q", m.wizard.Action, FixActionPush)
+	}
+}
+
 func TestFixTUIRiskySelectionOpensConfirmationWizard(t *testing.T) {
 	t.Parallel()
 
@@ -2291,14 +2346,17 @@ func TestFixTUIListGlobalFooterHelpShowsOnlyAvailableActions(t *testing.T) {
 	m.setCursor(0)
 
 	initial := shortHelpEntries(m.contextualHelpMap().ShortHelp())
-	if helpContains(initial, "enter run selected") || helpContains(initial, "ctrl+a run all selected") {
-		t.Fatalf("expected apply shortcuts hidden when nothing is selected, got %v", initial)
+	if !helpContains(initial, "enter run current") {
+		t.Fatalf("expected enter to advertise running current fix when nothing is selected, got %v", initial)
+	}
+	if helpContains(initial, "ctrl+a run all selected") {
+		t.Fatalf("expected apply-all hidden when nothing is selected, got %v", initial)
 	}
 
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")}) // schedule push
 	selected := shortHelpEntries(m.contextualHelpMap().ShortHelp())
-	if len(selected) == 0 || selected[0] != "enter run selected" {
-		t.Fatalf("expected most important shortcut first (enter run selected), got %v", selected)
+	if len(selected) == 0 || selected[0] != "enter run selected/current" {
+		t.Fatalf("expected most important shortcut first (enter run selected/current), got %v", selected)
 	}
 	if !helpContains(selected, "ctrl+a run all selected") || !helpContains(selected, "s cycle auto-push") {
 		t.Fatalf("expected selected-action footer help to include apply-all and auto-push, got %v", selected)

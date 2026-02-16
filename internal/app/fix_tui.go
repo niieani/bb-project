@@ -173,6 +173,7 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 	if hasRepo {
 		canApplySelected = len(m.scheduledActionsForRepo(repo.Record.Path, options)) > 0
 	}
+	canApplyCurrent := hasRepo && !m.ignored[repo.Record.Path] && len(options) > 0
 	canApplyAll := m.hasAnySelectedFixes()
 	canMoveRepo := len(m.visible) > 1
 	canChangeFix := len(options) > 0
@@ -181,8 +182,12 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 	canIgnoreRepo := hasRepo && !m.ignored[repo.Record.Path]
 	canUnignoreRepo := hasRepo && m.ignored[repo.Record.Path]
 
-	if canApplySelected {
-		b := newHelpBinding([]string{"enter"}, "enter", "run selected")
+	if canApplyCurrent {
+		desc := "run current"
+		if canApplySelected {
+			desc = "run selected/current"
+		}
+		b := newHelpBinding([]string{"enter"}, "enter", desc)
 		short = append(short, b)
 		primary = append(primary, b)
 	}
@@ -2357,8 +2362,12 @@ func (m *fixTUIModel) applyCurrentSelection() {
 	options := selectableFixActions(fixActionsForSelection(actions))
 	selections := m.scheduledActionsForRepo(repo.Record.Path, options)
 	if len(selections) == 0 {
-		m.status = fmt.Sprintf("no fixes selected for %s", repo.Record.Name)
-		return
+		current := m.currentActionForRepo(repo.Record.Path, options)
+		if current == fixNoAction {
+			m.status = fmt.Sprintf("no eligible fixes available for %s", repo.Record.Name)
+			return
+		}
+		selections = []string{current}
 	}
 	m.resetSummaryFollowUpState()
 	m.summaryResults = nil

@@ -316,6 +316,7 @@ Interactive apply behavior:
 - In list mode, the primary panel uses a compact titled border (`bb fix · Interactive remediation for unsyncable repositories`) to preserve vertical space, and selected-repo metadata is rendered on one dot-separated line.
 - Selected-repo metadata wrapping is segment-aware (wraps at ` · ` boundaries), so labels stay attached to their values and avoid orphan trailing tokens on separate lines.
 - When terminal height has spare rows, `bb fix` expands the list viewport inside the primary panel instead of inserting blank rows between the panel and sticky footer.
+- In list mode, `enter` runs currently selected fixes; when none are selected, it runs the currently browsed fix for the selected repo.
 - Interactive list ordering is by catalog (default catalog first), then `fixable`, `unsyncable`, `not cloned`, `syncable`, and `ignored`; repos with `clone_required` are surfaced as `not cloned`.
 
 Selector resolution for `<project>`:
