@@ -990,12 +990,12 @@ func (m *fixTUIBootModel) viewContentWidth() int {
 }
 
 func (m *fixTUIBootModel) setProgress(line string) {
-	line = strings.TrimSpace(line)
-	if line == "" {
+	normalized, ok := normalizeFixBootProgressLine(line)
+	if !ok {
 		return
 	}
 	m.progressMu.Lock()
-	m.progressLine = line
+	m.progressLine = normalized
 	m.progressMu.Unlock()
 }
 
@@ -1006,6 +1006,51 @@ func (m *fixTUIBootModel) currentProgress() string {
 		return "Preparing interactive fix startup"
 	}
 	return m.progressLine
+}
+
+func normalizeFixBootProgressLine(line string) (string, bool) {
+	line = strings.Join(strings.Fields(strings.TrimSpace(line)), " ")
+	if line == "" {
+		return "", false
+	}
+	lower := strings.ToLower(line)
+
+	switch {
+	case strings.HasPrefix(line, "loading config from "):
+		return "Loading configuration...", true
+	case strings.HasPrefix(line, "using machine id "):
+		return "Loading machine state...", true
+	case strings.HasPrefix(line, "scan: snapshot is stale, refreshing"):
+		return "Refreshing repository snapshot...", true
+	case strings.HasPrefix(line, "scan: snapshot is fresh"):
+		return "Using current repository snapshot...", true
+	case strings.HasPrefix(line, "scan: selected "):
+		return line, true
+	case strings.HasPrefix(line, "scan: discovered "):
+		return "Discovering repositories...", true
+	case strings.HasPrefix(line, "scan: observing repo at "):
+		return "Observing repository state...", true
+	case strings.HasPrefix(line, "fix: collecting risk checks for "):
+		return line, true
+	case strings.HasPrefix(line, "fix: collecting risk checks ("):
+		return line, true
+	case strings.HasPrefix(line, "fix: verifying push access for "):
+		return line, true
+	case strings.HasPrefix(line, "fix: verifying push access ("):
+		return line, true
+	case strings.HasPrefix(line, "fix: push-access verification completed"):
+		return line, true
+	case strings.Contains(lower, "push-access probe failed"):
+		return "Verifying repository push access (manual authentication needed for some remotes)...", true
+	case strings.HasPrefix(line, "fix: acquiring global lock"),
+		strings.HasPrefix(line, "fix: released global lock"),
+		strings.HasPrefix(line, "state: wrote machine file"),
+		strings.HasPrefix(line, "state: wrote repo metadata"):
+		return line, true
+	default:
+		// Ignore unrelated internal logs during boot.
+		return "", false
+	}
 }
 
 func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUIModel, error) {

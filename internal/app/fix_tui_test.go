@@ -382,7 +382,7 @@ func TestFixTUIBootViewUsesLatestProgressLine(t *testing.T) {
 	m.setProgress("scan: snapshot is stale, refreshing")
 
 	view := m.View()
-	if !strings.Contains(view, "scan: snapshot is stale, refreshing") {
+	if !strings.Contains(view, "Refreshing repository snapshot...") {
 		t.Fatalf("expected current progress line in boot view, got %q", view)
 	}
 }
@@ -407,7 +407,7 @@ func TestFixTUIBootLoadCmdCapturesAppLogProgress(t *testing.T) {
 
 	boot.loadFn = func() (*fixTUIModel, error) {
 		app.logf("scan: snapshot is stale, refreshing")
-		app.logf("fix: selected 1 repository")
+		app.logf("fix: collecting risk checks (1/2)")
 		return loaded, nil
 	}
 
@@ -422,8 +422,19 @@ func TestFixTUIBootLoadCmdCapturesAppLogProgress(t *testing.T) {
 	if loadedMsg.model != loaded {
 		t.Fatal("expected load command to return loaded model")
 	}
-	if got := boot.currentProgress(); got != "fix: selected 1 repository" {
+	if got := boot.currentProgress(); got != "fix: collecting risk checks (1/2)" {
 		t.Fatalf("current progress = %q, want latest startup log line", got)
+	}
+}
+
+func TestFixTUIBootProgressNormalizesProbeFailures(t *testing.T) {
+	t.Parallel()
+
+	m := newFixTUIBootModel(nil, nil, false)
+	m.setProgress(`scan: push-access probe failed for /repo/path: fatal: could not read Password for 'https://user@github.com': terminal prompts disabled`)
+
+	if got := m.currentProgress(); got != "Verifying repository push access (manual authentication needed for some remotes)..." {
+		t.Fatalf("current progress = %q", got)
 	}
 }
 

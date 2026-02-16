@@ -758,7 +758,9 @@ func (a *App) probeAndUpdateRepoPushAccess(repoPath string, originURL string, me
 
 	pushAccess, probedRemote, probeErr := a.Git.ProbePushAccess(repoPath, meta.PreferredRemote)
 	if probeErr != nil {
-		a.logf("scan: push-access probe failed for %s: %v", repoPath, probeErr)
+		if a.isVerbose() {
+			a.logf("scan: push-access probe failed for %s: %v", repoPath, probeErr)
+		}
 		pushAccess = domain.PushAccessUnknown
 		if strings.TrimSpace(probedRemote) == "" {
 			probedRemote = remote
@@ -797,13 +799,17 @@ func (a *App) probePushAccessViaGitHubCLI(originURL string) (domain.PushAccess, 
 	}
 	out, err := runCommand("gh", "repo", "view", fmt.Sprintf("%s/%s", owner, repo), "--json", "viewerPermission")
 	if err != nil {
-		a.logf("scan: github push-access probe failed for %s/%s: %v", owner, repo, err)
+		if a.isVerbose() {
+			a.logf("scan: github push-access probe failed for %s/%s: %v", owner, repo, err)
+		}
 		return domain.PushAccessUnknown, false
 	}
 
 	access, ok := parseGitHubViewerPermissionPushAccess(out)
 	if !ok {
-		a.logf("scan: github push-access probe returned unknown viewer permission for %s/%s", owner, repo)
+		if a.isVerbose() {
+			a.logf("scan: github push-access probe returned unknown viewer permission for %s/%s", owner, repo)
+		}
 		return domain.PushAccessUnknown, false
 	}
 	return access, true

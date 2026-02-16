@@ -519,7 +519,13 @@ func (a *App) loadFixRepos(includeCatalogs []string, refreshMode scanRefreshMode
 	}
 
 	out := make([]fixRepoState, 0, len(machine.Repos))
-	for _, rec := range machine.Repos {
+	if len(machine.Repos) > 0 {
+		a.logf("fix: collecting risk checks for %d repositories", len(machine.Repos))
+	}
+	for idx, rec := range machine.Repos {
+		if len(machine.Repos) <= 20 || idx == 0 || (idx+1)%10 == 0 || idx+1 == len(machine.Repos) {
+			a.logf("fix: collecting risk checks (%d/%d)", idx+1, len(machine.Repos))
+		}
 		rec, syncFeasibility := a.enrichFixSyncFeasibility(rec)
 		risk, riskErr := collectFixRiskSnapshot(rec.Path, a.Git)
 		if riskErr != nil && !errors.Is(riskErr, os.ErrNotExist) {
@@ -614,10 +620,15 @@ func (a *App) refreshUnknownPushAccessForFixReposLocked(repos []fixRepoState) (b
 		keys = append(keys, repoKey)
 	}
 	sort.Strings(keys)
+	a.logf("fix: verifying push access for %d repositories with unknown access", len(keys))
 
 	changed := false
-	for _, repoKey := range keys {
+	updatedCount := 0
+	for idx, repoKey := range keys {
 		target := byRepoKey[repoKey]
+		if len(keys) <= 20 || idx == 0 || (idx+1)%10 == 0 || idx+1 == len(keys) {
+			a.logf("fix: verifying push access (%d/%d)", idx+1, len(keys))
+		}
 
 		meta, err := state.LoadRepoMetadata(a.Paths, target.repoKey)
 		if err != nil {
@@ -641,7 +652,9 @@ func (a *App) refreshUnknownPushAccessForFixReposLocked(repos []fixRepoState) (b
 			return false, err
 		}
 		changed = true
+		updatedCount++
 	}
+	a.logf("fix: push-access verification completed (%d/%d updated)", updatedCount, len(keys))
 
 	return changed, nil
 }

@@ -35,6 +35,7 @@ bb fix [project] [action] [flags]
 - Before computing fix eligibility, `bb fix` re-probes repositories whose cached `push_access` is `unknown`.
 - For GitHub origins (including `*.github.com` aliases), the probe checks `gh` viewer permission first and then validates with `git push --dry-run` as needed.
 - Repositories that still have `push_access=unknown` after probing do not get push-related fix actions; run `bb repo access-refresh <repo>` after resolving probe blockers.
+- Startup loading shows phase-based progress and collapses noisy multiline probe/auth errors into concise status text while checks continue.
 
 ### SEE ALSO
 
