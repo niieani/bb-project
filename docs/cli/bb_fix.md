@@ -28,6 +28,7 @@ bb fix [project] [action] [flags]
 ### Interactive mode notes
 
 - `bb fix` list mode renders a compact bordered title (`bb fix · Interactive remediation for unsyncable repositories`) and a compact selected-repo details line to reduce vertical space usage.
+- Selected-repo metadata wraps on segment separators (` · `) so labels stay attached to values.
 - List ordering is by catalog (default first), then state tier: `fixable`, `unsyncable`, `not cloned`, `syncable`, `ignored`.
 - Repositories marked with `clone_required` are shown as `not cloned`.
 

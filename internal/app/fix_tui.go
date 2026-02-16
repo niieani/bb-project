@@ -719,6 +719,26 @@ var (
 	fixDetailsPathStyle = lipgloss.NewStyle().
 				Foreground(mutedTextColor)
 
+	fixDetailsStateKeyStyle = lipgloss.NewStyle().
+				Foreground(accentColor).
+				Bold(true)
+
+	fixDetailsAutoPushKeyStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("81")).
+					Bold(true)
+
+	fixDetailsBranchKeyStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("111")).
+					Bold(true)
+
+	fixDetailsReasonsKeyStyle = lipgloss.NewStyle().
+					Foreground(warningColor).
+					Bold(true)
+
+	fixDetailsSelectedKeyStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("177")).
+					Bold(true)
+
 	fixActionPushStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("45"))
 
@@ -1209,7 +1229,15 @@ func (m *fixTUIModel) View() string {
 	helpBlock := helpPanel.Render(helpView)
 
 	body := m.viewBodyForMode(m.viewMode)
-	doc := body + "\n" + helpBlock
+	spacer := ""
+	if m.height > 0 {
+		baseDoc := body + "\n" + helpBlock
+		baseHeight := lipgloss.Height(fixPageStyle.Render(baseDoc))
+		if gap := m.height - baseHeight; gap > 0 {
+			spacer = strings.Repeat("\n", gap)
+		}
+	}
+	doc := body + spacer + "\n" + helpBlock
 	return fixPageStyle.Render(doc)
 }
 
@@ -1541,11 +1569,6 @@ func (m *fixTUIModel) viewRepoDetails(repo fixRepoState) string {
 		fixDetailsPathStyle.Render("("+repo.Record.Path+")"),
 	))
 	b.WriteString("\n")
-	stateLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("State:")
-	autoPushLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Auto-push:")
-	branchLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Branch:")
-	reasonsLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Reasons:")
-	selectedLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Selected fixes:")
 	separator := hintStyle.Render(" · ")
 	autoPushValue := autoPushModeDisplayLabel(repoMetaAutoPushMode(repo.Meta))
 	autoPushValueStyle := fixAutoPushOffStyle
@@ -1557,29 +1580,21 @@ func (m *fixTUIModel) viewRepoDetails(repo fixRepoState) string {
 	} else if repoMetaAutoPushMode(repo.Meta) == domain.AutoPushModeEnabled {
 		autoPushValueStyle = fixAutoPushOnStyle
 	}
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top,
-		stateLabel,
-		" ",
-		stateStyle.Render(state),
-		separator,
-		autoPushLabel,
-		" ",
-		autoPushValueStyle.Render(autoPushValue),
-		separator,
-		branchLabel,
-		" ",
-		fixBranchStyle.Render(repo.Record.Branch),
-		separator,
-		reasonsLabel,
-		" ",
-		fixReasonsStyle.Render(reasonText),
-		separator,
-		selectedLabel,
-		" ",
-		renderScheduledDetails(scheduled, ignored),
-	))
+	segments := []string{
+		fixDetailsStateKeyStyle.Render("State:") + " " + stateStyle.Render(state),
+		fixDetailsAutoPushKeyStyle.Render("Auto-push:") + " " + autoPushValueStyle.Render(autoPushValue),
+		fixDetailsBranchKeyStyle.Render("Branch:") + " " + fixBranchStyle.Render(repo.Record.Branch),
+		fixDetailsReasonsKeyStyle.Render("Reasons:") + " " + fixReasonsStyle.Render(reasonText),
+		fixDetailsSelectedKeyStyle.Render("Selected fixes:") + " " + renderScheduledDetails(scheduled, ignored),
+	}
+	for i, line := range wrapStyledSegments(segments, separator, m.repoDetailsLineWidth()) {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(line)
+	}
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Action: ") + hintStyle.Render(fixActionDescription(action)))
+	b.WriteString(fixDetailsLabelStyle.Render("Action: ") + hintStyle.Render(fixActionDescription(action)))
 	return b.String()
 }
 
@@ -1637,6 +1652,49 @@ func (m *fixTUIModel) viewContentWidth() int {
 		return 0
 	}
 	return contentWidth
+}
+
+func (m *fixTUIModel) repoDetailsLineWidth() int {
+	if w := m.viewContentWidth(); w > 0 {
+		inner := w - panelStyle.GetHorizontalFrameSize()
+		if inner > 0 {
+			return inner
+		}
+	}
+	return 0
+}
+
+func wrapStyledSegments(segments []string, separator string, width int) []string {
+	if len(segments) == 0 {
+		return nil
+	}
+	if width <= 0 {
+		return []string{strings.Join(segments, separator)}
+	}
+
+	lines := make([]string, 0, len(segments))
+	current := ""
+	for _, segment := range segments {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			continue
+		}
+		if current == "" {
+			current = segment
+			continue
+		}
+		candidate := current + separator + segment
+		if ansi.StringWidth(candidate) <= width {
+			current = candidate
+			continue
+		}
+		lines = append(lines, current)
+		current = segment
+	}
+	if strings.TrimSpace(current) != "" {
+		lines = append(lines, current)
+	}
+	return lines
 }
 
 func (m *fixTUIModel) repoDetailsHeightStats(innerWidth int) (current int, maxHeight int, currentWraps bool) {

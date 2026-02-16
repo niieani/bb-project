@@ -4019,6 +4019,33 @@ func TestFixTUIFooterDoesNotLeaveExtraTrailingBlankRows(t *testing.T) {
 	}
 }
 
+func TestFixTUIListViewFillsWindowHeightWithoutRowsAfterFooter(t *testing.T) {
+	t.Parallel()
+
+	m := newFixTUIModelForTest([]fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	})
+	const (
+		width  = 140
+		height = 24
+	)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+
+	view := ansi.Strip(m.View())
+	if got := lipgloss.Height(view); got != height {
+		t.Fatalf("view should fill terminal height so footer sits on last row: got=%d want=%d view=%q", got, height, view)
+	}
+}
+
 func TestFixTUIWizardStatusToFooterGapIsCompact(t *testing.T) {
 	t.Parallel()
 
@@ -4382,6 +4409,39 @@ func TestFixTUISelectedDetailsUsesCompactMetaLineWithDotSeparators(t *testing.T)
 	}
 	if !strings.HasPrefix(lines[2], "Action: ") {
 		t.Fatalf("expected standalone action line with compact label, got %q", lines[2])
+	}
+}
+
+func TestFixTUISelectedDetailsWrapAvoidsOrphanSelectedFixValueLine(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+				UnsyncableReasons: []domain.UnsyncableReason{
+					domain.ReasonDirtyTracked,
+					domain.ReasonDirtyUntracked,
+					domain.ReasonMissingUpstream,
+					domain.ReasonPushFailed,
+					domain.ReasonPushPolicyBlocked,
+				},
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 92, Height: 24})
+
+	details := ansi.Strip(m.viewSelectedRepoDetails())
+	for _, line := range strings.Split(details, "\n") {
+		if strings.TrimSpace(line) == "-" {
+			t.Fatalf("selected-fixes value should not orphan on its own wrapped line, got details %q", details)
+		}
 	}
 }
 

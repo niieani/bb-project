@@ -22,6 +22,7 @@ Interactive screens share the same skeleton:
 
 - Outer padding: `1` row, `2` columns.
 - Header: product badge + title + dynamic subtitle on a single line, separated by ` · ` (middle dot).
+  - Standard for dense list/table screens: embed this header in the main panel top border (for example `╭─  bb  fix · <subtitle> ─…╮`) instead of rendering a separate standalone header row.
 - Main: exactly one primary panel per screen/step.
 - Footer: sticky help panel at the bottom. No other key legends.
 - Callouts: warnings/errors render above the help panel (so keys stay visible).
@@ -32,7 +33,7 @@ Chrome spacing rules:
 - No trailing empty rows or whitespace after the help panel. The help panel is the visual bottom of the screen.
 - Header should not wrap to multiple lines; prefer truncating the subtitle with `...` over spending another row.
 - If tabs/steps are not present, the main panel starts immediately under the header line.
-- For dense list workflows that need to maximize visible rows, prefer embedding the screen title/subtitle in the panel's top border (for example `╭─bb fix · <subtitle>─…╮`) instead of spending an extra standalone header row.
+- For dense list workflows, use the embedded bordered header as the default pattern, and fall back to a standalone header row only when bordered embedding would make the layout less readable.
 
 Example shape (schematic):
 
