@@ -502,6 +502,9 @@ func (a *App) createRemoteRepo(owner, repo string, visibility domain.Visibility,
 		}
 		return remotePath, nil
 	}
+	if err := a.ensureGitHubCLIReady(); err != nil {
+		return "", err
+	}
 
 	name := fmt.Sprintf("%s/%s", owner, repo)
 	visibilityFlag := "--private"
@@ -574,6 +577,9 @@ func (a *App) ensureForkRemoteRepo(originURL string, forkOwner string, protocol 
 			return "", err
 		}
 		return remotePath, nil
+	}
+	if err := a.ensureGitHubCLIReady(); err != nil {
+		return "", err
 	}
 
 	sourceOwner, repoName, err := sourceRepoForFork(originURL)
@@ -1365,8 +1371,9 @@ func (a *App) RunDoctor(include []string) (int, error) {
 	if err != nil {
 		return 2, err
 	}
+	warningCount += a.reportGitHubCLIWarnings(cfg, machine.Repos, allowed)
 	if warningCount > 0 {
-		a.logf("doctor: found %d notification delivery warning(s)", warningCount)
+		a.logf("doctor: found %d warning(s)", warningCount)
 	}
 	if unsyncable {
 		a.logf("doctor: found unsyncable repos")

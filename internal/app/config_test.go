@@ -253,10 +253,24 @@ func TestRunConfigPassesLumenAvailabilityToWizardInput(t *testing.T) {
 		a := New(paths, &bytes.Buffer{}, &bytes.Buffer{})
 		a.IsInteractiveTerminal = func() bool { return true }
 		a.LookPath = func(file string) (string, error) {
-			if file != "lumen" {
-				t.Fatalf("lookpath file = %q, want lumen", file)
+			switch file {
+			case "lumen":
+				return "/usr/local/bin/lumen", nil
+			case "gh":
+				return "/usr/local/bin/gh", nil
+			default:
+				t.Fatalf("lookpath file = %q, want lumen or gh", file)
 			}
-			return "/usr/local/bin/lumen", nil
+			return "", nil
+		}
+		a.RunCommand = func(name string, args ...string) (string, error) {
+			if name != "gh" {
+				t.Fatalf("command = %q, want gh", name)
+			}
+			if len(args) != 2 || args[0] != "auth" || args[1] != "status" {
+				t.Fatalf("args = %#v, want [auth status]", args)
+			}
+			return "logged in", nil
 		}
 		a.RunConfigWizard = func(input ConfigWizardInput) (ConfigWizardResult, error) {
 			if !input.LumenAvailable {
@@ -274,10 +288,15 @@ func TestRunConfigPassesLumenAvailabilityToWizardInput(t *testing.T) {
 		a := New(paths, &bytes.Buffer{}, &bytes.Buffer{})
 		a.IsInteractiveTerminal = func() bool { return true }
 		a.LookPath = func(file string) (string, error) {
-			if file != "lumen" {
-				t.Fatalf("lookpath file = %q, want lumen", file)
+			switch file {
+			case "lumen":
+				return "", errors.New("not found")
+			case "gh":
+				return "", errors.New("not found")
+			default:
+				t.Fatalf("lookpath file = %q, want lumen or gh", file)
 			}
-			return "", errors.New("not found")
+			return "", nil
 		}
 		a.RunConfigWizard = func(input ConfigWizardInput) (ConfigWizardResult, error) {
 			if input.LumenAvailable {

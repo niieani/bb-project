@@ -35,7 +35,7 @@ For each `repo_key`, `bb` picks the newest syncable observation as winner and tr
 - Go `1.26.0` (for building/testing)
 - `just` in `PATH`
 - `git` CLI in `PATH`
-- `gh` CLI in `PATH` for real `bb init` GitHub repo creation
+- `gh` CLI in `PATH` and authenticated (`gh auth login`) for GitHub operations (`bb init`, GitHub create/fork fixes, GitHub push-access checks)
 - External file sync tool for `~/.config/bb-project`
 
 ## Build
@@ -87,6 +87,11 @@ This wizard configures:
 - sync/notify options
 - Lumen integration defaults (install tips and optional AI commit generation when commit message is empty)
 - catalogs, per-catalog repository layout depth (`1` or `2`), and default catalog
+
+GitHub CLI prerequisite note:
+
+- the wizard checks whether `gh` is installed and authenticated
+- onboarding and the GitHub step both show remediation when missing (install `gh`, run `gh auth login`)
 
 Lumen note:
 
@@ -279,6 +284,7 @@ Shows last recorded machine repo state.
 Prints unsyncable repos and reasons from machine file.
 
 - refreshes local observations only when the last scan snapshot is stale (default threshold: 60 seconds; configurable via `sync.scan_freshness_seconds`)
+- when GitHub is configured or selected repos use GitHub remotes, also reports warnings if `gh` is missing or not authenticated, with remediation commands
 
 Returns `1` if any unsyncable repo is present in selected catalogs.
 

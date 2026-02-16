@@ -515,6 +515,48 @@ func TestWizardCatalogButtonsAllowChangingSelectedRowWithUpDown(t *testing.T) {
 	}
 }
 
+func TestWizardIntroShowsGitHubCLIPreflightWarning(t *testing.T) {
+	t.Parallel()
+
+	m := testConfigWizardModel(t)
+	m.input.GitHubCLIStatus = GitHubCLIStatus{
+		Checked:       true,
+		Installed:     false,
+		Authenticated: false,
+	}
+
+	view := ansi.Strip(m.viewIntro())
+	if !strings.Contains(view, "GitHub CLI prerequisite") {
+		t.Fatalf("expected intro prerequisite section, got: %q", view)
+	}
+	if !strings.Contains(view, "brew install gh") {
+		t.Fatalf("expected install guidance, got: %q", view)
+	}
+	if !strings.Contains(view, "gh auth login") {
+		t.Fatalf("expected auth guidance, got: %q", view)
+	}
+}
+
+func TestWizardGitHubStepShowsLoginGuidanceWhenAuthMissing(t *testing.T) {
+	t.Parallel()
+
+	m := testConfigWizardModel(t)
+	m.input.GitHubCLIStatus = GitHubCLIStatus{
+		Checked:       true,
+		Installed:     true,
+		Authenticated: false,
+		AuthStatus:    "not logged into any GitHub hosts",
+	}
+
+	view := ansi.Strip(m.viewGitHub())
+	if !strings.Contains(view, "gh is installed but not authenticated") {
+		t.Fatalf("expected auth warning in GitHub step, got: %q", view)
+	}
+	if !strings.Contains(view, "gh auth login") {
+		t.Fatalf("expected login command in GitHub step, got: %q", view)
+	}
+}
+
 func TestWizardCatalogEnterOnTableRowOpensEditor(t *testing.T) {
 	t.Parallel()
 

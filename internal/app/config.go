@@ -22,6 +22,7 @@ type ConfigWizardInput struct {
 	ConfigPath        string
 	MachinePath       string
 	LumenAvailable    bool
+	GitHubCLIStatus   GitHubCLIStatus
 	KnownCatalogRoots map[string][]string
 }
 
@@ -77,6 +78,7 @@ func (a *App) RunConfig() error {
 		ConfigPath:        configPath,
 		MachinePath:       machinePath,
 		LumenAvailable:    a.isLumenAvailableForConfigWizard(),
+		GitHubCLIStatus:   a.detectGitHubCLIStatus(),
 		KnownCatalogRoots: knownCatalogRoots,
 	})
 	if err != nil {
