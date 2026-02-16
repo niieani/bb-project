@@ -371,6 +371,90 @@ func TestProbeAndUpdateRepoPushAccessUsesGitHubViewerPermission(t *testing.T) {
 	}
 }
 
+func TestProbeAndUpdateRepoPushAccessUsesGitHubViewerPermissionForReadWriteWithoutDryRunFallback(t *testing.T) {
+	t.Parallel()
+
+	paths := state.NewPaths(t.TempDir())
+	a := New(paths, io.Discard, io.Discard)
+	now := time.Date(2026, time.February, 16, 9, 0, 0, 0, time.UTC)
+	a.Now = func() time.Time { return now }
+
+	repoPath := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo path: %v", err)
+	}
+	if err := a.Git.InitRepo(repoPath); err != nil {
+		t.Fatalf("init repo: %v", err)
+	}
+	if err := a.Git.AddOrigin(repoPath, "https://niieani.github.com/acme/demo.git"); err != nil {
+		t.Fatalf("add origin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	if err := a.Git.AddAll(repoPath); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := a.Git.Commit(repoPath, "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	if _, err := a.Git.RunGit(repoPath, "checkout", "--detach"); err != nil {
+		t.Fatalf("detach head: %v", err)
+	}
+
+	var ghCalls int
+	a.LookPath = func(file string) (string, error) {
+		if file == "gh" {
+			return "/usr/bin/gh", nil
+		}
+		return "", fmt.Errorf("unexpected executable lookup for %q", file)
+	}
+	a.RunCommand = func(name string, args ...string) (string, error) {
+		if name != "gh" {
+			return "", fmt.Errorf("unexpected command %q", name)
+		}
+		ghCalls++
+		want := []string{"repo", "view", "acme/demo", "--json", "viewerPermission"}
+		if len(args) != len(want) {
+			t.Fatalf("gh args len=%d, want %d (%v)", len(args), len(want), args)
+		}
+		for i := range want {
+			if args[i] != want[i] {
+				t.Fatalf("gh arg[%d]=%q, want %q (args=%v)", i, args[i], want[i], args)
+			}
+		}
+		return `{"viewerPermission":"WRITE"}`, nil
+	}
+
+	meta := domain.RepoMetadataFile{
+		RepoKey:             "software/demo",
+		Name:                "demo",
+		OriginURL:           "https://niieani.github.com/acme/demo.git",
+		PushAccess:          domain.PushAccessUnknown,
+		BranchFollowEnabled: true,
+	}
+
+	updated, changed, err := a.probeAndUpdateRepoPushAccess(repoPath, meta.OriginURL, meta, true)
+	if err != nil {
+		t.Fatalf("probeAndUpdateRepoPushAccess error: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected metadata change from github viewer permission probe")
+	}
+	if ghCalls != 1 {
+		t.Fatalf("gh call count=%d, want 1", ghCalls)
+	}
+	if updated.PushAccess != domain.PushAccessReadWrite {
+		t.Fatalf("push access=%q, want %q", updated.PushAccess, domain.PushAccessReadWrite)
+	}
+	if strings.TrimSpace(updated.PushAccessCheckedRemote) != "origin" {
+		t.Fatalf("checked_remote=%q, want origin", updated.PushAccessCheckedRemote)
+	}
+	if !updated.PushAccessCheckedAt.Equal(now) {
+		t.Fatalf("checked_at=%s, want %s", updated.PushAccessCheckedAt, now)
+	}
+}
+
 func TestParseGitHubViewerPermissionPushAccess(t *testing.T) {
 	t.Parallel()
 

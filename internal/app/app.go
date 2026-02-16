@@ -746,8 +746,8 @@ func (a *App) probeAndUpdateRepoPushAccess(repoPath string, originURL string, me
 		return meta, meta != original, nil
 	}
 
-	if access, ok := a.probePushAccessViaGitHubCLI(originURL); ok && access == domain.PushAccessReadOnly {
-		meta.PushAccess = domain.PushAccessReadOnly
+	if access, ok := a.probePushAccessViaGitHubCLI(originURL); ok {
+		meta.PushAccess = domain.NormalizePushAccess(access)
 		meta.PushAccessCheckedRemote = strings.TrimSpace(remote)
 		meta.PushAccessCheckedAt = a.Now()
 		if force {

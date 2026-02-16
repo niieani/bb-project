@@ -20,7 +20,7 @@ bb repo access-refresh <repo> [flags]
 
 ### Notes
 
-- For GitHub origins (including `*.github.com` aliases), access refresh consults `gh` viewer permission and then falls back to `git push --dry-run` when needed.
+- For GitHub origins (including `*.github.com` aliases), access refresh treats `gh` viewer permission as authoritative when available; it falls back to `git push --dry-run` only when `gh` cannot determine access.
 - For non-GitHub origins, access refresh uses `git push --dry-run` (or leaves access `unknown` when probing is unsupported).
 
 ### SEE ALSO

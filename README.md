@@ -320,7 +320,7 @@ Interactive apply behavior:
 - In list mode, `enter` runs currently selected fixes; when none are selected, it runs the currently browsed fix for the selected repo.
 - Interactive list ordering is by catalog (default catalog first), then `fixable`, `unsyncable`, `not cloned`, `syncable`, and `ignored`; repos with `clone_required` are surfaced as `not cloned`.
 - Before computing fix eligibility, `bb fix` re-probes repositories whose cached `push_access` is `unknown`.
-- For GitHub origins (including `*.github.com` aliases), the probe checks `gh` viewer permission first and then validates with `git push --dry-run` as needed.
+- For GitHub origins (including `*.github.com` aliases), the probe treats `gh` viewer permission as authoritative when available; it falls back to `git push --dry-run` only when `gh` cannot determine access.
 - Repositories that still have `push_access=unknown` after probing do not get push-related fix actions; run `bb repo access-refresh <repo>` after resolving probe blockers.
 - The startup loading screen shows phase-based progress and collapses noisy multiline probe/auth errors into concise status text while checks continue.
 
