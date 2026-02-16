@@ -233,7 +233,7 @@ func TestFixActionPlanForkAndRetargetRendersConcreteForkCommands(t *testing.T) {
 	}
 }
 
-func TestFixActionPlanForkAndRetargetWithBranchRenameAvoidsForcePush(t *testing.T) {
+func TestFixActionPlanForkAndRetargetWithPublishBranchAvoidsForcePush(t *testing.T) {
 	t.Parallel()
 
 	plan := fixActionPlanFor(FixActionForkAndRetarget, fixActionPlanContext{
@@ -244,21 +244,21 @@ func TestFixActionPlanForkAndRetargetWithBranchRenameAvoidsForcePush(t *testing.
 		ForkBranchRenameTo: "feature/acme-bun",
 	})
 
-	renameIdx := planEntryIndex(plan, "fork-rename-branch")
+	checkoutIdx := planEntryIndex(plan, "fork-checkout-new-branch")
 	pushIdx := planEntryIndex(plan, "fork-push-upstream")
-	if renameIdx < 0 || pushIdx < 0 {
-		t.Fatalf("missing expected rename/push entries, got %#v", plan)
+	if checkoutIdx < 0 || pushIdx < 0 {
+		t.Fatalf("missing expected checkout/push entries, got %#v", plan)
 	}
-	if renameIdx > pushIdx {
-		t.Fatalf("expected branch rename before push, got %#v", plan)
+	if checkoutIdx > pushIdx {
+		t.Fatalf("expected checkout before push, got %#v", plan)
 	}
 
-	renameEntry := plan[renameIdx]
-	if !renameEntry.Command {
-		t.Fatalf("fork-rename-branch should be a command step, got %#v", renameEntry)
+	checkoutEntry := plan[checkoutIdx]
+	if !checkoutEntry.Command {
+		t.Fatalf("fork-checkout-new-branch should be a command step, got %#v", checkoutEntry)
 	}
-	if !strings.Contains(renameEntry.Summary, "git branch -m feature/acme-bun") {
-		t.Fatalf("expected branch rename summary, got %#v", renameEntry)
+	if !strings.Contains(checkoutEntry.Summary, "git checkout -b feature/acme-bun") {
+		t.Fatalf("expected branch checkout summary, got %#v", checkoutEntry)
 	}
 
 	pushEntry := plan[pushIdx]
@@ -273,7 +273,7 @@ func TestFixActionPlanForkAndRetargetWithBranchRenameAvoidsForcePush(t *testing.
 	}
 }
 
-func TestFixActionPlanStageCommitPushWithBranchRenamePublishesRenamedBranch(t *testing.T) {
+func TestFixActionPlanStageCommitPushWithPublishBranchChecksOutBeforeCommit(t *testing.T) {
 	t.Parallel()
 
 	plan := fixActionPlanFor(FixActionStageCommitPush, fixActionPlanContext{
@@ -285,16 +285,18 @@ func TestFixActionPlanStageCommitPushWithBranchRenamePublishesRenamedBranch(t *t
 		ForkBranchRenameTo: "feature/safe-publish",
 	})
 
-	renameIdx := planEntryIndex(plan, "stage-rename-branch")
+	checkoutIdx := planEntryIndex(plan, "stage-checkout-new-branch")
+	addIdx := planEntryIndex(plan, "stage-git-add")
+	commitIdx := planEntryIndex(plan, "stage-git-commit")
 	pushIdx := planEntryIndex(plan, "stage-push-set-upstream")
-	if renameIdx < 0 || pushIdx < 0 {
-		t.Fatalf("missing expected stage rename/push steps, got %#v", plan)
+	if checkoutIdx < 0 || addIdx < 0 || commitIdx < 0 || pushIdx < 0 {
+		t.Fatalf("missing expected stage checkout/add/commit/push steps, got %#v", plan)
 	}
-	if renameIdx > pushIdx {
-		t.Fatalf("expected rename to happen before stage push, got %#v", plan)
+	if !(checkoutIdx < addIdx && addIdx < commitIdx && commitIdx < pushIdx) {
+		t.Fatalf("expected checkout->add->commit->push order, got %#v", plan)
 	}
-	if !strings.Contains(plan[renameIdx].Summary, "git branch -m feature/safe-publish") {
-		t.Fatalf("unexpected stage rename summary = %q", plan[renameIdx].Summary)
+	if !strings.Contains(plan[checkoutIdx].Summary, "git checkout -b feature/safe-publish") {
+		t.Fatalf("unexpected stage checkout summary = %q", plan[checkoutIdx].Summary)
 	}
 	if !strings.Contains(plan[pushIdx].Summary, "git push -u origin feature/safe-publish") {
 		t.Fatalf("unexpected stage publish summary = %q", plan[pushIdx].Summary)
@@ -331,7 +333,7 @@ func TestFixActionPlanPublishNewBranchChecksOutBeforeCommitAndPushesTargetBranch
 	}
 }
 
-func TestFixActionPlanPushWithBranchRenamePublishesRenamedBranch(t *testing.T) {
+func TestFixActionPlanPushWithPublishBranchChecksOutThenPushesNewBranch(t *testing.T) {
 	t.Parallel()
 
 	plan := fixActionPlanFor(FixActionPush, fixActionPlanContext{
@@ -341,16 +343,16 @@ func TestFixActionPlanPushWithBranchRenamePublishesRenamedBranch(t *testing.T) {
 		ForkBranchRenameTo: "feature/safe-publish",
 	})
 
-	renameIdx := planEntryIndex(plan, "push-rename-branch")
+	checkoutIdx := planEntryIndex(plan, "push-checkout-new-branch")
 	pushIdx := planEntryIndex(plan, "push-main")
-	if renameIdx < 0 || pushIdx < 0 {
-		t.Fatalf("missing expected push rename/push steps, got %#v", plan)
+	if checkoutIdx < 0 || pushIdx < 0 {
+		t.Fatalf("missing expected push checkout/push steps, got %#v", plan)
 	}
-	if renameIdx > pushIdx {
-		t.Fatalf("expected rename before push, got %#v", plan)
+	if checkoutIdx > pushIdx {
+		t.Fatalf("expected checkout before push, got %#v", plan)
 	}
-	if !strings.Contains(plan[renameIdx].Summary, "git branch -m feature/safe-publish") {
-		t.Fatalf("unexpected push rename summary = %q", plan[renameIdx].Summary)
+	if !strings.Contains(plan[checkoutIdx].Summary, "git checkout -b feature/safe-publish") {
+		t.Fatalf("unexpected push checkout summary = %q", plan[checkoutIdx].Summary)
 	}
 	if !strings.Contains(plan[pushIdx].Summary, "git push -u origin feature/safe-publish") {
 		t.Fatalf("unexpected push publish summary = %q", plan[pushIdx].Summary)
@@ -433,7 +435,7 @@ func TestFixActionPlanCheckpointThenSyncIncludesCommitSyncAndPush(t *testing.T) 
 	}
 }
 
-func TestFixActionPlanCheckpointThenSyncWithBranchRenameRenamesOnceAtPublishStep(t *testing.T) {
+func TestFixActionPlanCheckpointThenSyncWithPublishBranchChecksOutBeforeCommit(t *testing.T) {
 	t.Parallel()
 
 	plan := fixActionPlanFor(FixActionCheckpointThenSync, fixActionPlanContext{
@@ -447,20 +449,21 @@ func TestFixActionPlanCheckpointThenSyncWithBranchRenameRenamesOnceAtPublishStep
 		FetchPrune:         true,
 	})
 
-	if idx := planEntryIndex(plan, "stage-rename-branch"); idx >= 0 {
-		t.Fatalf("did not expect stage rename in checkpoint-then-sync plan, got %#v", plan)
+	if idx := planEntryIndex(plan, "checkpoint-rename-branch"); idx >= 0 {
+		t.Fatalf("did not expect publish branch rename in checkpoint-then-sync plan, got %#v", plan)
 	}
-
-	renameIdx := planEntryIndex(plan, "checkpoint-rename-branch")
+	checkoutIdx := planEntryIndex(plan, "checkpoint-checkout-new-branch")
+	addIdx := planEntryIndex(plan, "stage-git-add")
+	commitIdx := planEntryIndex(plan, "stage-git-commit")
 	pushIdx := planEntryIndex(plan, "checkpoint-push")
-	if renameIdx < 0 || pushIdx < 0 {
-		t.Fatalf("missing expected checkpoint rename/push entries, got %#v", plan)
+	if checkoutIdx < 0 || addIdx < 0 || commitIdx < 0 || pushIdx < 0 {
+		t.Fatalf("missing expected checkpoint checkout/add/commit/push entries, got %#v", plan)
 	}
-	if renameIdx > pushIdx {
-		t.Fatalf("expected checkpoint rename before checkpoint push, got %#v", plan)
+	if !(checkoutIdx < addIdx && addIdx < commitIdx && commitIdx < pushIdx) {
+		t.Fatalf("expected checkout->add->commit order before checkpoint push, got %#v", plan)
 	}
-	if !strings.Contains(plan[renameIdx].Summary, "git branch -m test-branch") {
-		t.Fatalf("unexpected checkpoint rename summary = %q", plan[renameIdx].Summary)
+	if !strings.Contains(plan[checkoutIdx].Summary, "git checkout -b test-branch") {
+		t.Fatalf("unexpected checkpoint checkout summary = %q", plan[checkoutIdx].Summary)
 	}
 	if !strings.Contains(plan[pushIdx].Summary, "git push -u origin test-branch") {
 		t.Fatalf("unexpected checkpoint push summary = %q", plan[pushIdx].Summary)

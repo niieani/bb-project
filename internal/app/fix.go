@@ -1165,22 +1165,23 @@ func (a *App) executeFixAction(
 		}
 		return branch, nil
 	}
-	maybeRenameForPublish := func(stepID string, branch string) (string, bool, error) {
-		renameTo := strings.TrimSpace(opts.ForkBranchRenameTo)
-		if renameTo == "" || renameTo == branch {
+	maybeCheckoutNewBranchForPublish := func(stepID string, branch string) (string, bool, error) {
+		targetBranch := strings.TrimSpace(opts.ForkBranchRenameTo)
+		if targetBranch == "" || targetBranch == branch {
 			return branch, false, nil
 		}
 		fallback := fixActionPlanEntry{
 			ID:      stepID,
 			Command: true,
-			Summary: fmt.Sprintf("git branch -m %s", renameTo),
+			Summary: fmt.Sprintf("git checkout -b %s", targetBranch),
 		}
 		if err := runStep(stepID, fallback, func() error {
-			return a.Git.RenameCurrentBranch(path, renameTo)
+			_, err := a.Git.RunGit(path, "checkout", "-b", targetBranch)
+			return err
 		}); err != nil {
 			return "", false, err
 		}
-		return renameTo, true, nil
+		return targetBranch, true, nil
 	}
 	localBranchExists := func(branch string) bool {
 		if strings.TrimSpace(branch) == "" {
@@ -1246,7 +1247,7 @@ func (a *App) executeFixAction(
 			if err != nil {
 				return errors.New("cannot determine branch for publish")
 			}
-			branch, _, err = maybeRenameForPublish("push-rename-branch", branch)
+			branch, _, err = maybeCheckoutNewBranchForPublish("push-checkout-new-branch", branch)
 			if err != nil {
 				return err
 			}
@@ -1287,6 +1288,18 @@ func (a *App) executeFixAction(
 				Reason: "stage-commit-push is blocked: branch is behind upstream, so push would be rejected; run sync-with-upstream first",
 			}
 		}
+		publishBranch := ""
+		switchedToPublishBranch := false
+		if strings.TrimSpace(opts.ForkBranchRenameTo) != "" {
+			branch, err := resolveCurrentBranch()
+			if err != nil {
+				return errors.New("cannot determine branch for publish")
+			}
+			publishBranch, switchedToPublishBranch, err = maybeCheckoutNewBranchForPublish("stage-checkout-new-branch", branch)
+			if err != nil {
+				return err
+			}
+		}
 		if err := a.runFixStageCommitSteps(cfg, path, target, opts, runStep); err != nil {
 			return err
 		}
@@ -1298,15 +1311,15 @@ func (a *App) executeFixAction(
 			})
 			return nil
 		}
-		branch, err := resolveCurrentBranch()
-		if err != nil {
-			return errors.New("cannot determine branch for upstream push")
+		branch := strings.TrimSpace(publishBranch)
+		if branch == "" {
+			var err error
+			branch, err = resolveCurrentBranch()
+			if err != nil {
+				return errors.New("cannot determine branch for upstream push")
+			}
 		}
-		branch, renamed, err := maybeRenameForPublish("stage-rename-branch", branch)
-		if err != nil {
-			return err
-		}
-		if target.Record.Upstream == "" || renamed {
+		if target.Record.Upstream == "" || switchedToPublishBranch {
 			pushRemote := resolvePushRemote(target.Record.Upstream)
 			return runStep("stage-push-set-upstream", fixActionPlanEntry{
 				ID:      "stage-push-set-upstream",
@@ -1450,6 +1463,18 @@ func (a *App) executeFixAction(
 				Reason: "checkpoint-then-sync is blocked: no local uncommitted changes to checkpoint",
 			}
 		}
+		publishBranch := ""
+		switchedToPublishBranch := false
+		if strings.TrimSpace(opts.ForkBranchRenameTo) != "" {
+			branch, err := resolveCurrentBranch()
+			if err != nil {
+				return errors.New("cannot determine branch for publish")
+			}
+			publishBranch, switchedToPublishBranch, err = maybeCheckoutNewBranchForPublish("checkpoint-checkout-new-branch", branch)
+			if err != nil {
+				return err
+			}
+		}
 		if err := a.runFixStageCommitSteps(cfg, path, target, opts, runStep); err != nil {
 			return err
 		}
@@ -1487,15 +1512,15 @@ func (a *App) executeFixAction(
 		if err := a.runFixSyncWithUpstreamSteps(cfg, path, target, syncStrategy, runStep, markSkipped); err != nil {
 			return err
 		}
-		branch, err := resolveCurrentBranch()
-		if err != nil {
-			return errors.New("cannot determine branch for publish")
+		branch := strings.TrimSpace(publishBranch)
+		if branch == "" {
+			var err error
+			branch, err = resolveCurrentBranch()
+			if err != nil {
+				return errors.New("cannot determine branch for publish")
+			}
 		}
-		branch, renamed, err := maybeRenameForPublish("checkpoint-rename-branch", branch)
-		if err != nil {
-			return err
-		}
-		if renamed {
+		if switchedToPublishBranch {
 			pushRemote := resolvePushRemote(target.Record.Upstream)
 			return runStep("checkpoint-push", fixActionPlanEntry{
 				ID:      "checkpoint-push",
@@ -1538,7 +1563,7 @@ func (a *App) executeFixAction(
 		if err != nil {
 			return errors.New("cannot determine branch for upstream push")
 		}
-		branch, _, err = maybeRenameForPublish("upstream-rename-branch", branch)
+		branch, _, err = maybeCheckoutNewBranchForPublish("upstream-checkout-new-branch", branch)
 		if err != nil {
 			return err
 		}
@@ -1884,27 +1909,28 @@ func (a *App) forkAndRetargetFromFix(
 		return errors.New("cannot determine branch for fork-and-retarget")
 	}
 
-	renamedBranch := false
-	renameTo := strings.TrimSpace(opts.ForkBranchRenameTo)
-	if renameTo != "" && renameTo != branch {
-		if err := runStep("fork-rename-branch", fixActionPlanEntry{
-			ID:      "fork-rename-branch",
+	switchedToPublishBranch := false
+	targetBranch := strings.TrimSpace(opts.ForkBranchRenameTo)
+	if targetBranch != "" && targetBranch != branch {
+		if err := runStep("fork-checkout-new-branch", fixActionPlanEntry{
+			ID:      "fork-checkout-new-branch",
 			Command: true,
-			Summary: fmt.Sprintf("git branch -m %s", renameTo),
+			Summary: fmt.Sprintf("git checkout -b %s", targetBranch),
 		}, func() error {
-			return a.Git.RenameCurrentBranch(repoPath, renameTo)
+			_, err := a.Git.RunGit(repoPath, "checkout", "-b", targetBranch)
+			return err
 		}); err != nil {
 			return err
 		}
-		branch = renameTo
-		renamedBranch = true
+		branch = targetBranch
+		switchedToPublishBranch = true
 	}
 
 	pushSummary := fmt.Sprintf("git push -u --force %s %s", owner, plannedBranch(branch))
 	push := func() error {
 		return a.Git.PushUpstreamForceWithPreferredRemote(repoPath, branch, forkRemoteName)
 	}
-	if renamedBranch {
+	if switchedToPublishBranch {
 		pushSummary = fmt.Sprintf("git push -u %s %s", owner, plannedBranch(branch))
 		push = func() error {
 			return a.Git.PushUpstreamWithPreferredRemote(repoPath, branch, forkRemoteName)

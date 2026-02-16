@@ -320,6 +320,7 @@ Interactive apply behavior:
 - Risky fixes (`push`, `sync-with-upstream`, `set-upstream-push`, `stage-commit-push`, `create-project`) open a confirmation wizard before execution.
 - Wizard shows changed files with `+/-` stats, target branch context, and a per-repo skip option.
 - For commit-producing actions, wizard includes commit message input with symbolic `✨` generation (Lumen draft).
+- When `Publish as new branch (optional)` is set, `bb fix` creates and switches to that branch before staging/committing, so the original branch ref is left unchanged.
 - When changed files are shown, press `⌥V` on macOS (or `alt+v` on other platforms) to launch Lumen visual diff and return to the same wizard state.
 - Wizard can generate a minimal root `.gitignore` when missing.
 - In list mode, when repository details wrap (for example long paths or action-help text), `bb fix` shrinks the table viewport first so top chrome and footer help remain visible without truncating details text, and keeps one-row navigation stable (no sudden page jump when moving by one row).
