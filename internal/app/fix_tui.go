@@ -32,7 +32,6 @@ type fixTUIKeyMap struct {
 	ApplyAll key.Binding
 	Refresh  key.Binding
 	Ignore   key.Binding
-	Unignore key.Binding
 	Help     key.Binding
 	Quit     key.Binding
 	Cancel   key.Binding
@@ -89,10 +88,6 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 			key.WithKeys("i"),
 			key.WithHelp("i", "ignore repo"),
 		),
-		Unignore: key.NewBinding(
-			key.WithKeys("u"),
-			key.WithHelp("u", "unignore repo"),
-		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),
 			key.WithHelp("?", "toggle help"),
@@ -115,7 +110,7 @@ func (k fixTUIKeyMap) ShortHelp() []key.Binding {
 func (k fixTUIKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right, k.Toggle},
-		{k.Apply, k.Setting, k.Skip, k.ApplyAll, k.Refresh, k.Ignore, k.Unignore},
+		{k.Apply, k.Setting, k.Skip, k.ApplyAll, k.Refresh, k.Ignore},
 		{k.Help, k.Cancel, k.Quit},
 	}
 }
@@ -179,8 +174,7 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 	canChangeFix := len(options) > 0
 	canToggleSchedule := hasRepo && !m.ignored[repo.Record.Path] && len(options) > 0
 	canToggleAutoPush := hasRepo && !m.ignored[repo.Record.Path] && repoMetaAllowsAutoPush(repo.Meta)
-	canIgnoreRepo := hasRepo && !m.ignored[repo.Record.Path]
-	canUnignoreRepo := hasRepo && m.ignored[repo.Record.Path]
+	canToggleIgnoreRepo := hasRepo
 
 	if canApplyCurrent {
 		desc := "run current"
@@ -216,13 +210,12 @@ func (m *fixTUIModel) listHelpMap() fixTUIHelpMap {
 		short = append(short, b)
 		secondary = append(secondary, b)
 	}
-	if canIgnoreRepo {
-		b := newHelpBinding([]string{"i"}, "i", "ignore repo")
-		short = append(short, b)
-		secondary = append(secondary, b)
-	}
-	if canUnignoreRepo {
-		b := newHelpBinding([]string{"u"}, "u", "unignore repo")
+	if canToggleIgnoreRepo {
+		desc := "ignore repo"
+		if m.ignored[repo.Record.Path] {
+			desc = "unignore repo"
+		}
+		b := newHelpBinding([]string{"i"}, "i", desc)
 		short = append(short, b)
 		secondary = append(secondary, b)
 	}
@@ -1245,10 +1238,7 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Refresh):
 			return m, m.beginRevalidate()
 		case key.Matches(msg, m.keys.Ignore):
-			m.ignoreCurrentRepo()
-			return m, nil
-		case key.Matches(msg, m.keys.Unignore):
-			m.unignoreCurrentRepo()
+			m.toggleCurrentRepoIgnored()
 			return m, nil
 		}
 	}
@@ -2343,7 +2333,7 @@ func (m *fixTUIModel) cycleCurrentAction(delta int) {
 		return
 	}
 	if m.ignored[repo.Record.Path] {
-		m.status = fmt.Sprintf("%s is ignored for this session; press u to unignore", repo.Record.Name)
+		m.status = fmt.Sprintf("%s is ignored for this session; press i to unignore", repo.Record.Name)
 		return
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
@@ -2379,7 +2369,7 @@ func (m *fixTUIModel) toggleCurrentActionScheduled() {
 		return
 	}
 	if m.ignored[repo.Record.Path] {
-		m.status = fmt.Sprintf("%s is ignored for this session; press u to unignore", repo.Record.Name)
+		m.status = fmt.Sprintf("%s is ignored for this session; press i to unignore", repo.Record.Name)
 		return
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
@@ -2430,7 +2420,7 @@ func (m *fixTUIModel) applyCurrentSelection() {
 		return
 	}
 	if m.ignored[repo.Record.Path] {
-		m.status = fmt.Sprintf("%s is ignored for this session; press u to unignore", repo.Record.Name)
+		m.status = fmt.Sprintf("%s is ignored for this session; press i to unignore", repo.Record.Name)
 		return
 	}
 	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
@@ -2570,7 +2560,7 @@ func (m *fixTUIModel) toggleCurrentRepoAutoPush() {
 		return
 	}
 	if m.ignored[repo.Record.Path] {
-		m.status = fmt.Sprintf("%s is ignored for this session; press u to unignore", repo.Record.Name)
+		m.status = fmt.Sprintf("%s is ignored for this session; press i to unignore", repo.Record.Name)
 		return
 	}
 	repoKey := strings.TrimSpace(repo.Record.RepoKey)
@@ -2626,6 +2616,15 @@ func (m *fixTUIModel) ignoreCurrentRepo() {
 	m.ignored[repo.Record.Path] = true
 	m.status = fmt.Sprintf("ignored %s for this session", repo.Record.Name)
 	m.rebuildList(repo.Record.Path)
+}
+
+func (m *fixTUIModel) toggleCurrentRepoIgnored() {
+	repo, ok := m.currentRepo()
+	if ok && m.ignored[repo.Record.Path] {
+		m.unignoreCurrentRepo()
+		return
+	}
+	m.ignoreCurrentRepo()
 }
 
 func (m *fixTUIModel) unignoreCurrentRepo() {

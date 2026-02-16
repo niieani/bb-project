@@ -690,6 +690,79 @@ func TestFixTUIUnignoreDoesNotClearOtherIgnoredRepos(t *testing.T) {
 	}
 }
 
+func TestFixTUIIgnoreKeyTogglesIgnoredState(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	if !m.ignored["/repos/api"] {
+		t.Fatal("expected i to ignore selected repository")
+	}
+	if got := m.status; got != "ignored api for this session" {
+		t.Fatalf("status after first i = %q, want ignored message", got)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	if m.ignored["/repos/api"] {
+		t.Fatal("expected second i to unignore selected repository")
+	}
+	if got := m.status; got != "unignored api" {
+		t.Fatalf("status after second i = %q, want unignored message", got)
+	}
+}
+
+func TestFixTUIHelpUsesIToIgnoreAndUnignore(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.setCursor(0)
+
+	initial := shortHelpEntries(m.contextualHelpMap().ShortHelp())
+	if !helpContains(initial, "i ignore repo") {
+		t.Fatalf("expected ignore help shortcut, got %v", initial)
+	}
+	if helpContains(initial, "u unignore repo") {
+		t.Fatalf("expected no u unignore shortcut, got %v", initial)
+	}
+
+	m.ignoreCurrentRepo()
+	ignored := shortHelpEntries(m.contextualHelpMap().ShortHelp())
+	if !helpContains(ignored, "i unignore repo") {
+		t.Fatalf("expected ignored state to advertise i unignore shortcut, got %v", ignored)
+	}
+	if helpContains(ignored, "u unignore repo") {
+		t.Fatalf("expected no u unignore shortcut while ignored, got %v", ignored)
+	}
+}
+
 func TestFixTUIHelpDoesNotExposeClearIgnoredShortcut(t *testing.T) {
 	t.Parallel()
 

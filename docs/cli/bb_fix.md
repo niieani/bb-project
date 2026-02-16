@@ -31,6 +31,7 @@ bb fix [project] [action] [flags]
 - Busy list-mode states recolor the full primary border consistently, including the titled top edge.
 - Selected-repo metadata wraps on segment separators (` · `) so labels stay attached to values.
 - In list mode, `enter` runs selected fixes; when none are selected, it runs the currently browsed fix for the selected repo.
+- In list mode, `i` toggles session ignore for the selected repo (ignore/unignore).
 - List ordering is by catalog (default first), then state tier: `fixable`, `unsyncable`, `not cloned`, `syncable`, `ignored`.
 - Repositories marked with `clone_required` are shown as `not cloned`.
 - Before computing fix eligibility, `bb fix` re-probes repositories whose cached `push_access` is `unknown`.

@@ -323,6 +323,7 @@ Interactive apply behavior:
 - Selected-repo metadata wrapping is segment-aware (wraps at ` · ` boundaries), so labels stay attached to their values and avoid orphan trailing tokens on separate lines.
 - In list mode, `bb fix` keeps the primary panel top-anchored and places footer help immediately below it (no artificial spacer gap between panel and footer); available height is absorbed by list sizing.
 - In list mode, `enter` runs currently selected fixes; when none are selected, it runs the currently browsed fix for the selected repo.
+- In list mode, `i` toggles session ignore for the selected repo (ignore/unignore).
 - Interactive list ordering is by catalog (default catalog first), then `fixable`, `unsyncable`, `not cloned`, `syncable`, and `ignored`; repos with `clone_required` are surfaced as `not cloned`.
 - Before computing fix eligibility, `bb fix` re-probes repositories whose cached `push_access` is `unknown`.
 - For GitHub origins (including `*.github.com` aliases), the probe treats `gh` viewer permission as authoritative when available; it falls back to `git push --dry-run` only when `gh` cannot determine access.
