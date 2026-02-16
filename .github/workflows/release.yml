@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (for example: v0.2.0)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -12,10 +18,20 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve ref
+        id: ref
+        run: |
+          ref="${GITHUB_REF}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag }}" ]; then
+            ref="refs/tags/${{ github.event.inputs.tag }}"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ steps.ref.outputs.ref }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
