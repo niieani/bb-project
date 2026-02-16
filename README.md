@@ -154,6 +154,16 @@ Behavior:
 - If selector is a repo input and no local match exists, auto-clones first using clone defaults.
 - Existing same-target symlink is treated as no-op; conflicting existing paths fail.
 
+### `bb info <project-or-repo>`
+
+Show resolved local details for a project/repository selector.
+
+Behavior:
+
+- Uses the same selector resolution rules as `bb link` (local selectors first, then repo-origin resolution).
+- If project exists in state but local git clone is missing, returns exit code `1`.
+- If selector cannot be resolved to a local project, returns exit code `1`.
+
 ### `bb scan [--include-catalog <name> ...]`
 
 Discovers git repos under selected catalogs, observes git state, and writes machine observations.

@@ -522,7 +522,8 @@ func TestWizardCatalogEditScreenCanSaveLayoutAndPushPolicy(t *testing.T) {
 		t.Fatal("expected public auto-push default off")
 	}
 
-	m.catalogEdit.inputs[1].SetValue("references")
+	m.catalogEdit.focus = 1 // preset enum (none -> references)
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m.catalogEdit.focus = 2 // layout toggle
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m.catalogEdit.focus = 3 // private toggle
@@ -543,6 +544,56 @@ func TestWizardCatalogEditScreenCanSaveLayoutAndPushPolicy(t *testing.T) {
 	}
 	if got := m.config.Clone.CatalogPreset["software"]; got != "references" {
 		t.Fatalf("clone.catalog_preset[software] = %q, want references", got)
+	}
+}
+
+func TestWizardCatalogEditPresetFieldUsesEnumOptions(t *testing.T) {
+	t.Parallel()
+
+	m := testConfigWizardModel(t)
+	m.config.Clone.Presets = map[string]domain.ClonePreset{
+		"alpha": {},
+	}
+	m.config.Clone.CatalogPreset = map[string]string{}
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.startCatalogEditRootEditor()
+	if m.catalogEdit == nil {
+		t.Fatal("expected edit editor")
+	}
+
+	view := m.viewCatalogEditor()
+	if !strings.Contains(view, "Clone preset mapping") {
+		t.Fatalf("expected clone preset field in view, got: %q", view)
+	}
+	if !strings.Contains(view, "none") {
+		t.Fatalf("expected none option in preset enum, got: %q", view)
+	}
+	if !strings.Contains(view, "alpha") {
+		t.Fatalf("expected custom preset option in preset enum, got: %q", view)
+	}
+	if !strings.Contains(view, "references") {
+		t.Fatalf("expected builtin references option in preset enum, got: %q", view)
+	}
+}
+
+func TestWizardCatalogEditScreenShowsRootAndLayoutWarnings(t *testing.T) {
+	t.Parallel()
+
+	m := testConfigWizardModel(t)
+	m.step = stepCatalogs
+	m.focusTabs = false
+	m.startCatalogEditRootEditor()
+	if m.catalogEdit == nil {
+		t.Fatal("expected edit editor")
+	}
+
+	view := m.viewCatalogEditor()
+	if !strings.Contains(view, "⚠") {
+		t.Fatalf("expected warning symbol in edit view, got: %q", view)
+	}
+	if !strings.Contains(view, "does not move repositories") {
+		t.Fatalf("expected warning copy about not moving repositories, got: %q", view)
 	}
 }
 

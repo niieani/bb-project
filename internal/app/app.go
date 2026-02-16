@@ -98,6 +98,10 @@ type LinkOptions struct {
 	Catalog  string
 }
 
+type InfoOptions struct {
+	Selector string
+}
+
 type scanRefreshMode int
 
 const (
@@ -1652,4 +1656,8 @@ func (a *App) RunClone(opts CloneOptions) (int, error) {
 
 func (a *App) RunLink(opts LinkOptions) (int, error) {
 	return a.runLink(opts)
+}
+
+func (a *App) RunInfo(opts InfoOptions) (int, error) {
+	return a.runInfo(opts)
 }

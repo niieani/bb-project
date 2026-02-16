@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -119,7 +120,7 @@ func defaultConfigWizardKeyMap() configWizardKeyMap {
 		),
 		CatalogEdit: key.NewBinding(
 			key.WithKeys("e"),
-			key.WithHelp("e", "edit root"),
+			key.WithHelp("e", "edit catalog"),
 		),
 		CatalogDelete: key.NewBinding(
 			key.WithKeys("d"),
@@ -135,6 +136,8 @@ func defaultConfigWizardKeyMap() configWizardKeyMap {
 type catalogEditor struct {
 	mode          catalogEditorMode
 	inputs        []textinput.Model
+	presetOptions []string
+	presetValue   string
 	focus         int
 	row           int
 	err           string
@@ -194,6 +197,7 @@ var (
 	accentBgColor  = lipgloss.AdaptiveColor{Light: "#DDF4FF", Dark: "#1F2937"}
 	successColor   = lipgloss.AdaptiveColor{Light: "#1A7F37", Dark: "#3FB950"}
 	errorFgColor   = lipgloss.AdaptiveColor{Light: "#CF222E", Dark: "#F85149"}
+	warningColor   = lipgloss.AdaptiveColor{Light: "#9A6700", Dark: "#D29922"}
 
 	pageStyle = lipgloss.NewStyle().Padding(1, 2)
 
@@ -207,6 +211,7 @@ var (
 	labelStyle  = lipgloss.NewStyle().Bold(true).Foreground(textColor)
 	errorStyle  = lipgloss.NewStyle().Foreground(errorFgColor)
 	hintStyle   = lipgloss.NewStyle().Foreground(mutedTextColor)
+	warnStyle   = lipgloss.NewStyle().Foreground(warningColor).Bold(true)
 
 	panelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -1010,6 +1015,15 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 			m.updateCatalogEditorFocus()
 			return m, nil
 		case "right":
+			if editor.mode == catalogEditorEditRoot && editor.focus >= len(editor.inputs) && editor.focus < actionStart {
+				if err := m.shiftCatalogEditorOption(editor.focus-len(editor.inputs), 1); err != nil {
+					editor.err = err.Error()
+					return m, nil
+				}
+				editor.confirmDelete = false
+				editor.err = ""
+				return m, nil
+			}
 			if editor.focus >= actionStart {
 				last := m.catalogEditorFocusCount() - 1
 				if editor.focus < last {
@@ -1020,6 +1034,15 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 				return m, nil
 			}
 		case "left":
+			if editor.mode == catalogEditorEditRoot && editor.focus >= len(editor.inputs) && editor.focus < actionStart {
+				if err := m.shiftCatalogEditorOption(editor.focus-len(editor.inputs), -1); err != nil {
+					editor.err = err.Error()
+					return m, nil
+				}
+				editor.confirmDelete = false
+				editor.err = ""
+				return m, nil
+			}
 			if editor.focus > actionStart {
 				editor.focus--
 				editor.confirmDelete = false
@@ -1028,7 +1051,7 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 			}
 		case " ":
 			if editor.mode == catalogEditorEditRoot && editor.focus >= len(editor.inputs) && editor.focus < actionStart {
-				if err := m.toggleCatalogEditorOption(editor.focus - len(editor.inputs)); err != nil {
+				if err := m.shiftCatalogEditorOption(editor.focus-len(editor.inputs), 1); err != nil {
 					editor.err = err.Error()
 					return m, nil
 				}
@@ -1042,14 +1065,18 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 				if editor.focus < len(editor.inputs)-1 {
 					editor.focus++
 				} else {
-					editor.focus = actionStart
+					if actionStart > len(editor.inputs) {
+						editor.focus = len(editor.inputs)
+					} else {
+						editor.focus = actionStart
+					}
 				}
 				editor.confirmDelete = false
 				m.updateCatalogEditorFocus()
 				return m, nil
 			}
 			if editor.mode == catalogEditorEditRoot && editor.focus >= len(editor.inputs) && editor.focus < actionStart {
-				if err := m.toggleCatalogEditorOption(editor.focus - len(editor.inputs)); err != nil {
+				if err := m.shiftCatalogEditorOption(editor.focus-len(editor.inputs), 1); err != nil {
 					editor.err = err.Error()
 					return m, nil
 				}
@@ -1342,7 +1369,7 @@ func (m *configWizardModel) catalogEditorToggleCount() int {
 		return 0
 	}
 	if m.catalogEdit.mode == catalogEditorEditRoot {
-		return 3
+		return 4
 	}
 	return 0
 }
@@ -1743,8 +1770,8 @@ func (m *configWizardModel) viewCatalogEditor() string {
 		b.WriteString("\n\n")
 		b.WriteString(renderFieldBlock(
 			m.catalogEdit.focus == 0,
-			"Catalog root path",
-			"Absolute path where repositories should be discovered.",
+			renderWarningTitle("Catalog root path"),
+			"Absolute path where repositories should be discovered.\nChanging this does not move repositories on disk and can break bb sync until paths match.",
 			renderInputContainer(m.catalogEdit.inputs[0].View(), m.catalogEdit.focus == 0),
 			"",
 		))
@@ -1752,15 +1779,15 @@ func (m *configWizardModel) viewCatalogEditor() string {
 		b.WriteString(renderFieldBlock(
 			m.catalogEdit.focus == 1,
 			"Clone preset mapping",
-			"Preset name from clone.presets applied to this catalog (empty = no preset).",
-			renderInputContainer(m.catalogEdit.inputs[1].View(), m.catalogEdit.focus == 1),
+			"Preset from clone.presets applied to this catalog.",
+			renderEnumLine(m.catalogEdit.presetValue, m.catalogEdit.presetOptions),
 			"",
 		))
 		b.WriteString("\n")
 		b.WriteString(renderFieldBlock(
 			m.catalogEdit.focus == 2,
-			"Repository layout depth",
-			"Choose how repo paths are derived under this catalog root.",
+			renderWarningTitle("Repository layout depth"),
+			"Choose how repo paths are derived under this catalog root.\nChanging this does not move repositories on disk and can break bb sync until paths match.",
 			renderEnumLine(strconv.Itoa(m.catalogEdit.repoPathDepth), []string{"1", "2"}),
 			"",
 		))
@@ -1892,6 +1919,10 @@ func errorText(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+func renderWarningTitle(title string) string {
+	return warnStyle.Render("⚠ ") + title
 }
 
 func renderInputContainer(input string, focused bool) string {
@@ -2106,6 +2137,39 @@ func repoPathDepthLabel(c domain.Catalog) string {
 	return "1-level"
 }
 
+func (m *configWizardModel) catalogPresetOptions() []string {
+	seen := map[string]struct{}{}
+	options := []string{"none"}
+	seen["none"] = struct{}{}
+
+	presets := make([]string, 0, len(m.config.Clone.Presets)+1)
+	for name := range m.config.Clone.Presets {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" || trimmed == "none" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		presets = append(presets, trimmed)
+	}
+	if _, ok := seen["references"]; !ok {
+		presets = append(presets, "references")
+	}
+	sort.Strings(presets)
+	return append(options, presets...)
+}
+
+func builtinReferencesClonePreset() domain.ClonePreset {
+	shallow := true
+	filter := "blob:none"
+	return domain.ClonePreset{
+		Shallow: &shallow,
+		Filter:  &filter,
+	}
+}
+
 func (m *configWizardModel) startCatalogAddEditor() {
 	name := textinput.New()
 	name.Prompt = ""
@@ -2136,14 +2200,27 @@ func (m *configWizardModel) startCatalogEditRootEditor() {
 	root.Placeholder = "/absolute/path"
 	root.SetValue(catalog.Root)
 	root.Focus()
-	preset := textinput.New()
-	preset.Prompt = ""
-	preset.Placeholder = "preset name (optional)"
-	preset.SetValue(strings.TrimSpace(m.config.Clone.CatalogPreset[catalog.Name]))
-	preset.Blur()
+	presetOptions := m.catalogPresetOptions()
+	presetValue := strings.TrimSpace(m.config.Clone.CatalogPreset[catalog.Name])
+	if presetValue == "" {
+		presetValue = "none"
+	}
+	seenPreset := false
+	for _, option := range presetOptions {
+		if option == presetValue {
+			seenPreset = true
+			break
+		}
+	}
+	if !seenPreset && presetValue != "" {
+		presetOptions = append(presetOptions, presetValue)
+		sort.Strings(presetOptions[1:])
+	}
 	m.catalogEdit = &catalogEditor{
 		mode:          catalogEditorEditRoot,
-		inputs:        []textinput.Model{root, preset},
+		inputs:        []textinput.Model{root},
+		presetOptions: presetOptions,
+		presetValue:   presetValue,
 		focus:         0,
 		row:           idx,
 		repoPathDepth: domain.EffectiveRepoPathDepth(catalog),
@@ -2198,10 +2275,17 @@ func (m *configWizardModel) commitCatalogEditor() error {
 		if !filepath.IsAbs(root) {
 			return fmt.Errorf("catalog root must be absolute")
 		}
-		preset := strings.TrimSpace(editor.inputs[1].Value())
+		preset := strings.TrimSpace(editor.presetValue)
+		if preset == "none" {
+			preset = ""
+		}
 		if preset != "" {
 			if _, ok := m.config.Clone.Presets[preset]; !ok {
-				return fmt.Errorf("clone preset %q is not defined", preset)
+				if preset == "references" {
+					m.config.Clone.Presets[preset] = builtinReferencesClonePreset()
+				} else {
+					return fmt.Errorf("clone preset %q is not defined", preset)
+				}
 			}
 		}
 
@@ -2314,21 +2398,23 @@ func (m *configWizardModel) toggleDefaultBranchAutoPushFromSelection(visibility 
 	return nil
 }
 
-func (m *configWizardModel) toggleCatalogEditorOption(toggleIndex int) error {
+func (m *configWizardModel) shiftCatalogEditorOption(toggleIndex int, delta int) error {
 	editor := m.catalogEdit
 	if editor == nil || editor.mode != catalogEditorEditRoot {
 		return nil
 	}
 	switch toggleIndex {
 	case 0:
+		editor.presetValue = shiftEnumValue(editor.presetValue, editor.presetOptions, delta)
+	case 1:
 		if editor.repoPathDepth == 2 {
 			editor.repoPathDepth = 1
 		} else {
 			editor.repoPathDepth = 2
 		}
-	case 1:
-		editor.privatePush = !editor.privatePush
 	case 2:
+		editor.privatePush = !editor.privatePush
+	case 3:
 		editor.publicPush = !editor.publicPush
 	default:
 		return fmt.Errorf("invalid editor toggle selection")

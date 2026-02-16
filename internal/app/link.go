@@ -38,19 +38,15 @@ func (a *App) runLink(opts LinkOptions) (int, error) {
 		return 2, err
 	}
 
-	target, found, err := resolveLinkSelector(machine.Repos, opts.Selector)
+	target, found, err := a.resolveProjectOrRepoSelector(cfg, &machine, opts.Selector, resolveProjectOrRepoSelectorOptions{
+		AllowClone: true,
+		Catalog:    opts.Catalog,
+	})
 	if err != nil {
 		return 2, err
 	}
 	if !found {
-		outcome, err := a.runCloneLocked(cfg, &machine, CloneOptions{
-			Repo:    opts.Selector,
-			Catalog: opts.Catalog,
-		})
-		if err != nil {
-			return 2, err
-		}
-		target = outcome.Record
+		return 2, fmt.Errorf("selector %q could not be resolved", opts.Selector)
 	}
 
 	targetDir, err := resolveLinkTargetDir(anchor, cfg, opts)
@@ -93,6 +89,40 @@ func (a *App) runLink(opts LinkOptions) (int, error) {
 	return 0, nil
 }
 
+type resolveProjectOrRepoSelectorOptions struct {
+	AllowClone bool
+	Catalog    string
+}
+
+func (a *App) resolveProjectOrRepoSelector(cfg domain.ConfigFile, machine *domain.MachineFile, selector string, opts resolveProjectOrRepoSelectorOptions) (domain.MachineRepoRecord, bool, error) {
+	target, found, err := resolveLocalProjectSelector(machine.Repos, selector)
+	if err != nil {
+		return domain.MachineRepoRecord{}, false, err
+	}
+	if found {
+		return target, true, nil
+	}
+
+	if spec, err := parseCloneRepoSpec(cfg, selector, a.Getenv); err == nil {
+		if existing, ok := findExistingRepoByOrigin(*machine, a.Git, spec.CloneURL); ok {
+			return existing, true, nil
+		}
+	}
+
+	if !opts.AllowClone {
+		return domain.MachineRepoRecord{}, false, nil
+	}
+
+	outcome, err := a.runCloneLocked(cfg, machine, CloneOptions{
+		Repo:    selector,
+		Catalog: opts.Catalog,
+	})
+	if err != nil {
+		return domain.MachineRepoRecord{}, false, err
+	}
+	return outcome.Record, true, nil
+}
+
 func resolveLinkAnchor(gitRunner gitx.Runner, cwd string) (string, error) {
 	cwd = filepath.Clean(cwd)
 	topLevel, err := gitRunner.RunGit(cwd, "rev-parse", "--show-toplevel")
@@ -120,7 +150,7 @@ func resolveLinkTargetDir(anchor string, cfg domain.ConfigFile, opts LinkOptions
 	return filepath.Join(anchor, filepath.Clean(dir)), nil
 }
 
-func resolveLinkSelector(records []domain.MachineRepoRecord, selector string) (domain.MachineRepoRecord, bool, error) {
+func resolveLocalProjectSelector(records []domain.MachineRepoRecord, selector string) (domain.MachineRepoRecord, bool, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
 		return domain.MachineRepoRecord{}, false, errors.New("selector is required")

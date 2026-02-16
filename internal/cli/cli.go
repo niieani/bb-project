@@ -18,6 +18,7 @@ type appRunner interface {
 	RunInit(opts app.InitOptions) error
 	RunClone(opts app.CloneOptions) (int, error)
 	RunLink(opts app.LinkOptions) (int, error)
+	RunInfo(opts app.InfoOptions) (int, error)
 	RunScan(opts app.ScanOptions) (int, error)
 	RunSync(opts app.SyncOptions) (int, error)
 	RunFix(opts app.FixOptions) (int, error)
@@ -166,6 +167,7 @@ func newRootCommand(runtime *runtimeState) *cobra.Command {
 		newInitCommand(runtime),
 		newCloneCommand(runtime),
 		newLinkCommand(runtime),
+		newInfoCommand(runtime),
 		newScanCommand(runtime),
 		newSyncCommand(runtime),
 		newFixCommand(runtime),
@@ -318,6 +320,23 @@ func newLinkCommand(runtime *runtimeState) *cobra.Command {
 	cmd.Flags().BoolVar(&absolute, "absolute", false, "Create absolute symlink instead of relative.")
 	cmd.Flags().StringVar(&catalog, "catalog", "", "Catalog override used for auto-clone fallback.")
 
+	return cmd
+}
+
+func newInfoCommand(runtime *runtimeState) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "info <project-or-repo>",
+		Short: "Show resolved local project information.",
+		Args:  exactArgsWithCommandHint(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunInfo(app.InfoOptions{Selector: args[0]})
+			return withExitCode(code, err)
+		},
+	}
 	return cmd
 }
 

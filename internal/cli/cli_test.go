@@ -22,6 +22,7 @@ type fakeApp struct {
 	fixOpts    app.FixOptions
 	cloneOpts  app.CloneOptions
 	linkOpts   app.LinkOptions
+	infoOpts   app.InfoOptions
 	statusJSON bool
 	statusIncl []string
 	doctorIncl []string
@@ -56,6 +57,8 @@ type fakeApp struct {
 	cloneErr        error
 	linkCode        int
 	linkErr         error
+	infoCode        int
+	infoErr         error
 	statusCode      int
 	statusErr       error
 	doctorCode      int
@@ -120,6 +123,11 @@ func (f *fakeApp) RunClone(opts app.CloneOptions) (int, error) {
 func (f *fakeApp) RunLink(opts app.LinkOptions) (int, error) {
 	f.linkOpts = opts
 	return f.linkCode, f.linkErr
+}
+
+func (f *fakeApp) RunInfo(opts app.InfoOptions) (int, error) {
+	f.infoOpts = opts
+	return f.infoCode, f.infoErr
 }
 
 func (f *fakeApp) RunStatus(jsonOut bool, include []string) (int, error) {
@@ -822,6 +830,33 @@ func TestRunCloneAndLinkForwardOptions(t *testing.T) {
 		if fake.linkOpts.Catalog != "references" {
 			t.Fatalf("catalog = %q, want %q", fake.linkOpts.Catalog, "references")
 		}
+	})
+
+	t.Run("info forwards selector", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"info", "openai/codex"})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.infoOpts.Selector != "openai/codex" {
+			t.Fatalf("selector = %q, want %q", fake.infoOpts.Selector, "openai/codex")
+		}
+	})
+
+	t.Run("info missing selector shows command hint", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, calls, _ := runCLI(t, fake, []string{"info"})
+		if code != 2 {
+			t.Fatalf("exit code = %d, want 2", code)
+		}
+		if calls != 0 {
+			t.Fatalf("app factory calls = %d, want 0", calls)
+		}
+		mustContain(t, stderr, "bb info")
+		mustContain(t, stderr, "accepts 1 arg(s), received 0")
 	})
 }
 

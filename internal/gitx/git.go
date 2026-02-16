@@ -3,6 +3,7 @@ package gitx
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,8 @@ type CloneOptions struct {
 	Shallow bool
 	Filter  string
 	Only    []string
+	Stdout  io.Writer
+	Stderr  io.Writer
 }
 
 type SyncProbeOutcome string
@@ -66,6 +69,10 @@ func (r Runner) run(dir string, name string, args ...string) (Result, error) {
 }
 
 func (r Runner) runWithEnv(dir string, extraEnv []string, name string, args ...string) (Result, error) {
+	return r.runWithEnvStreaming(dir, extraEnv, nil, nil, name, args...)
+}
+
+func (r Runner) runWithEnvStreaming(dir string, extraEnv []string, stdoutWriter io.Writer, stderrWriter io.Writer, name string, args ...string) (Result, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
 	base := os.Environ()
@@ -74,8 +81,16 @@ func (r Runner) runWithEnv(dir string, extraEnv []string, name string, args ...s
 	}
 	cmd.Env = gitCommandEnv(base)
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	if stdoutWriter != nil {
+		cmd.Stdout = io.MultiWriter(stdoutWriter, &stdout)
+	} else {
+		cmd.Stdout = &stdout
+	}
+	if stderrWriter != nil {
+		cmd.Stderr = io.MultiWriter(stderrWriter, &stderr)
+	} else {
+		cmd.Stderr = &stderr
+	}
 	err := cmd.Run()
 	if err != nil {
 		return Result{Stdout: stdout.String(), Stderr: stderr.String()}, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, stderr.String())
@@ -622,14 +637,14 @@ func (r Runner) CloneWithOptions(opts CloneOptions) error {
 		args = append(args, "--sparse")
 	}
 	args = append(args, origin, path)
-	if _, err := r.RunGit("", args...); err != nil {
+	if _, err := r.runWithEnvStreaming("", nil, opts.Stdout, opts.Stderr, "git", args...); err != nil {
 		return err
 	}
 	if len(only) == 0 {
 		return nil
 	}
 	sparseArgs := append([]string{"sparse-checkout", "set", "--no-cone"}, only...)
-	_, err := r.RunGit(path, sparseArgs...)
+	_, err := r.runWithEnvStreaming(path, nil, opts.Stdout, opts.Stderr, "git", sparseArgs...)
 	return err
 }
 

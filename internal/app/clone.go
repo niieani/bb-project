@@ -92,6 +92,8 @@ func (a *App) runCloneLocked(cfg domain.ConfigFile, machine *domain.MachineFile,
 		Shallow: cloneShallow,
 		Filter:  cloneFilter,
 		Only:    cloneOnly,
+		Stdout:  a.Stdout,
+		Stderr:  a.Stderr,
 	}); err != nil {
 		return cloneOutcome{}, fmt.Errorf("clone failed: %w", err)
 	}

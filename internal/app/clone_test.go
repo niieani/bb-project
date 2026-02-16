@@ -64,6 +64,51 @@ func TestRunCloneGitHubHTTPLink(t *testing.T) {
 	}
 }
 
+func TestRunCloneStreamsGitCloneOutput(t *testing.T) {
+	now := time.Date(2026, 2, 16, 10, 0, 0, 0, time.UTC)
+	home := t.TempDir()
+	paths := state.NewPaths(home)
+	t.Setenv("BB_MACHINE_ID", "machine-a")
+
+	remoteRoot := filepath.Join(home, "remotes")
+	setupCloneTestRemote(t, remoteRoot, "openai", "codex")
+	t.Setenv("BB_TEST_REMOTE_ROOT", remoteRoot)
+
+	cfg := state.DefaultConfig()
+	cfg.GitHub.Owner = "you"
+	cfg.Clone.DefaultCatalog = "references"
+	if err := state.SaveConfig(paths, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	machine := state.BootstrapMachine("machine-a", "host-a", now.Add(-time.Hour))
+	machine.DefaultCatalog = "software"
+	machine.Catalogs = []domain.Catalog{
+		{Name: "references", Root: filepath.Join(home, "catalogs", "references"), RepoPathDepth: 2},
+	}
+	if err := state.SaveMachine(paths, machine); err != nil {
+		t.Fatalf("save machine: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := New(paths, &stdout, &stderr)
+	app.SetVerbose(false)
+	app.Now = func() time.Time { return now }
+	app.Hostname = func() (string, error) { return "host-a", nil }
+
+	code, err := app.RunClone(CloneOptions{Repo: "openai/codex"})
+	if err != nil {
+		t.Fatalf("RunClone error: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+	if combined := stdout.String() + "\n" + stderr.String(); !strings.Contains(combined, "Cloning into") {
+		t.Fatalf("expected streamed clone output to contain %q, got: %q", "Cloning into", combined)
+	}
+}
+
 func TestRunCloneCatalogPresetMapping(t *testing.T) {
 	tests := []struct {
 		name          string
