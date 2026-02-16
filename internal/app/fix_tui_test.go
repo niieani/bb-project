@@ -4099,8 +4099,8 @@ func TestFixTUIListViewFillsWindowHeightWithoutRowsAfterFooter(t *testing.T) {
 	_, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
 
 	view := ansi.Strip(m.View())
-	if got := lipgloss.Height(view); got > height {
-		t.Fatalf("view should not exceed terminal height: got=%d want<=%d view=%q", got, height, view)
+	if got := lipgloss.Height(view); got != height {
+		t.Fatalf("view should fill terminal height so footer remains sticky: got=%d want=%d view=%q", got, height, view)
 	}
 }
 
@@ -4123,6 +4123,16 @@ func TestFixTUIListViewHasNoBlankRowsBetweenMainPanelAndFooter(t *testing.T) {
 
 	view := ansi.Strip(m.View())
 	lines := strings.Split(view, "\n")
+	firstNonEmpty := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			firstNonEmpty = i
+			break
+		}
+	}
+	if firstNonEmpty != 0 {
+		t.Fatalf("expected list view to stay top-anchored with no leading blank rows, first non-empty line=%d view=%q", firstNonEmpty, view)
+	}
 	helpTopIdx := -1
 	for i := len(lines) - 1; i >= 0; i-- {
 		trimmed := strings.TrimSpace(lines[i])
@@ -4134,11 +4144,20 @@ func TestFixTUIListViewHasNoBlankRowsBetweenMainPanelAndFooter(t *testing.T) {
 	if helpTopIdx <= 0 {
 		t.Fatalf("footer top border not found: %q", view)
 	}
-	if strings.TrimSpace(lines[helpTopIdx-1]) == "" {
-		t.Fatalf("expected no blank line between main panel and footer, got view %q", view)
+	panelBottomIdx := -1
+	for i := helpTopIdx - 1; i >= 0; i-- {
+		if strings.Contains(lines[i], "╯") {
+			panelBottomIdx = i
+			break
+		}
 	}
-	if !strings.Contains(lines[helpTopIdx-1], "╯") {
-		t.Fatalf("expected main panel bottom border immediately above footer, got %q", lines[helpTopIdx-1])
+	if panelBottomIdx < 0 {
+		t.Fatalf("main panel bottom border not found above footer: %q", view)
+	}
+	for i := panelBottomIdx + 1; i < helpTopIdx; i++ {
+		if strings.TrimSpace(lines[i]) != "" {
+			t.Fatalf("expected spacer between panel and footer to be blank-only, got line %d=%q in view %q", i, lines[i], view)
+		}
 	}
 }
 

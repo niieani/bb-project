@@ -1234,7 +1234,14 @@ func (m *fixTUIModel) View() string {
 	helpBlock := helpPanel.Render(helpView)
 
 	body := m.viewBodyForMode(m.viewMode)
-	return fixPageStyle.Render(body + "\n" + helpBlock)
+	doc := body + "\n" + helpBlock
+	if m.height > 0 {
+		baseHeight := lipgloss.Height(fixPageStyle.Render(doc))
+		if gap := m.height - baseHeight; gap > 0 {
+			doc = body + "\n" + strings.Repeat("\n", gap) + helpBlock
+		}
+	}
+	return fixPageStyle.Render(doc)
 }
 
 func (m *fixTUIModel) viewBodyForMode(mode fixViewMode) string {

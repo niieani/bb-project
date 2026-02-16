@@ -204,6 +204,7 @@ Rules:
 - Keep table cell content plain text (avoid embedding ANSI/lipgloss inside cell strings); style at the row/column layer instead.
 - Keep the selected row visible while navigating; viewport must follow the cursor.
 - If list height can change based on below-list details, reserve height against worst-case visible details so single-step cursor movement does not trigger sudden page re-bucketing (no large backward/forward viewport jumps on a one-row move).
+- Keep list pages top-anchored; when extra vertical space exists, preserve sticky footer placement with middle spacer rows rather than adding leading top padding.
 - Avoid nested bordered containers for the same region (table inside panel inside another framed box) because it frequently causes wrap artifacts.
 - When rendering custom list rows, leave at least one guard column so the rendered width stays strictly below viewport width (prevents terminal auto-wrap).
 
