@@ -4144,20 +4144,11 @@ func TestFixTUIListViewHasNoBlankRowsBetweenMainPanelAndFooter(t *testing.T) {
 	if helpTopIdx <= 0 {
 		t.Fatalf("footer top border not found: %q", view)
 	}
-	panelBottomIdx := -1
-	for i := helpTopIdx - 1; i >= 0; i-- {
-		if strings.Contains(lines[i], "╯") {
-			panelBottomIdx = i
-			break
-		}
+	if strings.TrimSpace(lines[helpTopIdx-1]) == "" {
+		t.Fatalf("expected no blank line between main panel and footer, got view %q", view)
 	}
-	if panelBottomIdx < 0 {
-		t.Fatalf("main panel bottom border not found above footer: %q", view)
-	}
-	for i := panelBottomIdx + 1; i < helpTopIdx; i++ {
-		if strings.TrimSpace(lines[i]) != "" {
-			t.Fatalf("expected spacer between panel and footer to be blank-only, got line %d=%q in view %q", i, lines[i], view)
-		}
+	if !strings.Contains(lines[helpTopIdx-1], "╯") {
+		t.Fatalf("expected main panel bottom border immediately above footer, got %q", lines[helpTopIdx-1])
 	}
 }
 
@@ -4444,6 +4435,47 @@ func TestFixTUIViewportTopDoesNotJumpUpWhenMovingDownOneRow(t *testing.T) {
 	if afterStart != beforeStart {
 		t.Fatalf("viewport page start jumped after one-row down move: beforeStart=%d afterStart=%d beforeSelected=%d afterSelected=%d", beforeStart, afterStart, beforeSelected, m.repoList.Index())
 	}
+}
+
+func TestFixTUIListViewStaysFooterAttachedAcrossWrapChangingSelectionMove(t *testing.T) {
+	t.Parallel()
+
+	repos := make([]fixRepoState, 0, 40)
+	for i := 0; i < 40; i++ {
+		name := fmt.Sprintf("repo-%02d", i)
+		path := fmt.Sprintf("/repos/%s", name)
+		if i%2 == 1 {
+			path = "/Volumes/Projects/Software/" + strings.Repeat("codegen-typescript-graphql-module-declarations-plugin-", 3) + name
+		}
+		repos = append(repos, fixRepoState{
+			Record: domain.MachineRepoRecord{
+				Name:      name,
+				Path:      path,
+				OriginURL: fmt.Sprintf("git@github.com:you/%s.git", name),
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{
+				OriginURL: fmt.Sprintf("https://github.com/you/%s.git", name),
+				AutoPush:  domain.AutoPushModeDisabled,
+			},
+		})
+	}
+
+	const (
+		width  = 118
+		height = 24
+	)
+	m := newFixTUIModelForTest(repos)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	m.setCursor(3)
+
+	before := ansi.Strip(m.View())
+	assertListViewFillsHeightAndFooterHasNoGap(t, before, height)
+
+	m.moveRepoCursor(1)
+	after := ansi.Strip(m.View())
+	assertListViewFillsHeightAndFooterHasNoGap(t, after, height)
 }
 
 func TestFixTUISelectedDetailsRenderActionHelp(t *testing.T) {
@@ -4930,6 +4962,33 @@ func trailingEmptyLineCount(s string) int {
 		break
 	}
 	return n
+}
+
+func assertListViewFillsHeightAndFooterHasNoGap(t *testing.T, view string, wantHeight int) {
+	t.Helper()
+
+	if got := lipgloss.Height(view); got != wantHeight {
+		t.Fatalf("list view should fill terminal height: got=%d want=%d view=%q", got, wantHeight, view)
+	}
+
+	lines := strings.Split(view, "\n")
+	helpTopIdx := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "╭") && strings.HasSuffix(trimmed, "╮") {
+			helpTopIdx = i
+			break
+		}
+	}
+	if helpTopIdx <= 0 {
+		t.Fatalf("footer top border not found: %q", view)
+	}
+	if strings.TrimSpace(lines[helpTopIdx-1]) == "" {
+		t.Fatalf("expected no blank line between main panel and footer, got %q", view)
+	}
+	if !strings.Contains(lines[helpTopIdx-1], "╯") {
+		t.Fatalf("expected main panel bottom border directly above footer, got %q", lines[helpTopIdx-1])
+	}
 }
 
 func previousNonEmptyLine(lines []string, start int) string {

@@ -472,6 +472,8 @@ type fixTUIModel struct {
 	status  string
 	errText string
 
+	listDetailsTargetHeight int
+
 	revalidating          bool
 	revalidateSpinner     spinner.Model
 	revalidatePath        string
@@ -1234,14 +1236,7 @@ func (m *fixTUIModel) View() string {
 	helpBlock := helpPanel.Render(helpView)
 
 	body := m.viewBodyForMode(m.viewMode)
-	doc := body + "\n" + helpBlock
-	if m.height > 0 {
-		baseHeight := lipgloss.Height(fixPageStyle.Render(doc))
-		if gap := m.height - baseHeight; gap > 0 {
-			doc = body + "\n" + strings.Repeat("\n", gap) + helpBlock
-		}
-	}
-	return fixPageStyle.Render(doc)
+	return fixPageStyle.Render(body + "\n" + helpBlock)
 }
 
 func (m *fixTUIModel) viewBodyForMode(mode fixViewMode) string {
@@ -1379,6 +1374,32 @@ func (m *fixTUIModel) mainContentPanelStyle() lipgloss.Style {
 }
 
 func (m *fixTUIModel) viewMainContent() string {
+	content := m.viewMainContentWithoutDetails()
+	if len(m.visible) == 0 {
+		return content
+	}
+	if details := m.viewSelectedRepoDetails(); details != "" {
+		return content + "\n" + m.padSelectedDetails(details)
+	}
+	return content
+}
+
+func (m *fixTUIModel) padSelectedDetails(details string) string {
+	target := m.listDetailsTargetHeight
+	if target <= 0 {
+		return details
+	}
+	lines := lipgloss.Height(details)
+	if width := m.repoDetailsLineWidth(); width > 0 {
+		lines = lipgloss.Height(lipgloss.NewStyle().Width(width).Render(details))
+	}
+	if lines >= target {
+		return details
+	}
+	return details + strings.Repeat("\n", target-lines)
+}
+
+func (m *fixTUIModel) viewMainContentWithoutDetails() string {
 	var b strings.Builder
 	b.WriteString(hintStyle.Render("Choose eligible fixes with ←/→, press space to select or unselect."))
 	if m.immediateApplying {
@@ -1395,10 +1416,6 @@ func (m *fixTUIModel) viewMainContent() string {
 		// Render list directly inside the main panel to avoid nested border/frame
 		// width interactions that can trigger hard wrapping artifacts.
 		b.WriteString(m.viewRepoList())
-		if details := m.viewSelectedRepoDetails(); details != "" {
-			b.WriteString("\n")
-			b.WriteString(details)
-		}
 	}
 
 	return b.String()
@@ -1700,35 +1717,32 @@ func wrapStyledSegments(segments []string, separator string, width int) []string
 	return lines
 }
 
-func (m *fixTUIModel) repoDetailsHeightStats(innerWidth int) (current int, maxHeight int, currentWraps bool) {
+func (m *fixTUIModel) maxRepoDetailsHeight(innerWidth int) int {
 	if innerWidth <= 0 {
-		return 0, 0, false
-	}
-	currentRepo, ok := m.currentRepo()
-	currentPath := ""
-	if ok {
-		currentPath = currentRepo.Record.Path
+		return 0
 	}
 	renderer := lipgloss.NewStyle().Width(innerWidth)
+	maxHeight := 0
 	for _, repo := range m.visible {
 		details := m.viewRepoDetails(repo)
-		raw := lipgloss.Height(details)
 		rendered := lipgloss.Height(renderer.Render(details))
 		if rendered > maxHeight {
 			maxHeight = rendered
 		}
-		if ok && repo.Record.Path == currentPath {
-			current = rendered
-			currentWraps = rendered > raw
-		}
 	}
-	return current, maxHeight, currentWraps
+	return maxHeight
+}
+
+func (m *fixTUIModel) listViewRenderedHeight(helpBlock string) int {
+	body := m.viewBodyForMode(fixViewList)
+	return lipgloss.Height(fixPageStyle.Render(body + "\n" + helpBlock))
 }
 
 func (m *fixTUIModel) resizeRepoList() {
 	if m.height <= 0 {
 		return
 	}
+	m.listDetailsTargetHeight = 0
 
 	listWidth := fixListDefaultWidth
 	if w := m.viewContentWidth(); w > 0 {
@@ -1751,48 +1765,45 @@ func (m *fixTUIModel) resizeRepoList() {
 	if w := m.viewContentWidth(); w > 0 {
 		helpPanel = helpPanel.Width(w)
 	}
-	helpHeight := lipgloss.Height(helpPanel.Render(m.footerHelpView(helpPanel)))
-
-	available := m.height - fixPageStyle.GetVerticalFrameSize()
-	if available < 0 {
-		available = 0
-	}
+	helpBlock := helpPanel.Render(m.footerHelpView(helpPanel))
 
 	const (
 		preferredMinListHeight = 6
 		hardMinListHeight      = 1
-		separatorLines         = 1
 	)
 
-	detailsWidth := m.viewContentWidth()
-	if detailsWidth > 0 {
-		detailsWidth -= panelStyle.GetHorizontalFrameSize()
+	detailsTargetHeight := 0
+	if len(m.visible) > 0 {
+		detailsWidth := m.repoDetailsLineWidth()
+		detailsTargetHeight = m.maxRepoDetailsHeight(detailsWidth)
 	}
-	currentDetailsHeight, maxDetailsHeight, currentDetailsWraps := m.repoDetailsHeightStats(detailsWidth)
-	extraDetailsReserve := 0
-	if maxDetailsHeight > currentDetailsHeight {
-		extraDetailsReserve = maxDetailsHeight - currentDetailsHeight
-	}
+	m.listDetailsTargetHeight = detailsTargetHeight
 
 	minListHeight := preferredMinListHeight
-	if currentWraps := currentDetailsWraps; currentWraps || extraDetailsReserve > 0 {
+	if detailsTargetHeight > 0 {
 		minListHeight = hardMinListHeight
 	}
 
-	height := available
-	if height < minListHeight {
-		height = minListHeight
+	maxListHeight := m.height
+	if maxListHeight < minListHeight {
+		maxListHeight = minListHeight
 	}
-	for {
+
+	chosenHeight := minListHeight
+	for height := maxListHeight; height >= minListHeight; height-- {
 		m.repoList.SetSize(listWidth, height)
-		bodyHeight := lipgloss.Height(m.viewBodyForMode(fixViewList))
-		used := bodyHeight + separatorLines + helpHeight + extraDetailsReserve
-		if used <= available || height <= minListHeight {
+		if m.listViewRenderedHeight(helpBlock) <= m.height {
+			chosenHeight = height
 			break
 		}
-		height--
 	}
-	m.repoList.SetSize(listWidth, height)
+	m.repoList.SetSize(listWidth, chosenHeight)
+
+	if len(m.visible) > 0 {
+		if gap := m.height - m.listViewRenderedHeight(helpBlock); gap > 0 {
+			m.listDetailsTargetHeight = detailsTargetHeight + gap
+		}
+	}
 }
 
 func (m *fixTUIModel) refreshRepos(refreshMode scanRefreshMode) error {
