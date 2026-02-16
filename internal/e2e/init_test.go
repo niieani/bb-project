@@ -212,4 +212,17 @@ func TestInitCases(t *testing.T) {
 			t.Fatalf("expected owner validation message, got: %s", out)
 		}
 	})
+
+	t.Run("TC-INIT-012", func(t *testing.T) {
+		t.Parallel()
+		_, m, _ := setupSingleMachine(t)
+
+		out, err := m.RunBB(fixedNow, "init", "demo")
+		if err != nil {
+			t.Fatalf("init failed: %v\n%s", err, out)
+		}
+		if strings.Contains(out, "scan: discovered") {
+			t.Fatalf("expected init to skip post-init scan, got output: %s", out)
+		}
+	})
 }

@@ -354,10 +354,6 @@ func (a *App) RunInit(opts InitOptions) error {
 		}
 	}
 
-	a.logf("init: scanning and publishing observed state")
-	if _, err := a.scanAndPublish(cfg, &machine, ScanOptions{IncludeCatalogs: nil}); err != nil {
-		return err
-	}
 	a.logf("init: completed successfully")
 
 	return nil
@@ -483,6 +479,14 @@ func originsMatchNormalized(observedOrigin string, expectedOrigin string) (bool,
 	return observedIdentity == expectedIdentity, nil
 }
 
+func (a *App) runCommandAttached(dir string, name string, args ...string) error {
+	run := a.RunCommandAttached
+	if run == nil {
+		run = defaultRunCommandAttached
+	}
+	return run(dir, name, args...)
+}
+
 func (a *App) createRemoteRepo(owner, repo string, visibility domain.Visibility, protocol string, repoPath string) (string, error) {
 	if fakeRoot := strings.TrimSpace(os.Getenv("BB_TEST_REMOTE_ROOT")); fakeRoot != "" {
 		remotePath := filepath.Join(fakeRoot, owner, repo+".git")
@@ -491,10 +495,8 @@ func (a *App) createRemoteRepo(owner, repo string, visibility domain.Visibility,
 			return "", err
 		}
 		if _, err := os.Stat(remotePath); errors.Is(err, os.ErrNotExist) {
-			cmd := exec.Command("git", "init", "--bare", remotePath)
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				return "", fmt.Errorf("create fake remote: %w: %s", err, string(out))
+			if err := a.runCommandAttached("", "git", "init", "--bare", remotePath); err != nil {
+				return "", fmt.Errorf("create fake remote: %w", err)
 			}
 		}
 		return remotePath, nil
@@ -507,11 +509,8 @@ func (a *App) createRemoteRepo(owner, repo string, visibility domain.Visibility,
 	}
 	args := []string{"repo", "create", name, visibilityFlag}
 	a.logf("init: running gh %s", strings.Join(args, " "))
-	cmd := exec.Command("gh", args...)
-	cmd.Dir = repoPath
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("gh repo create failed: %w: %s", err, string(out))
+	if err := a.runCommandAttached(repoPath, "gh", args...); err != nil {
+		return "", fmt.Errorf("gh repo create failed: %w", err)
 	}
 
 	if protocol == "https" {

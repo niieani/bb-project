@@ -106,14 +106,18 @@ Flags:
 
 Behavior:
 
-- If `project` omitted, infers project root from current directory inside a catalog subtree.
+- Selected catalog is `--catalog` when provided, otherwise the machine default catalog.
+- If `project` is provided, target path is `<selected-catalog-root>/<project>`.
+- If `project` is omitted, infers project root from current directory only when current directory is inside the selected catalog subtree and matches its layout depth.
 - `project` must match the selected catalog layout depth:
   - depth `1`: `repo`
   - depth `2`: `owner/repo`
 - Initializes git repo if missing.
 - Creates GitHub repo via `gh repo create` (unless running in test backend mode).
+- Streams `gh`/`git` command output directly to the terminal during remote creation.
 - Sets/verifies `origin`.
 - Creates/updates repo metadata YAML.
+- Does not run an automatic post-init `bb scan`.
 
 ### `bb clone <repo> [flags]`
 
