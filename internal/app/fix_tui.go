@@ -1231,6 +1231,21 @@ func (m *fixTUIModel) View() string {
 	body := m.viewBodyForMode(m.viewMode)
 	spacer := ""
 	if m.height > 0 {
+		if m.viewMode == fixViewList && len(m.visible) > 0 {
+			prevHeight := -1
+			for i := 0; i < 3; i++ {
+				baseDoc := body + "\n" + helpBlock
+				baseHeight := lipgloss.Height(fixPageStyle.Render(baseDoc))
+				gap := m.height - baseHeight
+				if gap <= 0 || baseHeight == prevHeight {
+					break
+				}
+				prevHeight = baseHeight
+				m.repoList.SetSize(m.repoList.Width(), m.repoList.Height()+gap)
+				body = m.viewBodyForMode(m.viewMode)
+			}
+		}
+
 		baseDoc := body + "\n" + helpBlock
 		baseHeight := lipgloss.Height(fixPageStyle.Render(baseDoc))
 		if gap := m.height - baseHeight; gap > 0 {

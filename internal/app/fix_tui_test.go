@@ -4046,6 +4046,44 @@ func TestFixTUIListViewFillsWindowHeightWithoutRowsAfterFooter(t *testing.T) {
 	}
 }
 
+func TestFixTUIListViewHasNoBlankRowsBetweenMainPanelAndFooter(t *testing.T) {
+	t.Parallel()
+
+	m := newFixTUIModelForTest([]fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
+
+	view := ansi.Strip(m.View())
+	lines := strings.Split(view, "\n")
+	helpTopIdx := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "╭") && strings.HasSuffix(trimmed, "╮") {
+			helpTopIdx = i
+			break
+		}
+	}
+	if helpTopIdx <= 0 {
+		t.Fatalf("footer top border not found: %q", view)
+	}
+	if strings.TrimSpace(lines[helpTopIdx-1]) == "" {
+		t.Fatalf("expected no blank line between main panel and footer, got view %q", view)
+	}
+	if !strings.Contains(lines[helpTopIdx-1], "╯") {
+		t.Fatalf("expected main panel bottom border immediately above footer, got %q", lines[helpTopIdx-1])
+	}
+}
+
 func TestFixTUIWizardStatusToFooterGapIsCompact(t *testing.T) {
 	t.Parallel()
 

@@ -31,6 +31,7 @@ Chrome spacing rules:
 
 - No blank lines between chrome rows (header, tabs, main panel, callouts, help). Borders already consume rows; extra padding is waste.
 - No trailing empty rows or whitespace after the help panel. The help panel is the visual bottom of the screen.
+- If extra vertical space remains, expand the primary scroll/list viewport first; do not insert blank rows between the main panel and footer.
 - Header should not wrap to multiple lines; prefer truncating the subtitle with `...` over spending another row.
 - If tabs/steps are not present, the main panel starts immediately under the header line.
 - For dense list workflows, use the embedded bordered header as the default pattern, and fall back to a standalone header row only when bordered embedding would make the layout less readable.
