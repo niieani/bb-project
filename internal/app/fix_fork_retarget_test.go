@@ -12,7 +12,7 @@ import (
 	"bb-project/internal/state"
 )
 
-func TestForkAndRetargetFromFixWithBranchRenameRenamesBeforePush(t *testing.T) {
+func TestForkAndRetargetFromFixWithPublishBranchChecksOutBeforePush(t *testing.T) {
 	paths := state.NewPaths(t.TempDir())
 	app := New(paths, io.Discard, io.Discard)
 	app.SetVerbose(false)
@@ -36,6 +36,11 @@ func TestForkAndRetargetFromFixWithBranchRenameRenamesBeforePush(t *testing.T) {
 	}
 	if err := app.Git.AddOrigin(repoPath, "git@github.com:oven-sh/bun.git"); err != nil {
 		t.Fatalf("add origin failed: %v", err)
+	}
+	mainBeforeOut, mainBeforeErr := app.Git.RunGit(repoPath, "rev-parse", "main")
+	mainBefore := strings.TrimSpace(mainBeforeOut)
+	if mainBeforeErr != nil {
+		t.Fatalf("rev-parse main before failed: %v", mainBeforeErr)
 	}
 
 	repoKey := "software/bun"
@@ -83,6 +88,14 @@ func TestForkAndRetargetFromFixWithBranchRenameRenamesBeforePush(t *testing.T) {
 	}
 	if branch != "feature/acme-bun" {
 		t.Fatalf("current branch = %q, want %q", branch, "feature/acme-bun")
+	}
+	mainAfterOut, mainAfterErr := app.Git.RunGit(repoPath, "rev-parse", "main")
+	mainAfter := strings.TrimSpace(mainAfterOut)
+	if mainAfterErr != nil {
+		t.Fatalf("rev-parse main after failed: %v", mainAfterErr)
+	}
+	if mainAfter != mainBefore {
+		t.Fatalf("main ref changed: before=%s after=%s", mainBefore, mainAfter)
 	}
 
 	upstream, err := app.Git.Upstream(repoPath)

@@ -3173,8 +3173,8 @@ func TestFixTUIWizardForkAndRetargetDefaultBranchShowsOptionalBranchRename(t *te
 	m.wizard.GitHubOwner = "acme"
 	m.wizard.ForkBranchName.SetValue("feature/fork-bun")
 	plan := m.wizardApplyPlanEntries()
-	if !planContains(plan, true, "git branch -m feature/fork-bun") {
-		t.Fatalf("expected branch rename step in wizard plan, got %#v", plan)
+	if !planContains(plan, true, "git checkout -b feature/fork-bun") {
+		t.Fatalf("expected branch checkout step in wizard plan, got %#v", plan)
 	}
 	if !planContains(plan, true, "git push -u") {
 		t.Fatalf("expected non-force push step in wizard plan after branch rename, got %#v", plan)
@@ -3255,8 +3255,8 @@ func TestFixTUIWizardStageCommitPushDefaultBranchShowsOptionalPublishBranch(t *t
 	m.wizard.ForkBranchName.SetValue("feature/safe-publish")
 
 	plan := m.wizardApplyPlanEntries()
-	if !planContains(plan, true, "git branch -m feature/safe-publish") {
-		t.Fatalf("expected branch rename step in wizard plan, got %#v", plan)
+	if !planContains(plan, true, "git checkout -b feature/safe-publish") {
+		t.Fatalf("expected branch checkout step in wizard plan, got %#v", plan)
 	}
 	if !planContains(plan, true, "git push -u origin feature/safe-publish") {
 		t.Fatalf("expected publish-to-new-branch push step in wizard plan, got %#v", plan)

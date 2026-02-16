@@ -201,22 +201,22 @@ func planFixActionClone(ctx fixActionPlanContext) []fixActionPlanEntry {
 
 func planFixActionPush(ctx fixActionPlanContext) []fixActionPlanEntry {
 	branch := strings.TrimSpace(ctx.Branch)
-	renameTo := strings.TrimSpace(ctx.ForkBranchRenameTo)
-	if renameTo == "" || renameTo == branch {
+	targetBranch := strings.TrimSpace(ctx.ForkBranchRenameTo)
+	if targetBranch == "" || targetBranch == branch {
 		return []fixActionPlanEntry{
 			{ID: "push-main", Command: true, Summary: "git push"},
 		}
 	}
 	return []fixActionPlanEntry{
 		{
-			ID:      "push-rename-branch",
+			ID:      "push-checkout-new-branch",
 			Command: true,
-			Summary: fmt.Sprintf("git branch -m %s", renameTo),
+			Summary: fmt.Sprintf("git checkout -b %s", targetBranch),
 		},
 		{
 			ID:      "push-main",
 			Command: true,
-			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(renameTo)),
+			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(targetBranch)),
 		},
 	}
 }
@@ -243,6 +243,17 @@ func planFixActionSyncWithUpstream(ctx fixActionPlanContext) []fixActionPlanEntr
 
 func planFixActionStageCommitPush(ctx fixActionPlanContext) []fixActionPlanEntry {
 	entries := make([]fixActionPlanEntry, 0, 5)
+	pushBranch := strings.TrimSpace(ctx.Branch)
+	targetBranch := strings.TrimSpace(ctx.ForkBranchRenameTo)
+	switchedToPublishBranch := targetBranch != "" && targetBranch != pushBranch
+	if switchedToPublishBranch {
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "stage-checkout-new-branch",
+			Command: true,
+			Summary: fmt.Sprintf("git checkout -b %s", targetBranch),
+		})
+		pushBranch = targetBranch
+	}
 	if ctx.GenerateGitignore && len(ctx.GitignorePatterns) > 0 {
 		n := len(ctx.GitignorePatterns)
 		if ctx.MissingRootGitignore {
@@ -280,17 +291,6 @@ func planFixActionStageCommitPush(ctx fixActionPlanContext) []fixActionPlanEntry
 		})
 		return entries
 	}
-	pushBranch := strings.TrimSpace(ctx.Branch)
-	renameTo := strings.TrimSpace(ctx.ForkBranchRenameTo)
-	renamed := renameTo != "" && renameTo != pushBranch
-	if renamed {
-		entries = append(entries, fixActionPlanEntry{
-			ID:      "stage-rename-branch",
-			Command: true,
-			Summary: fmt.Sprintf("git branch -m %s", renameTo),
-		})
-		pushBranch = renameTo
-	}
 	if strings.TrimSpace(ctx.Upstream) == "" {
 		entries = append(entries, fixActionPlanEntry{
 			ID:      "stage-push-set-upstream",
@@ -299,7 +299,7 @@ func planFixActionStageCommitPush(ctx fixActionPlanContext) []fixActionPlanEntry
 		})
 		return entries
 	}
-	if renamed {
+	if switchedToPublishBranch {
 		entries = append(entries, fixActionPlanEntry{
 			ID:      "stage-push-set-upstream",
 			Command: true,
@@ -324,7 +324,7 @@ func planFixActionPublishNewBranch(ctx fixActionPlanContext) []fixActionPlanEntr
 	stageEntries := planFixActionStageCommitPush(ctx)
 	for _, entry := range stageEntries {
 		switch entry.ID {
-		case "stage-skip-push-no-origin", "stage-push-set-upstream", "stage-push", "stage-rename-branch":
+		case "stage-skip-push-no-origin", "stage-push-set-upstream", "stage-push", "stage-checkout-new-branch":
 			continue
 		default:
 			entries = append(entries, entry)
@@ -369,31 +369,33 @@ func planFixActionPublishNewBranch(ctx fixActionPlanContext) []fixActionPlanEntr
 }
 
 func planFixActionCheckpointThenSync(ctx fixActionPlanContext) []fixActionPlanEntry {
+	pushBranch := strings.TrimSpace(ctx.Branch)
+	targetBranch := strings.TrimSpace(ctx.ForkBranchRenameTo)
+	switchedToPublishBranch := targetBranch != "" && targetBranch != pushBranch
+
 	stageEntries := planFixActionStageCommitPush(ctx)
 	stageOnly := make([]fixActionPlanEntry, 0, len(stageEntries))
 	for _, entry := range stageEntries {
 		switch entry.ID {
-		case "stage-skip-push-no-origin", "stage-push-set-upstream", "stage-push", "stage-rename-branch":
+		case "stage-skip-push-no-origin", "stage-push-set-upstream", "stage-push", "stage-checkout-new-branch":
 			continue
 		default:
 			stageOnly = append(stageOnly, entry)
 		}
 	}
 	entries := make([]fixActionPlanEntry, 0, len(stageOnly)+4)
+	if switchedToPublishBranch {
+		entries = append(entries, fixActionPlanEntry{
+			ID:      "checkpoint-checkout-new-branch",
+			Command: true,
+			Summary: fmt.Sprintf("git checkout -b %s", targetBranch),
+		})
+		pushBranch = targetBranch
+	}
 	entries = append(entries, stageOnly...)
 	entries = append(entries, planFixActionSyncWithUpstream(ctx)...)
-	pushBranch := strings.TrimSpace(ctx.Branch)
-	renameTo := strings.TrimSpace(ctx.ForkBranchRenameTo)
-	if renameTo != "" && renameTo != pushBranch {
-		entries = append(entries, fixActionPlanEntry{
-			ID:      "checkpoint-rename-branch",
-			Command: true,
-			Summary: fmt.Sprintf("git branch -m %s", renameTo),
-		})
-		pushBranch = renameTo
-	}
 	pushSummary := "git push"
-	if pushBranch != "" && pushBranch != strings.TrimSpace(ctx.Branch) {
+	if switchedToPublishBranch {
 		pushSummary = fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(pushBranch))
 	}
 	entries = append(entries, fixActionPlanEntry{
@@ -421,8 +423,8 @@ func planFixActionPullFFOnly(ctx fixActionPlanContext) []fixActionPlanEntry {
 
 func planFixActionSetUpstreamPush(ctx fixActionPlanContext) []fixActionPlanEntry {
 	branch := strings.TrimSpace(ctx.Branch)
-	renameTo := strings.TrimSpace(ctx.ForkBranchRenameTo)
-	if renameTo == "" || renameTo == branch {
+	targetBranch := strings.TrimSpace(ctx.ForkBranchRenameTo)
+	if targetBranch == "" || targetBranch == branch {
 		return []fixActionPlanEntry{
 			{
 				ID:      "upstream-push",
@@ -433,14 +435,14 @@ func planFixActionSetUpstreamPush(ctx fixActionPlanContext) []fixActionPlanEntry
 	}
 	return []fixActionPlanEntry{
 		{
-			ID:      "upstream-rename-branch",
+			ID:      "upstream-checkout-new-branch",
 			Command: true,
-			Summary: fmt.Sprintf("git branch -m %s", renameTo),
+			Summary: fmt.Sprintf("git checkout -b %s", targetBranch),
 		},
 		{
 			ID:      "upstream-push",
 			Command: true,
-			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(renameTo)),
+			Summary: fmt.Sprintf("git push -u %s %s", plannedRemote(ctx.PreferredRemote, ctx.Upstream), plannedBranch(targetBranch)),
 		},
 	}
 }
@@ -561,14 +563,14 @@ func planFixActionForkAndRetarget(ctx fixActionPlanContext) []fixActionPlanEntry
 	}
 	pushBranch := strings.TrimSpace(ctx.Branch)
 	pushSummary := fmt.Sprintf("git push -u --force %s %s", owner, plannedBranch(pushBranch))
-	renameTo := strings.TrimSpace(ctx.ForkBranchRenameTo)
-	if renameTo != "" && renameTo != pushBranch {
+	targetBranch := strings.TrimSpace(ctx.ForkBranchRenameTo)
+	if targetBranch != "" && targetBranch != pushBranch {
 		entries = append(entries, fixActionPlanEntry{
-			ID:      "fork-rename-branch",
+			ID:      "fork-checkout-new-branch",
 			Command: true,
-			Summary: fmt.Sprintf("git branch -m %s", renameTo),
+			Summary: fmt.Sprintf("git checkout -b %s", targetBranch),
 		})
-		pushBranch = renameTo
+		pushBranch = targetBranch
 		pushSummary = fmt.Sprintf("git push -u %s %s", owner, plannedBranch(pushBranch))
 	}
 	entries = append(entries, fixActionPlanEntry{

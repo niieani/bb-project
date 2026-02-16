@@ -28,6 +28,7 @@ bb fix [project] [action] [flags]
 ### Interactive mode notes
 
 - `bb fix` list mode renders a compact bordered title (`bb fix · Interactive remediation for unsyncable repositories`) and a compact selected-repo details line to reduce vertical space usage.
+- When `Publish as new branch (optional)` is set, `bb fix` creates and switches to that branch before staging/committing, leaving the original branch ref untouched.
 - Busy list-mode states recolor the full primary border consistently, including the titled top edge.
 - Selected-repo metadata wraps on segment separators (` · `) so labels stay attached to values.
 - In list mode, `enter` runs selected fixes; when none are selected, it runs the currently browsed fix for the selected repo.
