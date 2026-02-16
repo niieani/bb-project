@@ -100,6 +100,7 @@ Use this baseline across TUIs unless there's a strong reason to diverge:
 - `Ctrl+C`: quit (with confirmation if it would discard work).
 - `?`: toggle extended help.
 - Prefer terminal-portable chords for secondary actions (for example `alt+<letter>`), and avoid punctuation-heavy control chords that vary across emulators.
+- Render shortcut labels with platform-appropriate symbols where possible: on macOS prefer glyphs like `⌥`/`⌃`/`⌘`; on other platforms prefer textual labels like `alt`/`ctrl`/`meta`.
 
 Text input rule:
 
@@ -111,7 +112,7 @@ Text input rule:
 - Never render a second key legend inside panel bodies, wizard steps, or details blocks.
 - The legend must be state-aware: show only shortcuts that are currently available/effective for the active screen and focus.
 - Order shortcuts by importance for the current context (primary action first, then navigation, then secondary actions).
-- Use compact key labels with symbols and lowercase text (`←/→`, `↑/↓`, `enter`, `esc`, `ctrl+a`).
+- Use compact key labels with symbols and lowercase text (`←/→`, `↑/↓`, `enter`, `esc`, `ctrl+a` or macOS `⌃A`).
 - Keep separator formatting consistent as ` • ` between shortcut entries.
 - In collapsed mode, footer help must render as exactly one line; if it overflows, truncate that same line and place `…` at the end (never wrap to a second line).
 - `?` must always toggle expanded/full footer help on every interactive screen/mode (including wizards and summaries).

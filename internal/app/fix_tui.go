@@ -300,7 +300,7 @@ func (m *fixTUIModel) wizardHelpMap() fixTUIHelpMap {
 	short = append(short, focus)
 	secondary = append(secondary, focus)
 	if m.wizardHasVisualDiffButton() {
-		diff := newHelpBinding([]string{"alt+v"}, "alt+v", "visual diff")
+		diff := newHelpBinding([]string{"alt+v"}, m.visualDiffShortcutDisplayLabel(), "visual diff")
 		short = append(short, diff)
 		secondary = append(secondary, diff)
 	}

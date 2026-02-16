@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"bb-project/internal/domain"
@@ -1584,11 +1585,12 @@ func (m *fixTUIModel) renderWizardChangedFilesBlock() string {
 }
 
 func (m *fixTUIModel) renderWizardVisualDiffHint() string {
+	shortcutLabel := m.visualDiffShortcutDisplayLabel()
 	shortcut := lipgloss.NewStyle().
 		Foreground(textColor).
 		Background(lipgloss.AdaptiveColor{Light: "#ECF3FF", Dark: "#1C2738"}).
 		Padding(0, 1).
-		Render("alt+v")
+		Render(shortcutLabel)
 	return hintStyle.Render("Press ") + shortcut + hintStyle.Render(" to open visual diff viewer (lumen).")
 }
 
@@ -1599,6 +1601,21 @@ func isWizardVisualDiffShortcut(msg tea.KeyMsg) bool {
 	default:
 		return false
 	}
+}
+
+func visualDiffShortcutDisplayLabel(goos string) string {
+	if strings.EqualFold(strings.TrimSpace(goos), "darwin") {
+		return "⌥V"
+	}
+	return "alt+v"
+}
+
+func (m *fixTUIModel) visualDiffShortcutDisplayLabel() string {
+	goos := runtime.GOOS
+	if m != nil && m.app != nil && m.app.GOOS != nil {
+		goos = m.app.GOOS()
+	}
+	return visualDiffShortcutDisplayLabel(goos)
 }
 
 func renderWizardCommandLine(command string) string {

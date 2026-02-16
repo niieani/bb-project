@@ -271,7 +271,7 @@ Interactive apply behavior:
 - Risky fixes (`push`, `sync-with-upstream`, `set-upstream-push`, `stage-commit-push`, `create-project`) open a confirmation wizard before execution.
 - Wizard shows changed files with `+/-` stats, target branch context, and a per-repo skip option.
 - For commit-producing actions, wizard includes commit message input with symbolic `✨` generation (Lumen draft).
-- When changed files are shown, press `alt+v` to launch Lumen visual diff and return to the same wizard state.
+- When changed files are shown, press `⌥V` on macOS (or `alt+v` on other platforms) to launch Lumen visual diff and return to the same wizard state.
 - Wizard can generate a minimal root `.gitignore` when missing.
 
 Selector resolution for `<project>`:

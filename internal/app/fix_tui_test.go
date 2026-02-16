@@ -5,6 +5,7 @@ import (
 	"io"
 	"os/exec"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -2430,8 +2431,9 @@ func TestFixTUIWizardVisualDiffButtonLaunchesAndReturnsToSameWizardState(t *test
 	m := newFixTUIModelForTest(repos)
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
 
+	shortcutLabel := visualDiffShortcutDisplayLabel(runtime.GOOS)
 	view := ansi.Strip(m.viewWizardContent())
-	if !strings.Contains(view, "alt+v") || !strings.Contains(view, "open visual diff viewer (lumen).") {
+	if !strings.Contains(view, shortcutLabel) || !strings.Contains(view, "open visual diff viewer (lumen).") {
 		t.Fatalf("expected shortcut hint copy in changed-files block, got %q", view)
 	}
 
@@ -2534,9 +2536,10 @@ func TestFixTUIWizardHelpShowsAltVForVisualDiff(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
 
+	shortcutLabel := visualDiffShortcutDisplayLabel(runtime.GOOS)
 	entries := shortHelpEntries(m.contextualHelpMap().ShortHelp())
-	if !helpContains(entries, "alt+v visual diff") {
-		t.Fatalf("expected wizard help to include alt+v visual diff shortcut, got %v", entries)
+	if !helpContains(entries, shortcutLabel+" visual diff") {
+		t.Fatalf("expected wizard help to include visual diff shortcut %q, got %v", shortcutLabel, entries)
 	}
 }
 
