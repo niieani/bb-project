@@ -4,3 +4,5 @@
 # Local vendor symlink references
 references/
 /bb
+.bin/
+.dist/

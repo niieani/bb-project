@@ -274,6 +274,66 @@ func TestRunUnknownCommandReturns2(t *testing.T) {
 	mustContain(t, stderr, "unknown command")
 }
 
+func TestRunVersionCommand(t *testing.T) {
+	originalVersion := buildVersion
+	originalCommit := buildCommit
+	originalDate := buildDate
+	t.Cleanup(func() {
+		buildVersion = originalVersion
+		buildCommit = originalCommit
+		buildDate = originalDate
+	})
+
+	buildVersion = ""
+	buildCommit = ""
+	buildDate = ""
+
+	fake := &fakeApp{}
+	code, stdout, stderr, calls, _ := runCLI(t, fake, []string{"version"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if calls != 0 {
+		t.Fatalf("app factory calls = %d, want 0", calls)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+	mustContain(t, stdout, "bb version dev")
+	mustContain(t, stdout, "commit: unknown")
+	mustContain(t, stdout, "built: unknown")
+}
+
+func TestRunVersionCommandUsesBuildOverrides(t *testing.T) {
+	originalVersion := buildVersion
+	originalCommit := buildCommit
+	originalDate := buildDate
+	t.Cleanup(func() {
+		buildVersion = originalVersion
+		buildCommit = originalCommit
+		buildDate = originalDate
+	})
+
+	buildVersion = "v1.2.3"
+	buildCommit = "abcdef0"
+	buildDate = "2026-02-16T00:00:00Z"
+
+	fake := &fakeApp{}
+	code, stdout, stderr, calls, _ := runCLI(t, fake, []string{"version"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if calls != 0 {
+		t.Fatalf("app factory calls = %d, want 0", calls)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+	mustContain(t, stdout, "bb version v1.2.3")
+	mustContain(t, stdout, "commit: abcdef0")
+	mustContain(t, stdout, "built: 2026-02-16T00:00:00Z")
+}
+
 func TestRunQuietFlagApplied(t *testing.T) {
 	t.Parallel()
 

@@ -12,7 +12,7 @@ bb fix [project] [action] [flags]
       --ai-message                    Generate commit message with Lumen for commit-producing fix actions.
   -h, --help                          help for fix
       --include-catalog stringArray   Limit scope to selected catalogs (repeatable).
-      --message string                Commit message for stage-commit-push/publish-new-branch/checkpoint-then-sync actions (or 'auto').
+      --message string                Commit message for stage-commit-push/publish-new-branch/checkpoint-then-sync actions (or 'auto' for configured empty-message behavior).
       --no-refresh                    Use current machine snapshot without running a refresh scan first.
       --publish-branch string         Target branch name for publish-new-branch or optional publish-to-new-branch flows.
       --return-to-original-sync       After publish-new-branch, switch back to the original branch and run pull --ff-only.

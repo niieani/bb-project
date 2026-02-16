@@ -50,6 +50,28 @@ Run:
 ./bb <command> [args]
 ```
 
+## Developer Install
+
+Build a dev binary and place a symlink in a directory that is already on your `PATH`:
+
+```bash
+just install-dev ~/bin
+```
+
+This creates `~/bin/bb -> /absolute/path/to/repo/.dist/dev/bb`.
+
+Default link directory is `.bin` inside the repo:
+
+```bash
+just install-dev
+```
+
+Remove a symlink with:
+
+```bash
+just uninstall-dev ~/bin
+```
+
 ## First-Time Setup
 
 Run interactive setup:
@@ -81,6 +103,7 @@ Global flags:
 
 Top-level commands:
 
+- `version`
 - `init`
 - `clone`
 - `link`
@@ -98,6 +121,14 @@ Top-level commands:
 - `catalog`
 - `config`
 - `completion`
+
+### `bb version`
+
+Print build metadata:
+
+- semantic version (`dev` for local builds)
+- commit SHA (`unknown` for local builds)
+- build timestamp (`unknown` for local builds)
 
 ### `bb init [project] [flags]`
 
@@ -508,6 +539,28 @@ Install periodic scheduler:
 
 ```bash
 ./bb scheduler install
+```
+
+## Releases
+
+Versioning and release PR/tag creation is automated with `release-please` on `main`.
+
+Release flow:
+
+1. Merge Conventional Commit messages into `main`.
+2. `release-please` opens/updates a release PR with version bump + changelog.
+3. Merge that PR to create a `vX.Y.Z` tag and GitHub release.
+4. Tag push triggers GoReleaser, which publishes multi-platform binaries and updates Homebrew tap formula.
+
+Required GitHub secrets:
+
+- `HOMEBREW_TAP_GITHUB_TOKEN`: PAT with push access to `<org>/homebrew-tap`.
+
+Homebrew install:
+
+```bash
+brew tap <org>/tap
+brew install bb
 ```
 
 ## Development

@@ -36,4 +36,5 @@ bb [flags]
 * [bb scheduler](bb_scheduler.md)	 - Manage periodic sync scheduler integration.
 * [bb status](bb_status.md)	 - Show last recorded machine repository state.
 * [bb sync](bb_sync.md)	 - Run observe, publish, and reconcile flow.
+* [bb version](bb_version.md)	 - Print bb build version information.
 

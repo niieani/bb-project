@@ -13,6 +13,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	buildVersion = "dev"
+	buildCommit  = "unknown"
+	buildDate    = "unknown"
+)
+
 type appRunner interface {
 	SetVerbose(verbose bool)
 	RunInit(opts app.InitOptions) error
@@ -166,6 +172,7 @@ func newRootCommand(runtime *runtimeState) *cobra.Command {
 	cmd.PersistentFlags().BoolVarP(&runtime.quiet, "quiet", "q", false, "Suppress verbose bb logs.")
 
 	cmd.AddCommand(
+		newVersionCommand(),
 		newInitCommand(runtime),
 		newCloneCommand(runtime),
 		newLinkCommand(runtime),
@@ -186,6 +193,27 @@ func newRootCommand(runtime *runtimeState) *cobra.Command {
 	cmd.AddCommand(newCompletionCommand(runtime, cmd))
 
 	return cmd
+}
+
+func newVersionCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print bb build version information.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			fmt.Fprintf(cmd.OutOrStdout(), "bb version %s\n", nonEmpty(buildVersion, "dev"))
+			fmt.Fprintf(cmd.OutOrStdout(), "commit: %s\n", nonEmpty(buildCommit, "unknown"))
+			fmt.Fprintf(cmd.OutOrStdout(), "built: %s\n", nonEmpty(buildDate, "unknown"))
+			return nil
+		},
+	}
+}
+
+func nonEmpty(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func withExitCode(code int, err error) error {
