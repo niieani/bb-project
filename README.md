@@ -314,7 +314,7 @@ Interactive apply behavior:
 - Wizard can generate a minimal root `.gitignore` when missing.
 - In list mode, when repository details wrap (for example long paths or action-help text), `bb fix` shrinks the table viewport first so top chrome and footer help remain visible without truncating details text, and keeps one-row navigation stable (no sudden page jump when moving by one row).
 - In list mode, the primary panel uses a compact titled border (`bb fix · Interactive remediation for unsyncable repositories`) to preserve vertical space, and selected-repo metadata is rendered on one dot-separated line.
-- The list-mode summary stats row is responsive: it renders pill boxes when they fit, and automatically switches to a wrapped dot-separated key/value line on narrow terminals to prevent horizontal overflow artifacts.
+- The list-mode summary stats row is responsive: it renders pill boxes when they fit, and on narrow terminals it keeps the same uppercase metric chips/order/colors but drops borders and wraps by chip to prevent horizontal overflow artifacts.
 - Selected-repo metadata wrapping is segment-aware (wraps at ` · ` boundaries), so labels stay attached to their values and avoid orphan trailing tokens on separate lines.
 - In list mode, `bb fix` keeps the primary panel top-anchored and places footer help immediately below it (no artificial spacer gap between panel and footer); available height is absorbed by list sizing.
 - In list mode, `enter` runs currently selected fixes; when none are selected, it runs the currently browsed fix for the selected repo.

@@ -1698,34 +1698,46 @@ func (m *fixTUIModel) viewFixSummary() string {
 			syncable++
 		}
 	}
-	totalStyle := renderStatusPill(fmt.Sprintf("%d repos", total))
-	pendingStyle := renderStatusPill(fmt.Sprintf("%d selected", pending))
-	autoStyle := renderFixSummaryPill(fmt.Sprintf("%d fixable", fixable), lipgloss.Color("214"))
-	blockedStyle := renderFixSummaryPill(fmt.Sprintf("%d unsyncable", blocked), errorFgColor)
-	notClonedStyle := renderFixSummaryPill(fmt.Sprintf("%d not cloned", notCloned), warningColor)
-	syncStyle := renderFixSummaryPill(fmt.Sprintf("%d syncable", syncable), successColor)
-	ignoredStyle := renderFixSummaryPill(fmt.Sprintf("%d ignored", ignored), mutedTextColor)
-	pills := lipgloss.JoinHorizontal(lipgloss.Top, totalStyle, " ", pendingStyle, "  ", autoStyle, " ", blockedStyle, " ", notClonedStyle, " ", syncStyle, " ", ignoredStyle)
+	segments := []fixSummarySegment{
+		{Value: fmt.Sprintf("%d repos", total), Fg: textColor},
+		{Value: fmt.Sprintf("%d selected", pending), Fg: textColor},
+		{Value: fmt.Sprintf("%d fixable", fixable), Fg: lipgloss.Color("214")},
+		{Value: fmt.Sprintf("%d unsyncable", blocked), Fg: errorFgColor},
+		{Value: fmt.Sprintf("%d not cloned", notCloned), Fg: warningColor},
+		{Value: fmt.Sprintf("%d syncable", syncable), Fg: successColor},
+		{Value: fmt.Sprintf("%d ignored", ignored), Fg: mutedTextColor},
+	}
+
+	pills := lipgloss.JoinHorizontal(lipgloss.Top,
+		renderFixSummaryChip(segments[0].Value, segments[0].Fg, true),
+		" ",
+		renderFixSummaryChip(segments[1].Value, segments[1].Fg, true),
+		"  ",
+		renderFixSummaryChip(segments[2].Value, segments[2].Fg, true),
+		" ",
+		renderFixSummaryChip(segments[3].Value, segments[3].Fg, true),
+		" ",
+		renderFixSummaryChip(segments[4].Value, segments[4].Fg, true),
+		" ",
+		renderFixSummaryChip(segments[5].Value, segments[5].Fg, true),
+		" ",
+		renderFixSummaryChip(segments[6].Value, segments[6].Fg, true),
+	)
 	summaryWidth := m.repoDetailsLineWidth()
 	if summaryWidth <= 0 || lipgloss.Width(pills) <= summaryWidth {
 		return pills
 	}
-	return m.viewFixSummaryCompactText(total, pending, fixable, blocked, notCloned, syncable, ignored, summaryWidth)
+
+	compactSegments := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		compactSegments = append(compactSegments, renderFixSummaryChip(segment.Value, segment.Fg, false))
+	}
+	return strings.Join(wrapStyledSegments(compactSegments, " ", summaryWidth), "\n")
 }
 
-func (m *fixTUIModel) viewFixSummaryCompactText(total int, pending int, fixable int, blocked int, notCloned int, syncable int, ignored int, width int) string {
-	segments := []string{
-		fmt.Sprintf("repos: %d", total),
-		fmt.Sprintf("selected: %d", pending),
-		fmt.Sprintf("fixable: %d", fixable),
-		fmt.Sprintf("unsyncable: %d", blocked),
-		fmt.Sprintf("not cloned: %d", notCloned),
-		fmt.Sprintf("syncable: %d", syncable),
-		fmt.Sprintf("ignored: %d", ignored),
-	}
-	separator := hintStyle.Render(" · ")
-	lines := wrapStyledSegments(segments, separator, width)
-	return strings.Join(lines, "\n")
+type fixSummarySegment struct {
+	Value string
+	Fg    lipgloss.TerminalColor
 }
 
 func (m *fixTUIModel) viewContentWidth() int {
@@ -2918,15 +2930,22 @@ func fixScheduledPlainText(actions []string) string {
 	return strings.Join(labels, " ")
 }
 
-func renderFixSummaryPill(value string, fg lipgloss.TerminalColor) string {
-	return lipgloss.NewStyle().
+func renderFixSummaryChip(value string, fg lipgloss.TerminalColor, bordered bool) string {
+	style := lipgloss.NewStyle().
 		Foreground(fg).
 		Background(accentBgColor).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(accentColor).
 		Padding(0, 1).
-		Bold(true).
-		Render(strings.ToUpper(value))
+		Bold(true)
+	if bordered {
+		style = style.
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(accentColor)
+	}
+	return style.Render(strings.ToUpper(value))
+}
+
+func renderFixSummaryPill(value string, fg lipgloss.TerminalColor) string {
+	return renderFixSummaryChip(value, fg, true)
 }
 
 func fixActionStyleFor(action string) lipgloss.Style {

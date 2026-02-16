@@ -4657,11 +4657,20 @@ func TestFixTUIFixSummaryFallsBackToWrappedTextWhenPillsDoNotFit(t *testing.T) {
 	if strings.Contains(summary, "╭") || strings.Contains(summary, "╮") || strings.Contains(summary, "╰") || strings.Contains(summary, "╯") {
 		t.Fatalf("expected narrow summary fallback without pill boxes, got %q", summary)
 	}
-	if !strings.Contains(summary, "repos:") || !strings.Contains(summary, "selected:") || !strings.Contains(summary, "fixable:") {
-		t.Fatalf("expected key/value summary entries, got %q", summary)
+	if strings.Contains(summary, ":") {
+		t.Fatalf("fallback should keep pill content format (NUMBER TEXT), got %q", summary)
 	}
-	if !strings.Contains(summary, " · ") {
-		t.Fatalf("expected dot-separated summary entries, got %q", summary)
+	wantOrder := []string{"12 REPOS", "0 SELECTED", "0 FIXABLE", "12 UNSYNCABLE", "0 NOT CLONED", "0 SYNCABLE", "0 IGNORED"}
+	last := -1
+	for _, token := range wantOrder {
+		idx := strings.Index(summary, token)
+		if idx < 0 {
+			t.Fatalf("fallback summary missing token %q in %q", token, summary)
+		}
+		if idx < last {
+			t.Fatalf("fallback summary changed metric order, token=%q summary=%q", token, summary)
+		}
+		last = idx
 	}
 	summaryWidth := m.repoDetailsLineWidth()
 	for _, line := range strings.Split(summary, "\n") {
