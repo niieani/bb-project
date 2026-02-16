@@ -22,4 +22,4 @@ For interactive commands, use the charmbracelet ecosystem: [bubbletea](https://p
 - `references/vendor/bubbletea`
 - `references/vendor/lipgloss`
 
-Read ./docs/CLI-STYLE.md guide whenever touching any UI or interactive elements.
+Read ./docs/CLI_UX_AND_STYLE_GUIDE.md guide whenever touching any UI or interactive elements.
