@@ -66,6 +66,11 @@ This wizard configures:
 - Lumen integration defaults (install tips and optional AI commit generation when commit message is empty)
 - catalogs, per-catalog repository layout depth (`1` or `2`), and default catalog
 
+Lumen note:
+
+- The `Fixes` tab includes `Use Lumen for empty commit messages`.
+- If `lumen` is not available on `PATH`, this toggle is disabled and the wizard shows an install/config tip.
+
 Manual catalog commands remain available.
 
 ## Command Reference

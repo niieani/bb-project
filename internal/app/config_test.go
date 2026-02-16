@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -228,6 +229,67 @@ func TestRunConfigNonInteractiveFails(t *testing.T) {
 	if !strings.Contains(err.Error(), "requires an interactive terminal") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func TestRunConfigPassesLumenAvailabilityToWizardInput(t *testing.T) {
+	home := t.TempDir()
+	paths := state.NewPaths(home)
+	now := time.Date(2026, 2, 16, 10, 0, 0, 0, time.UTC)
+	t.Setenv("BB_MACHINE_ID", "machine-a")
+
+	cfg := state.DefaultConfig()
+	cfg.GitHub.Owner = "owner-before"
+	if err := state.SaveYAML(paths.ConfigPath(), cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	machine := state.BootstrapMachine("machine-a", "host-a", now)
+	machine.DefaultCatalog = "software"
+	machine.Catalogs = []domain.Catalog{{Name: "software", Root: filepath.Join(home, "software")}}
+	if err := state.SaveMachine(paths, machine); err != nil {
+		t.Fatalf("save machine: %v", err)
+	}
+
+	t.Run("lumen available", func(t *testing.T) {
+		a := New(paths, &bytes.Buffer{}, &bytes.Buffer{})
+		a.IsInteractiveTerminal = func() bool { return true }
+		a.LookPath = func(file string) (string, error) {
+			if file != "lumen" {
+				t.Fatalf("lookpath file = %q, want lumen", file)
+			}
+			return "/usr/local/bin/lumen", nil
+		}
+		a.RunConfigWizard = func(input ConfigWizardInput) (ConfigWizardResult, error) {
+			if !input.LumenAvailable {
+				t.Fatal("expected lumen availability to be true")
+			}
+			return ConfigWizardResult{Applied: false}, nil
+		}
+
+		if err := a.RunConfig(); err != nil {
+			t.Fatalf("RunConfig failed: %v", err)
+		}
+	})
+
+	t.Run("lumen unavailable", func(t *testing.T) {
+		a := New(paths, &bytes.Buffer{}, &bytes.Buffer{})
+		a.IsInteractiveTerminal = func() bool { return true }
+		a.LookPath = func(file string) (string, error) {
+			if file != "lumen" {
+				t.Fatalf("lookpath file = %q, want lumen", file)
+			}
+			return "", errors.New("not found")
+		}
+		a.RunConfigWizard = func(input ConfigWizardInput) (ConfigWizardResult, error) {
+			if input.LumenAvailable {
+				t.Fatal("expected lumen availability to be false")
+			}
+			return ConfigWizardResult{Applied: false}, nil
+		}
+
+		if err := a.RunConfig(); err != nil {
+			t.Fatalf("RunConfig failed: %v", err)
+		}
+	})
 }
 
 func TestValidateMachineForSaveRejectsInvalidRepoPathDepth(t *testing.T) {

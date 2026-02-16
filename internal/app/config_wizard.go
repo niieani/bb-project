@@ -24,8 +24,8 @@ const (
 	stepIntro configStep = iota
 	stepGitHub
 	stepSync
-	stepScheduler
-	stepNotify
+	stepAutomation
+	stepFixes
 	stepCatalogs
 	stepReview
 )
@@ -45,11 +45,15 @@ const (
 )
 
 const (
-	notifyFocusEnabled = iota
-	notifyFocusDedupe
-	notifyFocusThrottle
-	notifyFocusLumenAutoCommit
-	notifyFocusCount
+	automationFocusScheduler = iota
+	automationFocusNotifyEnabled
+	automationFocusNotifyDedupe
+	automationFocusNotifyThrottle
+	automationFocusCount
+)
+
+const (
+	fixesFocusLumenAutoCommit = iota
 )
 
 type configWizardKeyMap struct {
@@ -185,8 +189,11 @@ type configWizardModel struct {
 
 	schedulerInterval textinput.Model
 
-	notifyThrottle textinput.Model
-	notifyFocus    int
+	notifyThrottle  textinput.Model
+	automationFocus int
+
+	fixesFocus     int
+	lumenAvailable bool
 
 	catalogTable table.Model
 	catalogEdit  *catalogEditor
@@ -401,6 +408,7 @@ func newConfigWizardModel(input ConfigWizardInput) *configWizardModel {
 		catalogFocus:       catalogFocusButtons,
 		catalogBtn:         0,
 		createMissingRoots: true,
+		lumenAvailable:     input.LumenAvailable,
 	}
 	if m.machine.Catalogs == nil {
 		m.machine.Catalogs = []domain.Catalog{}
@@ -491,10 +499,10 @@ func (m *configWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateGitHub(msg)
 	case stepSync:
 		return m.updateSync(msg)
-	case stepScheduler:
-		return m.updateScheduler(msg)
-	case stepNotify:
-		return m.updateNotify(msg)
+	case stepAutomation:
+		return m.updateAutomation(msg)
+	case stepFixes:
+		return m.updateFixes(msg)
 	case stepCatalogs:
 		return m.updateCatalogs(msg)
 	case stepReview:
@@ -551,10 +559,10 @@ func (m *configWizardModel) View() string {
 		content = m.viewGitHub()
 	case stepSync:
 		content = m.viewSync()
-	case stepScheduler:
-		content = m.viewScheduler()
-	case stepNotify:
-		content = m.viewNotify()
+	case stepAutomation:
+		content = m.viewAutomation()
+	case stepFixes:
+		content = m.viewFixes()
 	case stepCatalogs:
 		content = m.viewCatalogs()
 	case stepReview:
@@ -747,26 +755,54 @@ func (m *configWizardModel) updateSync(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *configWizardModel) updateScheduler(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *configWizardModel) updateAutomation(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.String() {
 		case "up":
 			if m.focusTabs {
 				return m, nil
 			}
-			m.focusTabs = true
-			m.updateSchedulerFocus()
+			if m.automationFocus == automationFocusScheduler {
+				m.focusTabs = true
+				m.updateAutomationFocus()
+				return m, nil
+			}
+			m.automationFocus--
+			m.updateAutomationFocus()
 			return m, nil
 		case "down":
 			if m.focusTabs {
 				m.focusTabs = false
-				m.updateSchedulerFocus()
+				m.automationFocus = automationFocusScheduler
+				m.updateAutomationFocus()
+				return m, nil
+			}
+			if m.automationFocus < automationFocusCount-1 {
+				m.automationFocus++
+			}
+			m.updateAutomationFocus()
+			return m, nil
+		case " ":
+			if m.focusTabs {
+				return m, nil
+			}
+			if m.automationFocus == automationFocusNotifyEnabled {
+				m.config.Notify.Enabled = !m.config.Notify.Enabled
+				m.recomputeDirty()
+				return m, nil
+			}
+			if m.automationFocus == automationFocusNotifyDedupe {
+				m.config.Notify.Dedupe = !m.config.Notify.Dedupe
+				m.recomputeDirty()
 				return m, nil
 			}
 		case "enter":
 			if !m.focusTabs {
 				if v, err := strconv.Atoi(strings.TrimSpace(m.schedulerInterval.Value())); err == nil {
 					m.config.Scheduler.IntervalMinutes = v
+				}
+				if v, err := strconv.Atoi(strings.TrimSpace(m.notifyThrottle.Value())); err == nil {
+					m.config.Notify.ThrottleMinutes = v
 				}
 				m.advanceStep()
 				return m, nil
@@ -779,56 +815,50 @@ func (m *configWizardModel) updateScheduler(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	m.schedulerInterval, cmd = m.schedulerInterval.Update(msg)
-	if v, err := strconv.Atoi(strings.TrimSpace(m.schedulerInterval.Value())); err == nil {
-		m.config.Scheduler.IntervalMinutes = v
+	switch m.automationFocus {
+	case automationFocusScheduler:
+		m.schedulerInterval, cmd = m.schedulerInterval.Update(msg)
+		if v, err := strconv.Atoi(strings.TrimSpace(m.schedulerInterval.Value())); err == nil {
+			m.config.Scheduler.IntervalMinutes = v
+		}
+	case automationFocusNotifyThrottle:
+		m.notifyThrottle, cmd = m.notifyThrottle.Update(msg)
+		if v, err := strconv.Atoi(strings.TrimSpace(m.notifyThrottle.Value())); err == nil {
+			m.config.Notify.ThrottleMinutes = v
+		}
+	default:
+		return m, nil
 	}
 	m.recomputeDirty()
 	return m, cmd
 }
 
-func (m *configWizardModel) updateNotify(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *configWizardModel) updateFixes(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		switch keyMsg.String() {
 		case "up":
 			if m.focusTabs {
 				return m, nil
 			}
-			if m.notifyFocus == notifyFocusEnabled {
+			if m.fixesFocus == fixesFocusLumenAutoCommit {
 				m.focusTabs = true
-				m.updateNotifyFocus()
+				m.updateFixesFocus()
 				return m, nil
 			}
-			m.notifyFocus--
-			m.updateNotifyFocus()
 			return m, nil
 		case "down":
 			if m.focusTabs {
 				m.focusTabs = false
-				m.notifyFocus = notifyFocusEnabled
-				m.updateNotifyFocus()
+				m.fixesFocus = fixesFocusLumenAutoCommit
+				m.updateFixesFocus()
 				return m, nil
 			}
-			if m.notifyFocus < notifyFocusCount-1 {
-				m.notifyFocus++
-			}
-			m.updateNotifyFocus()
 			return m, nil
 		case " ":
-			if m.focusTabs {
+			if m.focusTabs || !m.lumenAvailable {
 				return m, nil
 			}
-			if m.notifyFocus == notifyFocusEnabled {
-				m.config.Notify.Enabled = !m.config.Notify.Enabled
-				m.recomputeDirty()
-				return m, nil
-			}
-			if m.notifyFocus == notifyFocusDedupe {
-				m.config.Notify.Dedupe = !m.config.Notify.Dedupe
-				m.recomputeDirty()
-				return m, nil
-			}
-			if m.notifyFocus == notifyFocusLumenAutoCommit {
+			if m.fixesFocus == fixesFocusLumenAutoCommit {
 				m.config.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty = !m.config.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty
 				m.recomputeDirty()
 				return m, nil
@@ -840,18 +870,7 @@ func (m *configWizardModel) updateNotify(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-
-	if m.focusTabs || m.notifyFocus != notifyFocusThrottle {
-		return m, nil
-	}
-
-	var cmd tea.Cmd
-	m.notifyThrottle, cmd = m.notifyThrottle.Update(msg)
-	if v, err := strconv.Atoi(strings.TrimSpace(m.notifyThrottle.Value())); err == nil {
-		m.config.Notify.ThrottleMinutes = v
-	}
-	m.recomputeDirty()
-	return m, cmd
+	return m, nil
 }
 
 func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1330,24 +1349,27 @@ func (m *configWizardModel) updateGitHubFocus() {
 	m.githubOwnerInput.Focus()
 }
 
-func (m *configWizardModel) updateSchedulerFocus() {
-	if m.focusTabs || m.step != stepScheduler {
+func (m *configWizardModel) updateAutomationFocus() {
+	if m.focusTabs || m.step != stepAutomation {
 		m.schedulerInterval.Blur()
-		return
-	}
-	m.schedulerInterval.Focus()
-}
-
-func (m *configWizardModel) updateNotifyFocus() {
-	if m.focusTabs {
 		m.notifyThrottle.Blur()
 		return
 	}
-	if m.notifyFocus == notifyFocusThrottle {
+	if m.automationFocus == automationFocusScheduler {
+		m.schedulerInterval.Focus()
+		m.notifyThrottle.Blur()
+		return
+	}
+	m.schedulerInterval.Blur()
+	if m.automationFocus == automationFocusNotifyThrottle {
 		m.notifyThrottle.Focus()
 		return
 	}
 	m.notifyThrottle.Blur()
+}
+
+func (m *configWizardModel) updateFixesFocus() {
+	// No text input focus to manage yet; reserved for future fixes settings.
 }
 
 func (m *configWizardModel) updateCatalogEditorFocus() {
@@ -1440,8 +1462,8 @@ func (m *configWizardModel) onStepChanged() {
 	m.errorText = ""
 	m.confirmQuit = false
 	m.updateGitHubFocus()
-	m.updateSchedulerFocus()
-	m.updateNotifyFocus()
+	m.updateAutomationFocus()
+	m.updateFixesFocus()
 	m.updateCatalogFocus()
 }
 
@@ -1495,11 +1517,10 @@ func (m *configWizardModel) validateCurrentStep() error {
 		if m.config.GitHub.RemoteProtocol != "ssh" && m.config.GitHub.RemoteProtocol != "https" {
 			return fmt.Errorf("remote protocol must be ssh or https")
 		}
-	case stepScheduler:
+	case stepAutomation:
 		if m.schedulerInterval.Err != nil {
 			return m.schedulerInterval.Err
 		}
-	case stepNotify:
 		if m.notifyThrottle.Err != nil {
 			return m.notifyThrottle.Err
 		}
@@ -1538,7 +1559,7 @@ func (m *configWizardModel) recomputeDirty() {
 }
 
 func (m *configWizardModel) stepsHeader() string {
-	labels := []string{"Intro", "GitHub", "Sync", "Scheduler", "Notify", "Catalogs", "Review"}
+	labels := []string{"Intro", "GitHub", "Sync", "Automation", "Fixes", "Catalogs", "Review"}
 	parts := make([]string, 0, len(labels))
 	for i, l := range labels {
 		if i == int(m.step) {
@@ -1660,56 +1681,67 @@ func (m *configWizardModel) viewSync() string {
 	return b.String()
 }
 
-func (m *configWizardModel) viewScheduler() string {
+func (m *configWizardModel) viewAutomation() string {
 	var b strings.Builder
-	b.WriteString(labelStyle.Render("Scheduler Settings"))
+	b.WriteString(labelStyle.Render("Automation & Notifications"))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Configure periodic background sync cadence used by `bb scheduler install`."))
+	b.WriteString(hintStyle.Render("Configure background sync cadence and unsyncable notification behavior."))
 	b.WriteString("\n\n")
 	b.WriteString(renderFieldBlock(
-		!m.focusTabs,
+		!m.focusTabs && m.automationFocus == automationFocusScheduler,
 		"Run interval (minutes)",
 		"Scheduler launch interval for background `bb sync --notify`.",
-		renderInputContainer(m.schedulerInterval.View(), !m.focusTabs),
+		renderInputContainer(m.schedulerInterval.View(), !m.focusTabs && m.automationFocus == automationFocusScheduler),
 		errorText(m.schedulerInterval.Err),
 	))
-	return b.String()
-}
-
-func (m *configWizardModel) viewNotify() string {
-	var b strings.Builder
-	b.WriteString(labelStyle.Render("Notify Settings"))
-	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Control when and how unsyncable repository notifications are emitted."))
 	b.WriteString("\n\n")
 	b.WriteString(renderToggleField(
-		!m.focusTabs && m.notifyFocus == notifyFocusEnabled,
+		!m.focusTabs && m.automationFocus == automationFocusNotifyEnabled,
 		"Enable notifications",
 		"Emits notification output for unsyncable repositories when --notify is used.",
 		m.config.Notify.Enabled,
 	))
 	b.WriteString("\n\n")
 	b.WriteString(renderToggleField(
-		!m.focusTabs && m.notifyFocus == notifyFocusDedupe,
+		!m.focusTabs && m.automationFocus == automationFocusNotifyDedupe,
 		"Deduplicate notifications",
 		"Suppresses repeated notifications for unchanged unsyncable states.",
 		m.config.Notify.Dedupe,
 	))
 	b.WriteString("\n\n")
 	b.WriteString(renderFieldBlock(
-		!m.focusTabs && m.notifyFocus == notifyFocusThrottle,
+		!m.focusTabs && m.automationFocus == automationFocusNotifyThrottle,
 		"Notification throttle (minutes)",
 		"Minimum minutes between notifications for the same repository.",
-		renderInputContainer(m.notifyThrottle.View(), !m.focusTabs && m.notifyFocus == notifyFocusThrottle),
+		renderInputContainer(m.notifyThrottle.View(), !m.focusTabs && m.automationFocus == automationFocusNotifyThrottle),
 		errorText(m.notifyThrottle.Err),
 	))
+	return b.String()
+}
+
+func (m *configWizardModel) viewFixes() string {
+	var b strings.Builder
+	b.WriteString(labelStyle.Render("Fixes"))
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Render("Configure commit-message defaults for `bb fix` commit-producing actions."))
 	b.WriteString("\n\n")
-	b.WriteString(renderToggleField(
-		!m.focusTabs && m.notifyFocus == notifyFocusLumenAutoCommit,
+	b.WriteString(renderToggleFieldWithAvailability(
+		!m.focusTabs && m.fixesFocus == fixesFocusLumenAutoCommit,
+		m.lumenAvailable,
 		"Use Lumen for empty commit messages",
-		"When enabled, bb fix uses `lumen draft` automatically when commit message is empty or set to auto.",
+		"When enabled, `bb fix` runs `lumen draft` to use AI/LLM generation of commit messages from staged changes when message is empty or set to auto.",
 		m.config.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty,
 	))
+	if !m.lumenAvailable {
+		b.WriteString("\n\n")
+		b.WriteString(renderFieldBlock(
+			false,
+			"Lumen required",
+			"Install and configure Lumen to enable AI commit message generation.",
+			hintStyle.Render(lumenInstallTipText),
+			"",
+		))
+	}
 	return b.String()
 }
 
@@ -1986,16 +2018,35 @@ func renderFieldBlock(focused bool, title, description, value, err string) strin
 }
 
 func renderToggleField(focused bool, title, description string, value bool) string {
+	return renderToggleFieldWithAvailability(focused, true, title, description, value)
+}
+
+func renderToggleFieldWithAvailability(focused bool, available bool, title, description string, value bool) string {
 	var b strings.Builder
-	b.WriteString(renderCheckbox(value))
+	switch {
+	case available:
+		b.WriteString(renderCheckbox(value))
+	default:
+		if value {
+			b.WriteString(switchOnStyle.Copy().Foreground(mutedTextColor).Background(lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#161B22"}).Render("● ON"))
+		} else {
+			b.WriteString(switchOffStyle.Copy().Foreground(mutedTextColor).Render("○ OFF"))
+		}
+	}
 	b.WriteString(" ")
-	b.WriteString(labelStyle.Render(title))
+	titleStyle := labelStyle
+	if !available {
+		titleStyle = hintStyle.Copy()
+	}
+	b.WriteString(titleStyle.Render(title))
 	if description != "" {
 		b.WriteString("\n")
 		b.WriteString(hintStyle.Render(description))
 	}
 	style := fieldStyle
-	if focused {
+	if !available {
+		style = style.BorderForeground(mutedTextColor)
+	} else if focused {
 		style = fieldFocusStyle
 	}
 	return style.Render(b.String())

@@ -21,10 +21,11 @@ func testConfigWizardModel(t *testing.T) *configWizardModel {
 	machine.Catalogs = []domain.Catalog{{Name: "software", Root: filepath.Join(t.TempDir(), "software")}}
 	machine.DefaultCatalog = "software"
 	return newConfigWizardModel(ConfigWizardInput{
-		Config:      cfg,
-		Machine:     machine,
-		ConfigPath:  "/tmp/config.yaml",
-		MachinePath: "/tmp/machine.yaml",
+		Config:         cfg,
+		Machine:        machine,
+		ConfigPath:     "/tmp/config.yaml",
+		MachinePath:    "/tmp/machine.yaml",
+		LumenAvailable: true,
 	})
 }
 
@@ -92,45 +93,39 @@ func TestWizardSyncSpaceTogglesAndEnterAdvances(t *testing.T) {
 
 	current := m.config.Sync.AutoDiscover
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.step != stepScheduler {
-		t.Fatalf("step = %v, want %v", m.step, stepScheduler)
+	if m.step != stepAutomation {
+		t.Fatalf("step = %v, want %v", m.step, stepAutomation)
 	}
 	if m.config.Sync.AutoDiscover != current {
 		t.Fatal("enter should not toggle current option")
 	}
 }
 
-func TestWizardSchedulerInputEnterAdvancesToNotify(t *testing.T) {
+func TestWizardAutomationInputEnterAdvancesToFixes(t *testing.T) {
 	m := testConfigWizardModel(t)
-	m.step = stepScheduler
+	m.step = stepAutomation
 	m.focusTabs = false
-	m.updateSchedulerFocus()
+	m.automationFocus = automationFocusScheduler
+	m.updateAutomationFocus()
 	m.schedulerInterval.SetValue("45")
 
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.step != stepNotify {
-		t.Fatalf("step = %v, want %v", m.step, stepNotify)
+	if m.step != stepFixes {
+		t.Fatalf("step = %v, want %v", m.step, stepFixes)
 	}
 	if m.config.Scheduler.IntervalMinutes != 45 {
 		t.Fatalf("scheduler interval = %d, want 45", m.config.Scheduler.IntervalMinutes)
 	}
 }
 
-func TestWizardNotifyCanToggleLumenAutoCommitDefault(t *testing.T) {
+func TestWizardFixesCanToggleLumenAutoCommitDefault(t *testing.T) {
 	t.Parallel()
 
 	m := testConfigWizardModel(t)
-	m.step = stepNotify
+	m.step = stepFixes
 	m.focusTabs = false
-	m.notifyFocus = 0
-	m.updateNotifyFocus()
-
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	if m.notifyFocus != 3 {
-		t.Fatalf("notify focus = %d, want 3", m.notifyFocus)
-	}
+	m.fixesFocus = fixesFocusLumenAutoCommit
+	m.updateFixesFocus()
 
 	if m.config.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty {
 		t.Fatal("expected lumen auto-commit default to start disabled")
@@ -142,14 +137,34 @@ func TestWizardNotifyCanToggleLumenAutoCommitDefault(t *testing.T) {
 	}
 }
 
-func TestWizardNotifyViewIncludesLumenAutoCommitToggle(t *testing.T) {
+func TestWizardFixesViewIncludesLumenAutoCommitToggle(t *testing.T) {
 	t.Parallel()
 
 	m := testConfigWizardModel(t)
-	m.step = stepNotify
-	view := ansi.Strip(m.viewNotify())
+	m.step = stepFixes
+	view := ansi.Strip(m.viewFixes())
 	if !strings.Contains(view, "Use Lumen for empty commit messages") {
-		t.Fatalf("expected notify view to include lumen auto-commit toggle, got %q", view)
+		t.Fatalf("expected fixes view to include lumen auto-commit toggle, got %q", view)
+	}
+}
+
+func TestWizardFixesViewDisablesLumenToggleWhenUnavailable(t *testing.T) {
+	t.Parallel()
+
+	m := testConfigWizardModel(t)
+	m.lumenAvailable = false
+	m.step = stepFixes
+	m.focusTabs = false
+	m.fixesFocus = fixesFocusLumenAutoCommit
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if m.config.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty {
+		t.Fatal("expected lumen auto-commit to remain disabled when lumen is unavailable")
+	}
+
+	view := ansi.Strip(m.viewFixes())
+	if !strings.Contains(view, "Lumen required") || !strings.Contains(view, "brew install jnsahaj/lumen/lumen") {
+		t.Fatalf("expected unavailable lumen tip in fixes view, got %q", view)
 	}
 }
 
@@ -237,12 +252,12 @@ func TestWizardTabsFocusedCanSwitchAcrossMultipleSteps(t *testing.T) {
 	}
 
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	if m.step != stepScheduler || !m.focusTabs {
+	if m.step != stepAutomation || !m.focusTabs {
 		t.Fatalf("after second right: step=%v focusTabs=%v", m.step, m.focusTabs)
 	}
 
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	if m.step != stepNotify || !m.focusTabs {
+	if m.step != stepFixes || !m.focusTabs {
 		t.Fatalf("after third right: step=%v focusTabs=%v", m.step, m.focusTabs)
 	}
 }

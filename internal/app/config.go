@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,10 +17,11 @@ import (
 )
 
 type ConfigWizardInput struct {
-	Config      domain.ConfigFile
-	Machine     domain.MachineFile
-	ConfigPath  string
-	MachinePath string
+	Config         domain.ConfigFile
+	Machine        domain.MachineFile
+	ConfigPath     string
+	MachinePath    string
+	LumenAvailable bool
 }
 
 type ConfigWizardResult struct {
@@ -65,10 +67,11 @@ func (a *App) RunConfig() error {
 	}
 
 	result, err := a.RunConfigWizard(ConfigWizardInput{
-		Config:      cfg,
-		Machine:     machine,
-		ConfigPath:  configPath,
-		MachinePath: machinePath,
+		Config:         cfg,
+		Machine:        machine,
+		ConfigPath:     configPath,
+		MachinePath:    machinePath,
+		LumenAvailable: a.isLumenAvailableForConfigWizard(),
 	})
 	if err != nil {
 		return err
@@ -127,6 +130,15 @@ func (a *App) RunConfig() error {
 		return err
 	}
 	return nil
+}
+
+func (a *App) isLumenAvailableForConfigWizard() bool {
+	lookPath := a.LookPath
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	_, err := lookPath("lumen")
+	return err == nil
 }
 
 func (a *App) loadConfigAndMachineForConfig() (domain.ConfigFile, domain.MachineFile, string, error) {
