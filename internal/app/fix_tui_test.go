@@ -108,7 +108,12 @@ func TestFixTUICursorFallbackAfterEligibilityChange(t *testing.T) {
 		Upstream:  "origin/main",
 		Ahead:     1,
 	}
-	m.repos[0].Meta = &domain.RepoMetadataFile{RepoKey: "software/api", OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled}
+	m.repos[0].Meta = &domain.RepoMetadataFile{
+		RepoKey:    "software/api",
+		OriginURL:  "https://github.com/you/api.git",
+		AutoPush:   domain.AutoPushModeEnabled,
+		PushAccess: domain.PushAccessReadWrite,
+	}
 	m.rebuildList("/repos/api")
 
 	if got := actionForVisibleRepo(m, 0); got != FixActionPush {
@@ -245,8 +250,24 @@ func TestFixTUIRepoNameUsesOSC8ForAliasedGitHubHost(t *testing.T) {
 }
 
 func newFixTUIModelForTest(repos []fixRepoState) *fixTUIModel {
+	cloned := append([]fixRepoState(nil), repos...)
+	for i := range cloned {
+		if cloned[i].Meta == nil {
+			continue
+		}
+		if strings.TrimSpace(cloned[i].Record.OriginURL) == "" {
+			continue
+		}
+		if domain.NormalizePushAccess(cloned[i].Meta.PushAccess) != domain.PushAccessUnknown {
+			continue
+		}
+		metaCopy := *cloned[i].Meta
+		metaCopy.PushAccess = domain.PushAccessReadWrite
+		cloned[i].Meta = &metaCopy
+	}
+
 	m := &fixTUIModel{
-		repos:                 append([]fixRepoState(nil), repos...),
+		repos:                 cloned,
 		ignored:               map[string]bool{},
 		actionCursor:          map[string]int{},
 		scheduled:             map[string][]string{},

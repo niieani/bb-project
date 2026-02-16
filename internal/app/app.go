@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -745,6 +746,16 @@ func (a *App) probeAndUpdateRepoPushAccess(repoPath string, originURL string, me
 		return meta, meta != original, nil
 	}
 
+	if access, ok := a.probePushAccessViaGitHubCLI(originURL); ok && access == domain.PushAccessReadOnly {
+		meta.PushAccess = domain.PushAccessReadOnly
+		meta.PushAccessCheckedRemote = strings.TrimSpace(remote)
+		meta.PushAccessCheckedAt = a.Now()
+		if force {
+			meta.PushAccessManualOverride = false
+		}
+		return meta, meta != original, nil
+	}
+
 	pushAccess, probedRemote, probeErr := a.Git.ProbePushAccess(repoPath, meta.PreferredRemote)
 	if probeErr != nil {
 		a.logf("scan: push-access probe failed for %s: %v", repoPath, probeErr)
@@ -764,6 +775,56 @@ func (a *App) probeAndUpdateRepoPushAccess(repoPath string, originURL string, me
 	}
 
 	return meta, meta != original, nil
+}
+
+func (a *App) probePushAccessViaGitHubCLI(originURL string) (domain.PushAccess, bool) {
+	owner, repo, ok := githubSourceRepoForOrigin(originURL)
+	if !ok {
+		return domain.PushAccessUnknown, false
+	}
+
+	lookPath := a.LookPath
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	if _, err := lookPath("gh"); err != nil {
+		return domain.PushAccessUnknown, false
+	}
+
+	runCommand := a.RunCommand
+	if runCommand == nil {
+		runCommand = defaultRunCommand
+	}
+	out, err := runCommand("gh", "repo", "view", fmt.Sprintf("%s/%s", owner, repo), "--json", "viewerPermission")
+	if err != nil {
+		a.logf("scan: github push-access probe failed for %s/%s: %v", owner, repo, err)
+		return domain.PushAccessUnknown, false
+	}
+
+	access, ok := parseGitHubViewerPermissionPushAccess(out)
+	if !ok {
+		a.logf("scan: github push-access probe returned unknown viewer permission for %s/%s", owner, repo)
+		return domain.PushAccessUnknown, false
+	}
+	return access, true
+}
+
+func parseGitHubViewerPermissionPushAccess(raw string) (domain.PushAccess, bool) {
+	payload := struct {
+		ViewerPermission string `json:"viewerPermission"`
+	}{}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return domain.PushAccessUnknown, false
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(payload.ViewerPermission)) {
+	case "ADMIN", "MAINTAIN", "WRITE":
+		return domain.PushAccessReadWrite, true
+	case "TRIAGE", "READ", "NONE":
+		return domain.PushAccessReadOnly, true
+	default:
+		return domain.PushAccessUnknown, false
+	}
 }
 
 func pushAccessAllowsAutoPush(access domain.PushAccess) bool {
@@ -787,7 +848,16 @@ func shouldProbePushAccessForOrigin(originURL string) bool {
 	if host == "file" {
 		return true
 	}
-	return host == "github.com" || strings.HasSuffix(host, ".github.com")
+	_, _, ok = githubSourceRepoForOrigin(originURL)
+	return ok
+}
+
+func githubSourceRepoForOrigin(originURL string) (owner string, repo string, ok bool) {
+	owner, repo, err := sourceRepoForFork(originURL)
+	if err != nil {
+		return "", "", false
+	}
+	return owner, repo, true
 }
 
 type discoveredRepo struct {

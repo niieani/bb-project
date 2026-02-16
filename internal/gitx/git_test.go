@@ -55,6 +55,37 @@ func TestLooksLikeSyncConflict(t *testing.T) {
 	}
 }
 
+func TestLooksLikePushRejectedNonFastForward(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		msg  string
+		want bool
+	}{
+		{
+			name: "non-fast-forward rejection",
+			msg: `error: failed to push some refs to '/tmp/demo.git'
+hint: Updates were rejected because the tip of your current branch is behind
+hint: its remote counterpart.`,
+			want: true,
+		},
+		{name: "explicit non-fast-forward", msg: "non-fast-forward", want: true},
+		{name: "access denied", msg: "permission denied", want: false},
+		{name: "empty", msg: "", want: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := looksLikePushRejectedNonFastForward(tt.msg); got != tt.want {
+				t.Fatalf("looksLikePushRejectedNonFastForward() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGitCommandEnvDisablesInteractivePrompts(t *testing.T) {
 	t.Parallel()
 

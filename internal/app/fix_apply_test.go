@@ -180,7 +180,7 @@ func writeFixApplyTestMetadata(t *testing.T, paths state.Paths, repoKey string, 
 		OriginURL:           origin,
 		PreferredCatalog:    "software",
 		AutoPush:            domain.AutoPushModeDisabled,
-		PushAccess:          domain.PushAccessUnknown,
+		PushAccess:          domain.PushAccessReadWrite,
 		BranchFollowEnabled: true,
 	}
 	if err := state.SaveRepoMetadata(paths, meta); err != nil {

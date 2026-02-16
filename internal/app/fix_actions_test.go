@@ -163,7 +163,7 @@ func TestEligibleFixActions(t *testing.T) {
 		{
 			name:    "auto push disabled allows enable action",
 			rec:     base,
-			meta:    &domain.RepoMetadataFile{RepoKey: "software/api", AutoPush: domain.AutoPushModeDisabled},
+			meta:    &domain.RepoMetadataFile{RepoKey: "software/api", AutoPush: domain.AutoPushModeDisabled, PushAccess: domain.PushAccessReadWrite},
 			ctx:     fixEligibilityContext{},
 			actions: []string{FixActionEnableAutoPush},
 		},
@@ -194,6 +194,22 @@ func TestEligibleFixActions(t *testing.T) {
 			},
 			ctx:     fixEligibilityContext{},
 			actions: []string{FixActionForkAndRetarget},
+		},
+		{
+			name: "unknown push access blocks push-related fixes",
+			rec: func() domain.MachineRepoRecord {
+				r := base
+				r.HasDirtyTracked = true
+				r.Ahead = 1
+				return r
+			}(),
+			meta: &domain.RepoMetadataFile{
+				RepoKey:    "software/api",
+				AutoPush:   domain.AutoPushModeDisabled,
+				PushAccess: domain.PushAccessUnknown,
+			},
+			ctx:     fixEligibilityContext{},
+			actions: []string{},
 		},
 		{
 			name: "default-branch push-policy-blocked with true mode offers enable auto push",

@@ -318,6 +318,9 @@ Interactive apply behavior:
 - In list mode, `bb fix` keeps the primary panel top-anchored and places footer help immediately below it (no artificial spacer gap between panel and footer); available height is absorbed by list sizing.
 - In list mode, `enter` runs currently selected fixes; when none are selected, it runs the currently browsed fix for the selected repo.
 - Interactive list ordering is by catalog (default catalog first), then `fixable`, `unsyncable`, `not cloned`, `syncable`, and `ignored`; repos with `clone_required` are surfaced as `not cloned`.
+- Before computing fix eligibility, `bb fix` re-probes repositories whose cached `push_access` is `unknown`.
+- For GitHub origins (including `*.github.com` aliases), the probe checks `gh` viewer permission first and then validates with `git push --dry-run` as needed.
+- Repositories that still have `push_access=unknown` after probing do not get push-related fix actions; run `bb repo access-refresh <repo>` after resolving probe blockers.
 
 Selector resolution for `<project>`:
 
@@ -352,6 +355,7 @@ Safety gating:
 - `stage-commit-push` is blocked when secret-like uncommitted files are detected (for example `.env`).
 - In non-interactive flow, `stage-commit-push` is also blocked when root `.gitignore` is missing and noisy uncommitted paths are detected (for example `node_modules`).
 - `stage-commit-push` is blocked when branch is behind upstream (run `sync-with-upstream` first).
+- Push-producing fixes are blocked when cached push access is `unknown` or `read_only`.
 
 ### `bb repo policy <repo> --auto-push=<false|true|include-default-branch>`
 

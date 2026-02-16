@@ -465,6 +465,9 @@ func (r Runner) ProbePushAccess(path string, preferredRemote string) (domain.Pus
 	if looksLikePushAccessDenied(errorAndResultOutput(err, pushResult)) {
 		return domain.PushAccessReadOnly, remote, nil
 	}
+	if looksLikePushRejectedNonFastForward(errorAndResultOutput(err, pushResult)) {
+		return domain.PushAccessReadWrite, remote, nil
+	}
 	return domain.PushAccessUnknown, remote, err
 }
 
@@ -496,6 +499,24 @@ func looksLikePushAccessDenied(msg string) bool {
 		"forbidden",
 		"authentication failed",
 		"could not read from remote repository",
+	}
+	for _, indicator := range indicators {
+		if strings.Contains(lower, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikePushRejectedNonFastForward(msg string) bool {
+	if strings.TrimSpace(msg) == "" {
+		return false
+	}
+	lower := strings.ToLower(msg)
+	indicators := []string{
+		"non-fast-forward",
+		"failed to push some refs",
+		"updates were rejected because the tip of your current branch is behind",
 	}
 	for _, indicator := range indicators {
 		if strings.Contains(lower, indicator) {

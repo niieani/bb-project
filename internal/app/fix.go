@@ -261,8 +261,12 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 
 	actions := make([]string, 0, 5)
 	pushAllowed := true
-	if meta != nil && strings.TrimSpace(rec.OriginURL) != "" && !pushAccessAllowsAutoPush(meta.PushAccess) {
-		pushAllowed = false
+	pushAccess := domain.PushAccessReadWrite
+	if meta != nil {
+		pushAccess = domain.NormalizePushAccess(meta.PushAccess)
+	}
+	if meta != nil && strings.TrimSpace(rec.OriginURL) != "" {
+		pushAllowed = pushAccess == domain.PushAccessReadWrite
 	}
 	if rec.OriginURL == "" {
 		actions = append(actions, FixActionCreateProject)
@@ -314,10 +318,10 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	if rec.OriginURL != "" && rec.Upstream == "" && rec.Branch != "" && !rec.Diverged && pushAllowed {
 		actions = append(actions, FixActionSetUpstreamPush)
 	}
-	if rec.OriginURL != "" && !pushAllowed && strings.TrimSpace(rec.RepoKey) != "" {
+	if rec.OriginURL != "" && pushAccess == domain.PushAccessReadOnly && strings.TrimSpace(rec.RepoKey) != "" {
 		actions = append(actions, FixActionForkAndRetarget)
 	}
-	if meta != nil && strings.TrimSpace(rec.RepoKey) != "" && pushAccessAllowsAutoPush(meta.PushAccess) {
+	if meta != nil && strings.TrimSpace(rec.RepoKey) != "" && pushAccess == domain.PushAccessReadWrite {
 		mode := domain.NormalizeAutoPushMode(meta.AutoPush)
 		if mode == domain.AutoPushModeDisabled || (mode == domain.AutoPushModeEnabled && containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonPushPolicyBlocked)) {
 			actions = append(actions, FixActionEnableAutoPush)
@@ -539,7 +543,107 @@ func (a *App) loadFixRepos(includeCatalogs []string, refreshMode scanRefreshMode
 		return out[i].Record.Path < out[j].Record.Path
 	})
 
+	pushAccessUpdated, err := a.refreshUnknownPushAccessForFixReposLocked(out)
+	if err != nil {
+		return nil, err
+	}
+	if pushAccessUpdated {
+		metas, err = state.LoadAllRepoMetadata(a.Paths)
+		if err != nil {
+			return nil, err
+		}
+		metaByRepoKey = repoMetadataByKey(metas)
+		for i := range out {
+			out[i].Meta = metaByRepoKey[out[i].Record.RepoKey]
+		}
+	}
+
 	return out, nil
+}
+
+func (a *App) loadFixReposForInteractive(includeCatalogs []string, refreshMode scanRefreshMode) ([]fixRepoState, error) {
+	return a.loadFixRepos(includeCatalogs, refreshMode)
+}
+
+func (a *App) refreshUnknownPushAccessForFixRepos(repos []fixRepoState) (bool, error) {
+	a.logf("fix: acquiring global lock for unknown push-access refresh")
+	lock, err := state.AcquireLock(a.Paths)
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		_ = lock.Release()
+		a.logf("fix: released global lock for unknown push-access refresh")
+	}()
+	return a.refreshUnknownPushAccessForFixReposLocked(repos)
+}
+
+func (a *App) refreshUnknownPushAccessForFixReposLocked(repos []fixRepoState) (bool, error) {
+	type probeTarget struct {
+		repoKey   string
+		repoPath  string
+		originURL string
+	}
+
+	byRepoKey := make(map[string]probeTarget, len(repos))
+	for _, repo := range repos {
+		if repo.Meta == nil {
+			continue
+		}
+		if domain.NormalizePushAccess(repo.Meta.PushAccess) != domain.PushAccessUnknown {
+			continue
+		}
+		repoKey := strings.TrimSpace(repo.Record.RepoKey)
+		repoPath := strings.TrimSpace(repo.Record.Path)
+		originURL := strings.TrimSpace(repo.Record.OriginURL)
+		if repoKey == "" || repoPath == "" || originURL == "" {
+			continue
+		}
+		byRepoKey[repoKey] = probeTarget{
+			repoKey:   repoKey,
+			repoPath:  repoPath,
+			originURL: originURL,
+		}
+	}
+	if len(byRepoKey) == 0 {
+		return false, nil
+	}
+
+	keys := make([]string, 0, len(byRepoKey))
+	for repoKey := range byRepoKey {
+		keys = append(keys, repoKey)
+	}
+	sort.Strings(keys)
+
+	changed := false
+	for _, repoKey := range keys {
+		target := byRepoKey[repoKey]
+
+		meta, err := state.LoadRepoMetadata(a.Paths, target.repoKey)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return false, err
+		}
+		if domain.NormalizePushAccess(meta.PushAccess) != domain.PushAccessUnknown {
+			continue
+		}
+
+		updated, probeChanged, err := a.probeAndUpdateRepoPushAccess(target.repoPath, target.originURL, meta, true)
+		if err != nil {
+			return false, err
+		}
+		if !probeChanged {
+			continue
+		}
+		if err := state.SaveRepoMetadata(a.Paths, updated); err != nil {
+			return false, err
+		}
+		changed = true
+	}
+
+	return changed, nil
 }
 
 func (a *App) enrichFixSyncFeasibility(rec domain.MachineRepoRecord) (domain.MachineRepoRecord, fixSyncFeasibility) {
@@ -1814,7 +1918,7 @@ func (a *App) forkAndRetargetFromFix(
 			return err
 		}
 
-		updated, _, err := a.probeAndUpdateRepoPushAccess(repoPath, target.Record.OriginURL, meta, true)
+		updated, _, err := a.probeAndUpdateRepoPushAccess(repoPath, forkURL, meta, true)
 		if err != nil {
 			return err
 		}

@@ -1014,7 +1014,7 @@ func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUI
 	m := &fixTUIModel{
 		app:                      app,
 		includeCatalogs:          append([]string(nil), includeCatalogs...),
-		loadReposFn:              app.loadFixRepos,
+		loadReposFn:              app.loadFixReposForInteractive,
 		execProcessFn:            tea.ExecProcess,
 		generateCommitMessageFn:  app.generateLumenCommitMessage,
 		prepareVisualDiffCmdFn:   app.prepareLumenDiffExecCommand,

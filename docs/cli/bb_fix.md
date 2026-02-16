@@ -32,6 +32,9 @@ bb fix [project] [action] [flags]
 - In list mode, `enter` runs selected fixes; when none are selected, it runs the currently browsed fix for the selected repo.
 - List ordering is by catalog (default first), then state tier: `fixable`, `unsyncable`, `not cloned`, `syncable`, `ignored`.
 - Repositories marked with `clone_required` are shown as `not cloned`.
+- Before computing fix eligibility, `bb fix` re-probes repositories whose cached `push_access` is `unknown`.
+- For GitHub origins (including `*.github.com` aliases), the probe checks `gh` viewer permission first and then validates with `git push --dry-run` as needed.
+- Repositories that still have `push_access=unknown` after probing do not get push-related fix actions; run `bb repo access-refresh <repo>` after resolving probe blockers.
 
 ### SEE ALSO
 
