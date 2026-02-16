@@ -1427,6 +1427,10 @@ func (m *fixTUIModel) viewSelectedRepoDetails() string {
 	if !ok {
 		return ""
 	}
+	return m.viewRepoDetails(repo)
+}
+
+func (m *fixTUIModel) viewRepoDetails(repo fixRepoState) string {
 	actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
 		Interactive:     true,
 		Risk:            repo.Risk,
@@ -1561,22 +1565,29 @@ func (m *fixTUIModel) viewContentWidth() int {
 	return contentWidth
 }
 
-func (m *fixTUIModel) selectedDetailsWraps() bool {
-	details := m.viewSelectedRepoDetails()
-	if details == "" {
-		return false
-	}
-	innerWidth := m.viewContentWidth()
+func (m *fixTUIModel) repoDetailsHeightStats(innerWidth int) (current int, maxHeight int, currentWraps bool) {
 	if innerWidth <= 0 {
-		return false
+		return 0, 0, false
 	}
-	innerWidth -= panelStyle.GetHorizontalFrameSize()
-	if innerWidth <= 0 {
-		return false
+	currentRepo, ok := m.currentRepo()
+	currentPath := ""
+	if ok {
+		currentPath = currentRepo.Record.Path
 	}
-	rawHeight := lipgloss.Height(details)
-	renderedHeight := lipgloss.Height(lipgloss.NewStyle().Width(innerWidth).Render(details))
-	return renderedHeight > rawHeight
+	renderer := lipgloss.NewStyle().Width(innerWidth)
+	for _, repo := range m.visible {
+		details := m.viewRepoDetails(repo)
+		raw := lipgloss.Height(details)
+		rendered := lipgloss.Height(renderer.Render(details))
+		if rendered > maxHeight {
+			maxHeight = rendered
+		}
+		if ok && repo.Record.Path == currentPath {
+			current = rendered
+			currentWraps = rendered > raw
+		}
+	}
+	return current, maxHeight, currentWraps
 }
 
 func (m *fixTUIModel) resizeRepoList() {
@@ -1617,8 +1628,19 @@ func (m *fixTUIModel) resizeRepoList() {
 		hardMinListHeight      = 1
 		separatorLines         = 1
 	)
+
+	detailsWidth := m.viewContentWidth()
+	if detailsWidth > 0 {
+		detailsWidth -= panelStyle.GetHorizontalFrameSize()
+	}
+	currentDetailsHeight, maxDetailsHeight, currentDetailsWraps := m.repoDetailsHeightStats(detailsWidth)
+	extraDetailsReserve := 0
+	if maxDetailsHeight > currentDetailsHeight {
+		extraDetailsReserve = maxDetailsHeight - currentDetailsHeight
+	}
+
 	minListHeight := preferredMinListHeight
-	if m.selectedDetailsWraps() {
+	if currentWraps := currentDetailsWraps; currentWraps || extraDetailsReserve > 0 {
 		minListHeight = hardMinListHeight
 	}
 
@@ -1629,7 +1651,7 @@ func (m *fixTUIModel) resizeRepoList() {
 	for {
 		m.repoList.SetSize(listWidth, height)
 		bodyHeight := lipgloss.Height(m.viewBodyForMode(fixViewList))
-		used := bodyHeight + separatorLines + helpHeight
+		used := bodyHeight + separatorLines + helpHeight + extraDetailsReserve
 		if used <= available || height <= minListHeight {
 			break
 		}

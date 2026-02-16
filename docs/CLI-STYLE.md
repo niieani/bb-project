@@ -200,6 +200,7 @@ Rules:
 - Default selections should be no-op (explicitly show `-` / "no action") rather than auto-selecting a mutating action.
 - Keep table cell content plain text (avoid embedding ANSI/lipgloss inside cell strings); style at the row/column layer instead.
 - Keep the selected row visible while navigating; viewport must follow the cursor.
+- If list height can change based on below-list details, reserve height against worst-case visible details to keep single-step cursor movement monotonic (do not let the viewport jump backward when pressing down once).
 - Avoid nested bordered containers for the same region (table inside panel inside another framed box) because it frequently causes wrap artifacts.
 - When rendering custom list rows, leave at least one guard column so the rendered width stays strictly below viewport width (prevents terminal auto-wrap).
 

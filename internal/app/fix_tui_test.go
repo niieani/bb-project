@@ -4158,6 +4158,59 @@ func TestFixTUIViewStaysWithinWindowHeightWhenSelectedDetailsWrap(t *testing.T) 
 	}
 }
 
+func TestFixTUIViewportTopDoesNotJumpUpWhenMovingDownOneRow(t *testing.T) {
+	t.Parallel()
+
+	repos := make([]fixRepoState, 0, 80)
+	for i := 0; i < 80; i++ {
+		name := fmt.Sprintf("repo-%02d", i)
+		path := fmt.Sprintf("/repos/%s", name)
+		// Alternate short and very long details so moving by one row can change
+		// selected-details wrapping and trigger list-height reflow.
+		if i%2 == 1 {
+			path = "/Volumes/Projects/Software/" + strings.Repeat("codegen-typescript-graphql-module-declarations-plugin-", 3) + name
+		}
+		repos = append(repos, fixRepoState{
+			Record: domain.MachineRepoRecord{
+				Name:      name,
+				Path:      path,
+				OriginURL: fmt.Sprintf("git@github.com:you/%s.git", name),
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{
+				OriginURL: fmt.Sprintf("https://github.com/you/%s.git", name),
+				AutoPush:  domain.AutoPushModeDisabled,
+			},
+		})
+	}
+
+	m := newFixTUIModelForTest(repos)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 118, Height: 22})
+	m.setCursor(3)
+	_ = m.View()
+
+	ordered := make([]string, 0, len(m.visible))
+	for _, repo := range m.visible {
+		ordered = append(ordered, repo.Record.Name)
+	}
+
+	beforeTop, ok := firstVisibleRepoIndex(ansi.Strip(m.viewRepoList()), ordered)
+	if !ok {
+		t.Fatalf("could not determine first visible repo before move: %q", m.viewRepoList())
+	}
+
+	m.moveRepoCursor(1)
+	_ = m.View()
+	afterTop, found := firstVisibleRepoIndex(ansi.Strip(m.viewRepoList()), ordered)
+	if !found {
+		t.Fatalf("could not determine first visible repo after move: %q", m.viewRepoList())
+	}
+	if afterTop < beforeTop {
+		t.Fatalf("viewport top jumped upward after moving down one row: beforeTop=%d afterTop=%d", beforeTop, afterTop)
+	}
+}
+
 func TestFixTUISelectedDetailsRenderActionHelp(t *testing.T) {
 	t.Parallel()
 
@@ -4564,6 +4617,18 @@ func previousNonEmptyLine(lines []string, start int) string {
 		}
 	}
 	return ""
+}
+
+func firstVisibleRepoIndex(listView string, ordered []string) (int, bool) {
+	lines := strings.Split(listView, "\n")
+	for _, line := range lines {
+		for i, name := range ordered {
+			if strings.Contains(line, name) {
+				return i, true
+			}
+		}
+	}
+	return 0, false
 }
 
 func shortHelpEntries(bindings []key.Binding) []string {
