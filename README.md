@@ -313,6 +313,8 @@ Interactive apply behavior:
 - When changed files are shown, press `⌥V` on macOS (or `alt+v` on other platforms) to launch Lumen visual diff and return to the same wizard state.
 - Wizard can generate a minimal root `.gitignore` when missing.
 - In list mode, when repository details wrap (for example long paths or action-help text), `bb fix` shrinks the table viewport first so top chrome and footer help remain visible without truncating details text, and keeps one-row navigation stable (no backward viewport jump when moving down).
+- In list mode, the primary panel uses a compact titled border (`bb fix · Interactive remediation for unsyncable repositories`) to preserve vertical space, and selected-repo metadata is rendered on one dot-separated line.
+- Interactive list ordering is by catalog (default catalog first), then `fixable`, `unsyncable`, `not cloned`, `syncable`, and `ignored`; repos with `clone_required` are surfaced as `not cloned`.
 
 Selector resolution for `<project>`:
 

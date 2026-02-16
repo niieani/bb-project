@@ -51,5 +51,15 @@ Inspect repositories and apply context-aware fixes.
 	Suppress verbose bb logs.
 
 
+.SH INTERACTIVE MODE NOTES
+\fBbb fix\fP list mode renders a compact bordered title (\fBbb fix · Interactive remediation for unsyncable repositories\fP) and a compact selected-repo details line to reduce vertical space usage.
+
+.PP
+List ordering is by catalog (default first), then state tier: \fBfixable\fP, \fBunsyncable\fP, \fBnot cloned\fP, \fBsyncable\fP, \fBignored\fP.
+
+.PP
+Repositories marked with \fBclone_required\fP are shown as \fBnot cloned\fP.
+
+
 .SH SEE ALSO
 \fBbb(1)\fP

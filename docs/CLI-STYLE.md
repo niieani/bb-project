@@ -32,6 +32,7 @@ Chrome spacing rules:
 - No trailing empty rows or whitespace after the help panel. The help panel is the visual bottom of the screen.
 - Header should not wrap to multiple lines; prefer truncating the subtitle with `...` over spending another row.
 - If tabs/steps are not present, the main panel starts immediately under the header line.
+- For dense list workflows that need to maximize visible rows, prefer embedding the screen title/subtitle in the panel's top border (for example `╭─bb fix · <subtitle>─…╮`) instead of spending an extra standalone header row.
 
 Example shape (schematic):
 
@@ -210,6 +211,7 @@ When you need rich styling, prefer a details panel below/alongside the list:
 - Use distinct label/value styling (muted label + higher-contrast value).
 - Keep detail values complete: do not truncate selected-item details (for example full repo paths) just to fit width; wrap as needed and reclaim space by shrinking adjacent scrollable regions (table/viewport) first.
 - Avoid vertical border glyphs (`│`) that visually merge with table columns.
+- When multiple short metadata fields are shown for the selected row, prefer a single compact line with ` · ` separators (for example `State · Auto-push · Branch · Reasons · Selected fixes`) and keep the action explanation on its own line.
 
 ### Scroll Indicators (More Above/Below)
 

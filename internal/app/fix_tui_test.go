@@ -296,6 +296,49 @@ func TestFixTUIViewUsesCanonicalChromeWithoutInlineKeyLegend(t *testing.T) {
 	}
 }
 
+func TestFixTUIViewUsesCompactMainPanelChrome(t *testing.T) {
+	t.Parallel()
+
+	m := newFixTUIModelForTest([]fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 24})
+
+	view := ansi.Strip(m.View())
+	if strings.Contains(view, "Repository Fixes") {
+		t.Fatalf("expected compact border title instead of repository-fixes heading, got %q", view)
+	}
+	if strings.Contains(view, "Enter runs selected fixes for the selected repo; ctrl+a runs selected fixes across repos.") {
+		t.Fatalf("expected long enter/ctrl+a sentence removed, got %q", view)
+	}
+	if strings.Contains(view, "Grouped by catalog (default catalog first), then fixable, unsyncable, syncable, and ignored.") {
+		t.Fatalf("expected grouping sentence removed, got %q", view)
+	}
+
+	lines := strings.Split(view, "\n")
+	top := firstNonEmptyLine(lines)
+	if !strings.Contains(top, "╭") || !strings.Contains(top, "bb") || !strings.Contains(top, "fix") || !strings.Contains(top, "Interactive remediation for unsyncable repositories") {
+		t.Fatalf("expected combined border title/subtitle on first content line, got %q", top)
+	}
+
+	statsIdx := lineIndexContaining(view, "REPOS")
+	if statsIdx <= 0 || statsIdx >= len(lines)-1 {
+		t.Fatalf("could not locate stats row in compact view: %q", view)
+	}
+	if strings.TrimSpace(lines[statsIdx-1]) == "" || strings.TrimSpace(lines[statsIdx+1]) == "" {
+		t.Fatalf("expected no blank row before or after stats row, got prev=%q next=%q", lines[statsIdx-1], lines[statsIdx+1])
+	}
+}
+
 func TestFixTUIBootViewShowsLoadingStatus(t *testing.T) {
 	t.Parallel()
 
@@ -674,8 +717,12 @@ func TestFixTUIRevalidateShortcutEntersBusyState(t *testing.T) {
 	if !m.revalidating {
 		t.Fatal("expected revalidate key to set in-progress state")
 	}
-	if !strings.Contains(m.viewMainContent(), "Repository Fixes "+m.revalidateSpinner.View()) {
-		t.Fatalf("expected spinner next to repository title while revalidating, got %q", m.viewMainContent())
+	titleLine := firstNonEmptyLine(strings.Split(ansi.Strip(m.View()), "\n"))
+	if !strings.Contains(titleLine, "bb") || !strings.Contains(titleLine, "fix") {
+		t.Fatalf("expected compact titled border line, got %q", titleLine)
+	}
+	if !strings.Contains(titleLine, m.revalidateSpinner.View()) {
+		t.Fatalf("expected spinner in bordered title while revalidating, got %q", titleLine)
 	}
 	if got := m.mainContentPanelStyle().GetBorderTopForeground(); !reflect.DeepEqual(got, accentColor) {
 		t.Fatalf("busy border color = %#v, want accent %#v", got, accentColor)
@@ -764,8 +811,12 @@ func TestFixTUIImmediateApplyEntersBusyStateWithSpinnerAndLockedStatus(t *testin
 	if !m.immediateApplying {
 		t.Fatal("expected immediate apply to set in-progress state")
 	}
-	if !strings.Contains(m.viewMainContent(), "Repository Fixes "+m.immediateApplySpinner.View()) {
-		t.Fatalf("expected spinner next to repository title while immediate apply is running, got %q", m.viewMainContent())
+	titleLine := firstNonEmptyLine(strings.Split(ansi.Strip(m.View()), "\n"))
+	if !strings.Contains(titleLine, "bb") || !strings.Contains(titleLine, "fix") {
+		t.Fatalf("expected compact titled border line, got %q", titleLine)
+	}
+	if !strings.Contains(titleLine, m.immediateApplySpinner.View()) {
+		t.Fatalf("expected spinner in bordered title while immediate apply is running, got %q", titleLine)
 	}
 	if !strings.Contains(ansi.Strip(m.viewMainContent()), "controls are locked until execution completes") {
 		t.Fatalf("expected locked-controls status line during immediate apply, got %q", ansi.Strip(m.viewMainContent()))
@@ -3551,6 +3602,29 @@ func TestFixTUIResizeExpandsWideColumns(t *testing.T) {
 	}
 }
 
+func TestFixTUIResizeUsesFullPanelInnerWidthForRepoList(t *testing.T) {
+	t.Parallel()
+
+	m := newFixTUIModelForTest([]fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 24})
+
+	want := m.viewContentWidth() - panelStyle.GetHorizontalFrameSize()
+	if got := m.repoList.Width(); got != want {
+		t.Fatalf("repo list width = %d, want full panel inner width %d", got, want)
+	}
+}
+
 func TestFixTUIOrdersReposByTier(t *testing.T) {
 	t.Parallel()
 
@@ -3582,6 +3656,19 @@ func TestFixTUIOrdersReposByTier(t *testing.T) {
 		},
 		{
 			Record: domain.MachineRepoRecord{
+				Name:      "nnn-clone",
+				Path:      "/repos/nnn-clone",
+				OriginURL: "git@github.com:you/nnn-clone.git",
+				Upstream:  "origin/main",
+				Syncable:  false,
+				UnsyncableReasons: []domain.UnsyncableReason{
+					domain.ReasonCloneRequired,
+				},
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/nnn-clone.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+		{
+			Record: domain.MachineRepoRecord{
 				Name:      "mmm-auto",
 				Path:      "/repos/mmm-auto",
 				OriginURL: "git@github.com:you/mmm-auto.git",
@@ -3603,8 +3690,11 @@ func TestFixTUIOrdersReposByTier(t *testing.T) {
 	if got := m.visible[1].Record.Name; got != "aaa-blocked" {
 		t.Fatalf("second row = %q, want unsyncable blocked repo second", got)
 	}
-	if got := m.visible[2].Record.Name; got != "zzz-sync" {
-		t.Fatalf("third row = %q, want syncable repo last", got)
+	if got := m.visible[2].Record.Name; got != "nnn-clone" {
+		t.Fatalf("third row = %q, want not-cloned repo third", got)
+	}
+	if got := m.visible[3].Record.Name; got != "zzz-sync" {
+		t.Fatalf("fourth row = %q, want syncable repo last", got)
 	}
 }
 
@@ -4038,14 +4128,10 @@ func TestFixTUIViewShowsMainPanelTopBorderBeforeContent(t *testing.T) {
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 26})
 	view := m.View()
 
-	lines := strings.Split(view, "\n")
-	idx := lineIndexContaining(view, "Repository Fixes")
-	if idx <= 0 || idx >= len(lines) {
-		t.Fatalf("could not locate repository fixes title in view: %q", view)
-	}
-	previous := previousNonEmptyLine(lines, idx-1)
-	if !strings.Contains(previous, "╭") {
-		t.Fatalf("expected panel top border before content, got %q", previous)
+	lines := strings.Split(ansi.Strip(view), "\n")
+	first := firstNonEmptyLine(lines)
+	if !strings.Contains(first, "╭") || !strings.Contains(first, "bb") || !strings.Contains(first, "fix") {
+		t.Fatalf("expected titled main border at top of view, got %q", first)
 	}
 }
 
@@ -4153,8 +4239,9 @@ func TestFixTUIViewStaysWithinWindowHeightWhenSelectedDetailsWrap(t *testing.T) 
 	if got := lipgloss.Height(view); got > height {
 		t.Fatalf("view height overflowed terminal height: got=%d want<=%d", got, height)
 	}
-	if !strings.Contains(ansi.Strip(view), "Repository Fixes") {
-		t.Fatalf("expected repository fixes title to stay visible, got %q", view)
+	stripped := ansi.Strip(view)
+	if !strings.Contains(stripped, "bb") || !strings.Contains(stripped, "fix") {
+		t.Fatalf("expected compact border title to stay visible, got %q", view)
 	}
 }
 
@@ -4231,8 +4318,8 @@ func TestFixTUISelectedDetailsRenderActionHelp(t *testing.T) {
 	m.cycleCurrentAction(1) // push
 
 	details := m.viewSelectedRepoDetails()
-	if !strings.Contains(details, "Action help:") {
-		t.Fatalf("expected action help in selected details, got %q", details)
+	if !strings.Contains(details, "Action:") {
+		t.Fatalf("expected action label in selected details, got %q", details)
 	}
 	if !strings.Contains(details, "Push local commits") {
 		t.Fatalf("expected push action description, got %q", details)
@@ -4263,6 +4350,38 @@ func TestFixTUISelectedDetailsHeaderHasNoFieldBorderAndUsesSelectedLabel(t *test
 	}
 	if !strings.Contains(firstLine, "Selected:") || !strings.Contains(firstLine, "api") {
 		t.Fatalf("selected details header missing expected label/value, got %q", firstLine)
+	}
+}
+
+func TestFixTUISelectedDetailsUsesCompactMetaLineWithDotSeparators(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+				UnsyncableReasons: []domain.UnsyncableReason{
+					domain.ReasonPushPolicyBlocked,
+				},
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	details := ansi.Strip(m.viewSelectedRepoDetails())
+	lines := strings.Split(details, "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected compact selected details lines, got %q", details)
+	}
+	if !strings.Contains(lines[1], "State:") || !strings.Contains(lines[1], " · Auto-push:") || !strings.Contains(lines[1], " · Branch:") || !strings.Contains(lines[1], " · Reasons:") || !strings.Contains(lines[1], " · Selected fixes:") {
+		t.Fatalf("expected dot-separated metadata line, got %q", lines[1])
+	}
+	if !strings.HasPrefix(lines[2], "Action: ") {
+		t.Fatalf("expected standalone action line with compact label, got %q", lines[2])
 	}
 }
 
@@ -4419,6 +4538,28 @@ func TestClassifyFixRepoMarksSyncProbeFailedAsBlocked(t *testing.T) {
 
 	if got := classifyFixRepo(repo, actions); got != fixRepoTierUnsyncableBlocked {
 		t.Fatalf("tier = %v, want unsyncable when sync feasibility probe was inconclusive", got)
+	}
+}
+
+func TestClassifyFixRepoMarksCloneRequiredAsNotCloned(t *testing.T) {
+	t.Parallel()
+
+	repo := fixRepoState{
+		Record: domain.MachineRepoRecord{
+			Name:      "api",
+			Path:      "/repos/api",
+			OriginURL: "git@github.com:you/api.git",
+			Upstream:  "origin/main",
+			Syncable:  false,
+			UnsyncableReasons: []domain.UnsyncableReason{
+				domain.ReasonCloneRequired,
+			},
+		},
+	}
+	actions := []string{FixActionClone}
+
+	if got := classifyFixRepo(repo, actions); got != fixRepoTierNotCloned {
+		t.Fatalf("tier = %v, want not-cloned tier for clone-required repos", got)
 	}
 }
 
@@ -4614,6 +4755,15 @@ func previousNonEmptyLine(lines []string, start int) string {
 	for i := start; i >= 0; i-- {
 		if strings.TrimSpace(lines[i]) != "" {
 			return lines[i]
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyLine(lines []string) string {
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			return line
 		}
 	}
 	return ""

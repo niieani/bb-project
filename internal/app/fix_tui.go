@@ -531,6 +531,7 @@ type fixRepoTier int
 const (
 	fixRepoTierAutofixable fixRepoTier = iota
 	fixRepoTierUnsyncableBlocked
+	fixRepoTierNotCloned
 	fixRepoTierSyncable
 )
 
@@ -565,10 +566,7 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	// Leave one guard column to avoid terminal auto-wrap when the rendered row
 	// exactly matches viewport width.
-	contentWidth := m.Width() - 5 // indicator + wrap guard
-	if contentWidth < 50 {
-		contentWidth = 50
-	}
+	contentWidth := fixListContentWidth(m.Width())
 	layout := fixListColumnsForWidth(contentWidth)
 
 	selected := index == m.Index()
@@ -582,6 +580,8 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 		stateStyle = fixStateAutofixableStyle
 	case fixRepoTierUnsyncableBlocked:
 		stateStyle = fixStateUnsyncableStyle
+	case fixRepoTierNotCloned:
+		stateStyle = fixStateNotClonedStyle
 	}
 	if row.Ignored {
 		repoStyle = repoStyle.Copy().Foreground(mutedTextColor).Faint(true)
@@ -650,6 +650,7 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 }
 
 const fixNoAction = "-"
+const fixTUISubtitle = "Interactive remediation for unsyncable repositories"
 
 const (
 	fixListDefaultWidth = 120
@@ -677,6 +678,9 @@ var (
 
 	fixStateUnsyncableStyle = lipgloss.NewStyle().
 				Foreground(errorFgColor)
+
+	fixStateNotClonedStyle = lipgloss.NewStyle().
+				Foreground(warningColor)
 
 	fixStateIgnoredStyle = lipgloss.NewStyle().
 				Foreground(mutedTextColor).
@@ -767,6 +771,9 @@ var (
 					Foreground(lipgloss.Color("81"))
 
 	fixPageStyle = lipgloss.NewStyle().Padding(0, 2)
+
+	fixTopBorderStyle = lipgloss.NewStyle().
+				Foreground(borderColor)
 )
 
 const fixListColumnGap = "  "
@@ -896,7 +903,7 @@ func (m *fixTUIBootModel) View() string {
 		titleBadgeStyle.Render("bb"),
 		" "+headerStyle.Render("fix"),
 	)
-	subtitle := hintStyle.Render("Interactive remediation for unsyncable repositories")
+	subtitle := hintStyle.Render(fixTUISubtitle)
 
 	message := fmt.Sprintf("%s %s", m.spin.View(), "Loading repositories and risk checks for interactive fix...")
 	detail := hintStyle.Render("Interactive UI opens automatically when startup checks complete.")
@@ -948,7 +955,7 @@ func (m *fixTUIBootModel) viewContentWidth() int {
 	if m.width <= 0 {
 		return 0
 	}
-	contentWidth := m.width - 8
+	contentWidth := m.width - fixPageStyle.GetHorizontalFrameSize()
 	if contentWidth < 52 {
 		return 0
 	}
@@ -1202,28 +1209,23 @@ func (m *fixTUIModel) View() string {
 	helpBlock := helpPanel.Render(helpView)
 
 	body := m.viewBodyForMode(m.viewMode)
-	spacer := ""
-	if m.height > 0 {
-		available := m.height - fixPageStyle.GetVerticalFrameSize()
-		if available < 0 {
-			available = 0
-		}
-		const separatorLines = 1
-		used := lipgloss.Height(body) + separatorLines + lipgloss.Height(helpBlock)
-		if gap := available - used; gap > 0 {
-			spacer = strings.Repeat("\n", gap)
-		}
-	}
-
-	doc := body + "\n" + spacer + helpBlock
+	doc := body + "\n" + helpBlock
 	return fixPageStyle.Render(doc)
 }
 
 func (m *fixTUIModel) viewBodyForMode(mode fixViewMode) string {
 	var b strings.Builder
-	b.WriteString(m.viewTopChromeForMode(mode))
+	topChrome := m.viewTopChromeForMode(mode)
+	if topChrome != "" {
+		b.WriteString(topChrome)
+	}
 	contentPanel := m.mainContentPanelStyle()
-	b.WriteString(contentPanel.Render(m.viewContentForMode(mode)))
+	content := m.viewContentForMode(mode)
+	if mode == fixViewList {
+		b.WriteString(renderPanelWithTopTitle(contentPanel, m.viewListPanelTitle(), content))
+	} else {
+		b.WriteString(contentPanel.Render(content))
+	}
 	if m.status != "" {
 		b.WriteString("\n")
 		b.WriteString(hintStyle.Render(m.status))
@@ -1242,12 +1244,15 @@ func (m *fixTUIModel) viewTopChromeForMode(mode fixViewMode) string {
 		b.WriteString("\n")
 		return b.String()
 	}
+	if mode == fixViewList {
+		return ""
+	}
 
 	title := lipgloss.JoinHorizontal(lipgloss.Center,
 		titleBadgeStyle.Render("bb"),
 		" "+headerStyle.Render("fix"),
 	)
-	subtitle := hintStyle.Render("Interactive remediation for unsyncable repositories")
+	subtitle := hintStyle.Render(fixTUISubtitle)
 	b.WriteString(title)
 	b.WriteString("\n")
 	b.WriteString(subtitle)
@@ -1266,6 +1271,71 @@ func (m *fixTUIModel) viewContentForMode(mode fixViewMode) string {
 	}
 }
 
+func (m *fixTUIModel) viewListPanelTitle() string {
+	title := lipgloss.JoinHorizontal(lipgloss.Center,
+		titleBadgeStyle.Render("bb"),
+		" "+headerStyle.Render("fix"),
+	)
+	subtitle := hintStyle.Render("·")
+	line := lipgloss.JoinHorizontal(lipgloss.Center,
+		title,
+		" ",
+		subtitle,
+		" ",
+		hintStyle.Render(fixTUISubtitle),
+	)
+	if m.immediateApplying {
+		line = lipgloss.JoinHorizontal(lipgloss.Center, line, " ", m.immediateApplySpinner.View())
+	} else if m.revalidating {
+		line = lipgloss.JoinHorizontal(lipgloss.Center, line, " ", m.revalidateSpinner.View())
+	}
+	return line
+}
+
+func renderPanelWithTopTitle(panel lipgloss.Style, title string, content string) string {
+	withoutTop := panel.Border(lipgloss.RoundedBorder(), false, true, true, true)
+	rendered := withoutTop.Render(content)
+	lines := strings.Split(rendered, "\n")
+	if len(lines) == 0 {
+		return rendered
+	}
+	totalWidth := lipgloss.Width(lines[0])
+	if totalWidth < 2 {
+		return rendered
+	}
+
+	border := lipgloss.RoundedBorder()
+	available := totalWidth - 2
+	plainTitle := strings.TrimSpace(title)
+	if plainTitle == "" {
+		plainTitle = "bb fix"
+	}
+	titleText := " " + ansi.Truncate(plainTitle, max(1, available-2), "…") + " "
+	titleWidth := lipgloss.Width(titleText)
+
+	prefix := border.Top
+	prefixWidth := lipgloss.Width(prefix)
+	if prefixWidth+titleWidth > available {
+		prefix = ""
+		prefixWidth = 0
+		titleText = ansi.Truncate(strings.TrimSpace(titleText), max(1, available), "…")
+		titleWidth = lipgloss.Width(titleText)
+	}
+
+	fillWidth := available - prefixWidth - titleWidth
+	if fillWidth < 0 {
+		fillWidth = 0
+	}
+	topLine := fixTopBorderStyle.Render(border.TopLeft) +
+		fixTopBorderStyle.Render(prefix) +
+		titleText +
+		fixTopBorderStyle.Render(strings.Repeat(border.Top, fillWidth)) +
+		fixTopBorderStyle.Render(border.TopRight)
+
+	lines[0] = topLine
+	return strings.Join(lines, "\n")
+}
+
 func (m *fixTUIModel) mainContentPanelStyle() lipgloss.Style {
 	contentPanel := panelStyle
 	if (m.viewMode == fixViewWizard && m.wizard.Applying) || m.revalidating || m.immediateApplying {
@@ -1279,26 +1349,14 @@ func (m *fixTUIModel) mainContentPanelStyle() lipgloss.Style {
 
 func (m *fixTUIModel) viewMainContent() string {
 	var b strings.Builder
-	title := "Repository Fixes"
-	if m.immediateApplying {
-		title += " " + m.immediateApplySpinner.View()
-	} else if m.revalidating {
-		title += " " + m.revalidateSpinner.View()
-	}
-	b.WriteString(labelStyle.Render(title))
-	b.WriteString("\n")
 	b.WriteString(hintStyle.Render("Choose eligible fixes with ←/→, press space to select or unselect."))
-	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Enter runs selected fixes for the selected repo; ctrl+a runs selected fixes across repos."))
-	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Grouped by catalog (default catalog first), then fixable, unsyncable, syncable, and ignored."))
 	if m.immediateApplying {
 		b.WriteString("\n")
 		b.WriteString(hintStyle.Render(m.immediateApplyStatusLine()))
 	}
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 	b.WriteString(m.viewFixSummary())
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	if len(m.visible) == 0 {
 		b.WriteString(fieldStyle.Render("No repositories available for interactive fix right now."))
@@ -1307,7 +1365,7 @@ func (m *fixTUIModel) viewMainContent() string {
 		// width interactions that can trigger hard wrapping artifacts.
 		b.WriteString(m.viewRepoList())
 		if details := m.viewSelectedRepoDetails(); details != "" {
-			b.WriteString("\n\n")
+			b.WriteString("\n")
 			b.WriteString(details)
 		}
 	}
@@ -1406,7 +1464,7 @@ func (m *fixTUIModel) viewRepoHeader() string {
 	if listWidth <= 0 {
 		listWidth = fixListDefaultWidth
 	}
-	layout := fixListColumnsForWidth(max(50, listWidth-3))
+	layout := fixListColumnsForWidth(fixListContentWidth(listWidth))
 
 	header := lipgloss.JoinHorizontal(lipgloss.Top,
 		renderFixColumnCell("Repo", layout.Repo, fixHeaderCellStyle),
@@ -1461,14 +1519,16 @@ func (m *fixTUIModel) viewRepoDetails(repo fixRepoState) string {
 		state = "ignored"
 		stateStyle = fixStateIgnoredStyle
 	} else {
-		tier := classifyFixRepo(repo, actions)
-		switch tier {
+		switch classifyFixRepo(repo, actions) {
 		case fixRepoTierAutofixable:
 			state = "fixable"
 			stateStyle = fixStateAutofixableStyle
 		case fixRepoTierUnsyncableBlocked:
 			state = "unsyncable"
 			stateStyle = fixStateUnsyncableStyle
+		case fixRepoTierNotCloned:
+			state = "not cloned"
+			stateStyle = fixStateNotClonedStyle
 		}
 	}
 
@@ -1484,6 +1544,9 @@ func (m *fixTUIModel) viewRepoDetails(repo fixRepoState) string {
 	stateLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("State:")
 	autoPushLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Auto-push:")
 	branchLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Branch:")
+	reasonsLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Reasons:")
+	selectedLabel := lipgloss.NewStyle().Foreground(mutedTextColor).Render("Selected fixes:")
+	separator := hintStyle.Render(" · ")
 	autoPushValue := autoPushModeDisplayLabel(repoMetaAutoPushMode(repo.Meta))
 	autoPushValueStyle := fixAutoPushOffStyle
 	if !repoMetaAllowsAutoPush(repo.Meta) {
@@ -1498,21 +1561,25 @@ func (m *fixTUIModel) viewRepoDetails(repo fixRepoState) string {
 		stateLabel,
 		" ",
 		stateStyle.Render(state),
-		"   ",
+		separator,
 		autoPushLabel,
 		" ",
 		autoPushValueStyle.Render(autoPushValue),
-		"   ",
+		separator,
 		branchLabel,
 		" ",
 		fixBranchStyle.Render(repo.Record.Branch),
+		separator,
+		reasonsLabel,
+		" ",
+		fixReasonsStyle.Render(reasonText),
+		separator,
+		selectedLabel,
+		" ",
+		renderScheduledDetails(scheduled, ignored),
 	))
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Reasons: ") + fixReasonsStyle.Render(reasonText))
-	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Selected fixes: ") + renderScheduledDetails(scheduled, ignored))
-	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Action help: ") + hintStyle.Render(fixActionDescription(action)))
+	b.WriteString(lipgloss.NewStyle().Foreground(mutedTextColor).Render("Action: ") + hintStyle.Render(fixActionDescription(action)))
 	return b.String()
 }
 
@@ -1521,6 +1588,7 @@ func (m *fixTUIModel) viewFixSummary() string {
 	pending := 0
 	fixable := 0
 	blocked := 0
+	notCloned := 0
 	syncable := 0
 	ignored := 0
 	for _, repo := range m.visible {
@@ -1544,6 +1612,8 @@ func (m *fixTUIModel) viewFixSummary() string {
 			fixable++
 		case fixRepoTierUnsyncableBlocked:
 			blocked++
+		case fixRepoTierNotCloned:
+			notCloned++
 		case fixRepoTierSyncable:
 			syncable++
 		}
@@ -1552,16 +1622,17 @@ func (m *fixTUIModel) viewFixSummary() string {
 	pendingStyle := renderStatusPill(fmt.Sprintf("%d selected", pending))
 	autoStyle := renderFixSummaryPill(fmt.Sprintf("%d fixable", fixable), lipgloss.Color("214"))
 	blockedStyle := renderFixSummaryPill(fmt.Sprintf("%d unsyncable", blocked), errorFgColor)
+	notClonedStyle := renderFixSummaryPill(fmt.Sprintf("%d not cloned", notCloned), warningColor)
 	syncStyle := renderFixSummaryPill(fmt.Sprintf("%d syncable", syncable), successColor)
 	ignoredStyle := renderFixSummaryPill(fmt.Sprintf("%d ignored", ignored), mutedTextColor)
-	return lipgloss.JoinHorizontal(lipgloss.Top, totalStyle, " ", pendingStyle, "  ", autoStyle, " ", blockedStyle, " ", syncStyle, " ", ignoredStyle)
+	return lipgloss.JoinHorizontal(lipgloss.Top, totalStyle, " ", pendingStyle, "  ", autoStyle, " ", blockedStyle, " ", notClonedStyle, " ", syncStyle, " ", ignoredStyle)
 }
 
 func (m *fixTUIModel) viewContentWidth() int {
 	if m.width <= 0 {
 		return 0
 	}
-	contentWidth := m.width - 8
+	contentWidth := m.width - fixPageStyle.GetHorizontalFrameSize()
 	if contentWidth < 52 {
 		return 0
 	}
@@ -1600,7 +1671,7 @@ func (m *fixTUIModel) resizeRepoList() {
 
 	listWidth := fixListDefaultWidth
 	if w := m.viewContentWidth(); w > 0 {
-		listWidth = w - 10
+		listWidth = w - panelStyle.GetHorizontalFrameSize()
 	}
 	if listWidth < 52 {
 		listWidth = 52
@@ -1995,6 +2066,8 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			state = "fixable"
 		case fixRepoTierUnsyncableBlocked:
 			state = "unsyncable"
+		case fixRepoTierNotCloned:
+			state = "not cloned"
 		}
 		ignored := m.ignored[path]
 		if ignored {
@@ -2554,6 +2627,14 @@ func fixActionSelectionPriority(action string) int {
 	}
 }
 
+func fixListContentWidth(listWidth int) int {
+	contentWidth := listWidth - 5 // indicator + wrap guard
+	if contentWidth < 50 {
+		contentWidth = 50
+	}
+	return contentWidth
+}
+
 func fixListColumnsForWidth(listWidth int) fixColumnLayout {
 	const (
 		repoMin        = 7
@@ -2842,10 +2923,22 @@ func classifyFixRepo(repo fixRepoState, actions []string) fixRepoTier {
 	if repo.Record.Syncable {
 		return fixRepoTierSyncable
 	}
+	if hasUnsyncableReason(repo.Record.UnsyncableReasons, domain.ReasonCloneRequired) {
+		return fixRepoTierNotCloned
+	}
 	if unsyncableReasonsFullyCoverable(repo.Record.UnsyncableReasons, fixActionsForSelection(actions)) {
 		return fixRepoTierAutofixable
 	}
 	return fixRepoTierUnsyncableBlocked
+}
+
+func hasUnsyncableReason(reasons []domain.UnsyncableReason, target domain.UnsyncableReason) bool {
+	for _, reason := range reasons {
+		if reason == target {
+			return true
+		}
+	}
+	return false
 }
 
 func unsyncableReasonsFullyCoverable(reasons []domain.UnsyncableReason, actions []string) bool {
