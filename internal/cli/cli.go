@@ -219,7 +219,7 @@ Target resolution:
 - Without [project], bb infers the project from the current directory only when the current directory is inside the selected catalog and matches its repo layout depth.
 - init does not run a post-init scan; run bb scan or bb sync when you want to refresh machine observations.
 `),
-		Args:  cobra.MaximumNArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			runner, err := runtime.appRunner()
 			if err != nil {
@@ -492,7 +492,7 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 	}
 
 	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
-	cmd.Flags().StringVar(&message, "message", "", "Commit message for stage-commit-push/publish-new-branch/checkpoint-then-sync actions (or 'auto').")
+	cmd.Flags().StringVar(&message, "message", "", "Commit message for stage-commit-push/publish-new-branch/checkpoint-then-sync actions (or 'auto' for configured empty-message behavior).")
 	cmd.Flags().BoolVar(&aiMessage, "ai-message", false, "Generate commit message with Lumen for commit-producing fix actions.")
 	cmd.Flags().StringVar(&publishBranch, "publish-branch", "", "Target branch name for publish-new-branch or optional publish-to-new-branch flows.")
 	cmd.Flags().BoolVar(&returnToOriginalSync, "return-to-original-sync", false, "After publish-new-branch, switch back to the original branch and run pull --ff-only.")

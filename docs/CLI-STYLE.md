@@ -99,6 +99,7 @@ Use this baseline across TUIs unless there's a strong reason to diverge:
 - `Esc`: back/cancel (non-destructive).
 - `Ctrl+C`: quit (with confirmation if it would discard work).
 - `?`: toggle extended help.
+- Prefer terminal-portable chords for secondary actions (for example `alt+<letter>`), and avoid punctuation-heavy control chords that vary across emulators.
 
 Text input rule:
 
@@ -177,6 +178,8 @@ Rules:
 - Every action is keyboard focusable with a clear focus treatment.
 - Use one focus treatment across primary/secondary/danger buttons.
 - Keep labels width-stable between focused and unfocused states.
+- If a primary mutating action depends on reviewing scrollable context, gate it behind an explicit `Review` state until the viewport reaches the bottom.
+- Secondary utility actions that are orthogonal to form completion (for example external viewers) should prefer explicit keyboard shortcuts over additional focus stops.
 
 Example focus treatment:
 

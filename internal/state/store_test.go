@@ -227,6 +227,9 @@ func TestDefaultConfigCloneLinkDefaults(t *testing.T) {
 	if !cfg.Integrations.Lumen.ShowInstallTip {
 		t.Fatal("integrations.lumen.show_install_tip = false, want true")
 	}
+	if cfg.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty {
+		t.Fatal("integrations.lumen.auto_generate_commit_message_when_empty = true, want false")
+	}
 }
 
 func TestLoadConfigAllowsEmptyCloneCatalogPresetOverride(t *testing.T) {
@@ -302,6 +305,9 @@ notify:
 		if !cfg.Integrations.Lumen.ShowInstallTip {
 			t.Fatal("integrations.lumen.show_install_tip = false, want true")
 		}
+		if cfg.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty {
+			t.Fatal("integrations.lumen.auto_generate_commit_message_when_empty = true, want false")
+		}
 	})
 
 	t.Run("explicit false values persist", func(t *testing.T) {
@@ -310,6 +316,7 @@ notify:
 		cfg.GitHub.Owner = "alice"
 		cfg.Integrations.Lumen.Enabled = false
 		cfg.Integrations.Lumen.ShowInstallTip = false
+		cfg.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty = true
 		if err := SaveConfig(paths, cfg); err != nil {
 			t.Fatalf("save config: %v", err)
 		}
@@ -323,6 +330,9 @@ notify:
 		}
 		if loaded.Integrations.Lumen.ShowInstallTip {
 			t.Fatal("integrations.lumen.show_install_tip = true, want false")
+		}
+		if !loaded.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty {
+			t.Fatal("integrations.lumen.auto_generate_commit_message_when_empty = false, want true")
 		}
 	})
 }

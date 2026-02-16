@@ -116,8 +116,9 @@ func DefaultConfig() domain.ConfigFile {
 		Notify: domain.NotifyConfig{Enabled: true, Dedupe: true, ThrottleMinutes: 60},
 		Integrations: domain.Integrations{
 			Lumen: domain.LumenIntegrationConfig{
-				Enabled:        true,
-				ShowInstallTip: true,
+				Enabled:                            true,
+				ShowInstallTip:                     true,
+				AutoGenerateCommitMessageWhenEmpty: false,
 			},
 		},
 	}

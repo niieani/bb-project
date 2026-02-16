@@ -116,6 +116,43 @@ func TestWizardSchedulerInputEnterAdvancesToNotify(t *testing.T) {
 	}
 }
 
+func TestWizardNotifyCanToggleLumenAutoCommitDefault(t *testing.T) {
+	t.Parallel()
+
+	m := testConfigWizardModel(t)
+	m.step = stepNotify
+	m.focusTabs = false
+	m.notifyFocus = 0
+	m.updateNotifyFocus()
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if m.notifyFocus != 3 {
+		t.Fatalf("notify focus = %d, want 3", m.notifyFocus)
+	}
+
+	if m.config.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty {
+		t.Fatal("expected lumen auto-commit default to start disabled")
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if !m.config.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty {
+		t.Fatal("expected space to toggle lumen auto-commit default on")
+	}
+}
+
+func TestWizardNotifyViewIncludesLumenAutoCommitToggle(t *testing.T) {
+	t.Parallel()
+
+	m := testConfigWizardModel(t)
+	m.step = stepNotify
+	view := ansi.Strip(m.viewNotify())
+	if !strings.Contains(view, "Use Lumen for empty commit messages") {
+		t.Fatalf("expected notify view to include lumen auto-commit toggle, got %q", view)
+	}
+}
+
 func TestWizardUpFromFirstFieldFocusesTabsThenRightAdvances(t *testing.T) {
 	m := testConfigWizardModel(t)
 	m.step = stepGitHub

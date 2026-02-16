@@ -602,7 +602,7 @@ func mapSyncProbeOutcome(in gitx.SyncProbeOutcome) fixSyncProbeOutcome {
 type fixStepRunner func(id string, fallback fixActionPlanEntry, fn func() error) error
 type fixStepSkipper func(id string, fallback fixActionPlanEntry)
 
-func (a *App) runFixStageCommitSteps(path string, target fixRepoState, opts fixApplyOptions, runStep fixStepRunner) error {
+func (a *App) runFixStageCommitSteps(cfg domain.ConfigFile, path string, target fixRepoState, opts fixApplyOptions, runStep fixStepRunner) error {
 	if opts.GenerateGitignore && len(opts.GitignorePatterns) > 0 {
 		stepID := "stage-gitignore-append"
 		summary := fmt.Sprintf("Append %d selected pattern(s) to root .gitignore.", len(opts.GitignorePatterns))
@@ -621,14 +621,31 @@ func (a *App) runFixStageCommitSteps(path string, target fixRepoState, opts fixA
 		}
 	}
 
-	msg := strings.TrimSpace(opts.CommitMessage)
-	if msg == "" || msg == "auto" {
-		msg = DefaultFixCommitMessage
-	}
 	if err := runStep("stage-git-add", fixActionPlanEntry{ID: "stage-git-add", Command: true, Summary: "git add -A"}, func() error {
 		return a.Git.AddAll(path)
 	}); err != nil {
 		return err
+	}
+
+	msg := strings.TrimSpace(opts.CommitMessage)
+	if shouldAutoGenerateCommitMessageWithLumen(msg, cfg.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty) {
+		if err := runStep("stage-lumen-draft", fixActionPlanEntry{
+			ID:      "stage-lumen-draft",
+			Command: true,
+			Summary: "lumen draft",
+		}, func() error {
+			generated, err := a.generateLumenCommitMessageFromStagedDiff(path)
+			if err != nil {
+				return err
+			}
+			msg = strings.TrimSpace(generated)
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	if msg == "" || msg == "auto" {
+		msg = DefaultFixCommitMessage
 	}
 	return runStep("stage-git-commit", fixActionPlanEntry{
 		ID:      "stage-git-commit",
@@ -1066,7 +1083,7 @@ func (a *App) executeFixAction(
 				Reason: "stage-commit-push is blocked: branch is behind upstream, so push would be rejected; run sync-with-upstream first",
 			}
 		}
-		if err := a.runFixStageCommitSteps(path, target, opts, runStep); err != nil {
+		if err := a.runFixStageCommitSteps(cfg, path, target, opts, runStep); err != nil {
 			return err
 		}
 		if strings.TrimSpace(target.Record.OriginURL) == "" {
@@ -1149,7 +1166,7 @@ func (a *App) executeFixAction(
 		}); err != nil {
 			return err
 		}
-		if err := a.runFixStageCommitSteps(path, target, opts, runStep); err != nil {
+		if err := a.runFixStageCommitSteps(cfg, path, target, opts, runStep); err != nil {
 			return err
 		}
 		if err := runStep("publish-push-set-upstream", fixActionPlanEntry{
@@ -1229,7 +1246,7 @@ func (a *App) executeFixAction(
 				Reason: "checkpoint-then-sync is blocked: no local uncommitted changes to checkpoint",
 			}
 		}
-		if err := a.runFixStageCommitSteps(path, target, opts, runStep); err != nil {
+		if err := a.runFixStageCommitSteps(cfg, path, target, opts, runStep); err != nil {
 			return err
 		}
 		probeOutcome, probeErr := a.Git.ProbeSyncWithUpstream(path, target.Record.Upstream, string(syncStrategy))
@@ -1378,26 +1395,27 @@ func (a *App) buildFixActionPlanContext(cfg domain.ConfigFile, target fixRepoSta
 		}
 	}
 	return fixActionPlanContext{
-		Operation:                     target.Record.OperationInProgress,
-		Branch:                        strings.TrimSpace(target.Record.Branch),
-		Upstream:                      strings.TrimSpace(target.Record.Upstream),
-		HeadSHA:                       strings.TrimSpace(target.Record.HeadSHA),
-		OriginURL:                     strings.TrimSpace(target.Record.OriginURL),
-		SyncStrategy:                  normalizeFixSyncStrategy(opts.SyncStrategy),
-		PreferredRemote:               preferredRemote,
-		GitHubOwner:                   owner,
-		RemoteProtocol:                strings.TrimSpace(cfg.GitHub.RemoteProtocol),
-		ForkRemoteExists:              forkRemoteExists,
-		RepoName:                      strings.TrimSpace(target.Record.Name),
-		CommitMessage:                 strings.TrimSpace(opts.CommitMessage),
-		CreateProjectName:             strings.TrimSpace(opts.CreateProjectName),
-		CreateProjectVisibility:       opts.CreateProjectVisibility,
-		ForkBranchRenameTo:            strings.TrimSpace(opts.ForkBranchRenameTo),
-		ReturnToOriginalBranchAndSync: opts.ReturnToOriginalBranchAndSync,
-		GenerateGitignore:             opts.GenerateGitignore,
-		GitignorePatterns:             append([]string(nil), opts.GitignorePatterns...),
-		MissingRootGitignore:          target.Risk.MissingRootGitignore,
-		FetchPrune:                    cfg.Sync.FetchPrune,
+		Operation:                          target.Record.OperationInProgress,
+		Branch:                             strings.TrimSpace(target.Record.Branch),
+		Upstream:                           strings.TrimSpace(target.Record.Upstream),
+		HeadSHA:                            strings.TrimSpace(target.Record.HeadSHA),
+		OriginURL:                          strings.TrimSpace(target.Record.OriginURL),
+		SyncStrategy:                       normalizeFixSyncStrategy(opts.SyncStrategy),
+		PreferredRemote:                    preferredRemote,
+		GitHubOwner:                        owner,
+		RemoteProtocol:                     strings.TrimSpace(cfg.GitHub.RemoteProtocol),
+		ForkRemoteExists:                   forkRemoteExists,
+		RepoName:                           strings.TrimSpace(target.Record.Name),
+		CommitMessage:                      strings.TrimSpace(opts.CommitMessage),
+		CreateProjectName:                  strings.TrimSpace(opts.CreateProjectName),
+		CreateProjectVisibility:            opts.CreateProjectVisibility,
+		ForkBranchRenameTo:                 strings.TrimSpace(opts.ForkBranchRenameTo),
+		ReturnToOriginalBranchAndSync:      opts.ReturnToOriginalBranchAndSync,
+		GenerateGitignore:                  opts.GenerateGitignore,
+		GitignorePatterns:                  append([]string(nil), opts.GitignorePatterns...),
+		MissingRootGitignore:               target.Risk.MissingRootGitignore,
+		FetchPrune:                         cfg.Sync.FetchPrune,
+		AutoGenerateCommitMessageWhenEmpty: cfg.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty,
 	}
 }
 

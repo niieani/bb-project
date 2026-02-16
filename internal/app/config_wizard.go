@@ -44,6 +44,14 @@ const (
 	catalogFocusButtons
 )
 
+const (
+	notifyFocusEnabled = iota
+	notifyFocusDedupe
+	notifyFocusThrottle
+	notifyFocusLumenAutoCommit
+	notifyFocusCount
+)
+
 type configWizardKeyMap struct {
 	NextStep       key.Binding
 	PrevStep       key.Binding
@@ -786,7 +794,7 @@ func (m *configWizardModel) updateNotify(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focusTabs {
 				return m, nil
 			}
-			if m.notifyFocus == 0 {
+			if m.notifyFocus == notifyFocusEnabled {
 				m.focusTabs = true
 				m.updateNotifyFocus()
 				return m, nil
@@ -797,11 +805,11 @@ func (m *configWizardModel) updateNotify(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down":
 			if m.focusTabs {
 				m.focusTabs = false
-				m.notifyFocus = 0
+				m.notifyFocus = notifyFocusEnabled
 				m.updateNotifyFocus()
 				return m, nil
 			}
-			if m.notifyFocus < 2 {
+			if m.notifyFocus < notifyFocusCount-1 {
 				m.notifyFocus++
 			}
 			m.updateNotifyFocus()
@@ -810,13 +818,18 @@ func (m *configWizardModel) updateNotify(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focusTabs {
 				return m, nil
 			}
-			if m.notifyFocus == 0 {
+			if m.notifyFocus == notifyFocusEnabled {
 				m.config.Notify.Enabled = !m.config.Notify.Enabled
 				m.recomputeDirty()
 				return m, nil
 			}
-			if m.notifyFocus == 1 {
+			if m.notifyFocus == notifyFocusDedupe {
 				m.config.Notify.Dedupe = !m.config.Notify.Dedupe
+				m.recomputeDirty()
+				return m, nil
+			}
+			if m.notifyFocus == notifyFocusLumenAutoCommit {
+				m.config.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty = !m.config.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty
 				m.recomputeDirty()
 				return m, nil
 			}
@@ -828,7 +841,7 @@ func (m *configWizardModel) updateNotify(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if m.focusTabs || m.notifyFocus != 2 {
+	if m.focusTabs || m.notifyFocus != notifyFocusThrottle {
 		return m, nil
 	}
 
@@ -1330,7 +1343,7 @@ func (m *configWizardModel) updateNotifyFocus() {
 		m.notifyThrottle.Blur()
 		return
 	}
-	if m.notifyFocus == 2 {
+	if m.notifyFocus == notifyFocusThrottle {
 		m.notifyThrottle.Focus()
 		return
 	}
@@ -1670,25 +1683,32 @@ func (m *configWizardModel) viewNotify() string {
 	b.WriteString(hintStyle.Render("Control when and how unsyncable repository notifications are emitted."))
 	b.WriteString("\n\n")
 	b.WriteString(renderToggleField(
-		!m.focusTabs && m.notifyFocus == 0,
+		!m.focusTabs && m.notifyFocus == notifyFocusEnabled,
 		"Enable notifications",
 		"Emits notification output for unsyncable repositories when --notify is used.",
 		m.config.Notify.Enabled,
 	))
 	b.WriteString("\n\n")
 	b.WriteString(renderToggleField(
-		!m.focusTabs && m.notifyFocus == 1,
+		!m.focusTabs && m.notifyFocus == notifyFocusDedupe,
 		"Deduplicate notifications",
 		"Suppresses repeated notifications for unchanged unsyncable states.",
 		m.config.Notify.Dedupe,
 	))
 	b.WriteString("\n\n")
 	b.WriteString(renderFieldBlock(
-		!m.focusTabs && m.notifyFocus == 2,
+		!m.focusTabs && m.notifyFocus == notifyFocusThrottle,
 		"Notification throttle (minutes)",
 		"Minimum minutes between notifications for the same repository.",
-		renderInputContainer(m.notifyThrottle.View(), !m.focusTabs && m.notifyFocus == 2),
+		renderInputContainer(m.notifyThrottle.View(), !m.focusTabs && m.notifyFocus == notifyFocusThrottle),
 		errorText(m.notifyThrottle.Err),
+	))
+	b.WriteString("\n\n")
+	b.WriteString(renderToggleField(
+		!m.focusTabs && m.notifyFocus == notifyFocusLumenAutoCommit,
+		"Use Lumen for empty commit messages",
+		"When enabled, bb fix uses `lumen draft` automatically when commit message is empty or set to auto.",
+		m.config.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty,
 	))
 	return b.String()
 }
@@ -1893,6 +1913,9 @@ func (m *configWizardModel) diffLines() []string {
 	}
 	if m.originalConfig.Notify != m.config.Notify {
 		out = append(out, "notify settings updated")
+	}
+	if m.originalConfig.Integrations != m.config.Integrations {
+		out = append(out, "integration settings updated")
 	}
 	if !reflect.DeepEqual(m.originalMachine.Catalogs, m.machine.Catalogs) {
 		out = append(out, "catalog list updated")

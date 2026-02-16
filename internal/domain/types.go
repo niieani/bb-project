@@ -131,8 +131,9 @@ type Integrations struct {
 }
 
 type LumenIntegrationConfig struct {
-	Enabled        bool `yaml:"enabled"`
-	ShowInstallTip bool `yaml:"show_install_tip"`
+	Enabled                            bool `yaml:"enabled"`
+	ShowInstallTip                     bool `yaml:"show_install_tip"`
+	AutoGenerateCommitMessageWhenEmpty bool `yaml:"auto_generate_commit_message_when_empty"`
 }
 
 type RepoMetadataFile struct {

@@ -63,6 +63,7 @@ This wizard configures:
 - `github.owner` (required)
 - default visibility and remote protocol
 - sync/notify options
+- Lumen integration defaults (install tips and optional AI commit generation when commit message is empty)
 - catalogs, per-catalog repository layout depth (`1` or `2`), and default catalog
 
 Manual catalog commands remain available.
@@ -265,7 +266,7 @@ Interactive apply behavior:
 - Risky fixes (`push`, `sync-with-upstream`, `set-upstream-push`, `stage-commit-push`, `create-project`) open a confirmation wizard before execution.
 - Wizard shows changed files with `+/-` stats, target branch context, and a per-repo skip option.
 - For commit-producing actions, wizard includes commit message input with symbolic `✨` generation (Lumen draft).
-- When changed files are shown, wizard includes a symbolic `◫` button that launches Lumen visual diff and returns to the same wizard state.
+- When changed files are shown, press `alt+v` to launch Lumen visual diff and return to the same wizard state.
 - Wizard can generate a minimal root `.gitignore` when missing.
 
 Selector resolution for `<project>`:
@@ -277,7 +278,7 @@ Selector resolution for `<project>`:
 Flags:
 
 - `--include-catalog <name>` (repeatable)
-- `--message <text>` (used with `stage-commit-push`; pass `auto` for generated message)
+- `--message <text>` (used with commit-producing fix actions; pass `auto` to use the configured empty-message default behavior)
 - `--ai-message` (generate commit message with Lumen for commit-producing actions)
 - `--sync-strategy <rebase|merge>` (used with `sync-with-upstream`; default `rebase`)
 
@@ -396,6 +397,7 @@ integrations:
   lumen:
     enabled: true
     show_install_tip: true
+    auto_generate_commit_message_when_empty: false
 ```
 
 Important notes:
@@ -404,6 +406,7 @@ Important notes:
 - `github.owner` is required (`bb init` fails if blank).
 - `scheduler.interval_minutes` controls cadence used by `bb scheduler install`.
 - set `integrations.lumen.show_install_tip: false` to hide Lumen install/config tips.
+- set `integrations.lumen.auto_generate_commit_message_when_empty: true` to run `lumen draft` automatically in commit-producing `bb fix` actions when commit message is empty/`auto`.
 
 ## State Layout
 

@@ -258,8 +258,8 @@ func (m *fixTUIModel) wizardHelpMap() fixTUIHelpMap {
 	if m.wizard.FocusArea == fixWizardFocusCommit && m.wizard.CommitButtonFocused {
 		enterDesc = "generate message"
 	}
-	if m.wizard.FocusArea == fixWizardFocusDiff {
-		enterDesc = "open visual diff"
+	if m.wizard.FocusArea == fixWizardFocusActions && m.wizard.ActionFocus == fixWizardActionApply && m.wizardNeedsReviewBeforeApply() {
+		enterDesc = "review first"
 	}
 	enter := newHelpBinding([]string{"enter"}, "enter", enterDesc)
 	short = append(short, enter)
@@ -299,6 +299,11 @@ func (m *fixTUIModel) wizardHelpMap() fixTUIHelpMap {
 	focus := newHelpBinding([]string{"tab", "shift+tab"}, "tab/shift+tab", "cycle focus")
 	short = append(short, focus)
 	secondary = append(secondary, focus)
+	if m.wizardHasVisualDiffButton() {
+		diff := newHelpBinding([]string{"alt+v"}, "alt+v", "visual diff")
+		short = append(short, diff)
+		secondary = append(secondary, diff)
+	}
 
 	helpToggle := newHelpBinding([]string{"?"}, "?", "more keys")
 	quit := newHelpBinding([]string{"q", "ctrl+c"}, "q", "quit")

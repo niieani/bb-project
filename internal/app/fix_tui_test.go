@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"bb-project/internal/domain"
@@ -1488,6 +1489,30 @@ func TestFixTUIWizardCommitGenerateButtonIsSymbolic(t *testing.T) {
 	}
 }
 
+func TestFixTUIWizardCommitGenerateButtonMatchesInputHeight(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+
+	input := renderInputContainer(m.wizard.CommitMessage.View(), true)
+	button := m.renderWizardCommitGenerateButton("✨", lipgloss.Height(input), false)
+	if lipgloss.Height(button) != lipgloss.Height(input) {
+		t.Fatalf("commit generate button height = %d, want %d", lipgloss.Height(button), lipgloss.Height(input))
+	}
+}
+
 func TestFixTUIWizardCommitGenerateButtonRunsImmediatelyAndReplacesMessage(t *testing.T) {
 	t.Parallel()
 
@@ -2023,7 +2048,7 @@ func TestFixTUIWizardButtonsRenderCancelFirst(t *testing.T) {
 func TestRenderWizardActionButtonsUsesVisibleFocusMarker(t *testing.T) {
 	t.Parallel()
 
-	view := ansi.Strip(renderWizardActionButtons(fixWizardActionSkip))
+	view := ansi.Strip(renderWizardActionButtons(fixWizardActionSkip, "Apply"))
 	if !strings.Contains(view, "[Skip]") {
 		t.Fatalf("expected focused marker on Skip, got %q", view)
 	}
@@ -2406,11 +2431,10 @@ func TestFixTUIWizardVisualDiffButtonLaunchesAndReturnsToSameWizardState(t *test
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
 
 	view := ansi.Strip(m.viewWizardContent())
-	if !strings.Contains(view, "◫") {
-		t.Fatalf("expected symbolic visual diff button, got %q", view)
+	if !strings.Contains(view, "alt+v") || !strings.Contains(view, "open visual diff viewer (lumen).") {
+		t.Fatalf("expected shortcut hint copy in changed-files block, got %q", view)
 	}
 
-	m.wizard.FocusArea = fixWizardFocusDiff
 	execCalled := false
 	m.prepareVisualDiffCmdFn = func(repoPath string, args []string) (*exec.Cmd, func(error) error, error) {
 		if repoPath != "/repos/api" {
@@ -2431,7 +2455,7 @@ func TestFixTUIWizardVisualDiffButtonLaunchesAndReturnsToSameWizardState(t *test
 	focusBefore := m.wizard.FocusArea
 	indexBefore := m.wizard.Index
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v"), Alt: true})
 	if !execCalled {
 		t.Fatal("expected visual diff exec process to be launched")
 	}
@@ -2445,6 +2469,169 @@ func TestFixTUIWizardVisualDiffButtonLaunchesAndReturnsToSameWizardState(t *test
 	}
 	if got := m.wizard.Index; got != indexBefore {
 		t.Fatalf("wizard index after returning from visual diff = %d, want %d", got, indexBefore)
+	}
+}
+
+func TestFixTUIWizardVisualDiffShortcutUsesAltV(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
+			Risk: fixRiskSnapshot{
+				ChangedFiles: []fixChangedFile{
+					{Path: "src/main.go", Added: 2, Deleted: 1},
+				},
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+
+	execCalled := false
+	m.prepareVisualDiffCmdFn = func(_ string, _ []string) (*exec.Cmd, func(error) error, error) {
+		return &exec.Cmd{}, func(err error) error { return err }, nil
+	}
+	m.execProcessFn = func(_ *exec.Cmd, fn tea.ExecCallback) tea.Cmd {
+		execCalled = true
+		return func() tea.Msg { return fn(nil) }
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v"), Alt: true})
+	if !execCalled {
+		t.Fatal("expected alt+v shortcut to launch visual diff")
+	}
+	if cmd == nil {
+		t.Fatal("expected exec callback command")
+	}
+}
+
+func TestFixTUIWizardHelpShowsAltVForVisualDiff(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
+			Risk: fixRiskSnapshot{
+				ChangedFiles: []fixChangedFile{
+					{Path: "src/main.go", Added: 2, Deleted: 1},
+				},
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
+
+	entries := shortHelpEntries(m.contextualHelpMap().ShortHelp())
+	if !helpContains(entries, "alt+v visual diff") {
+		t.Fatalf("expected wizard help to include alt+v visual diff shortcut, got %v", entries)
+	}
+}
+
+func TestFixTUIWizardChangedFilesShortcutNotInFocusFlow(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{
+				ChangedFiles: []fixChangedFile{
+					{Path: "src/main.go", Added: 10, Deleted: 1},
+				},
+			},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 20})
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project -> visibility
+	if m.wizard.FocusArea != fixWizardFocusVisibility {
+		t.Fatalf("focus area = %v, want visibility before bottom-edge check", m.wizard.FocusArea)
+	}
+
+	m.wizard.BodyViewport.GotoBottom()
+	if !m.wizard.BodyViewport.AtBottom() {
+		t.Fatal("expected wizard viewport to be at bottom")
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // visibility -> actions (no intermediate visual-diff focus)
+	if m.wizard.FocusArea != fixWizardFocusActions {
+		t.Fatalf("focus area after down at bottom = %v, want actions", m.wizard.FocusArea)
+	}
+}
+
+func TestFixTUIWizardApplyActionRequiresReviewBeforeBottom(t *testing.T) {
+	t.Parallel()
+
+	changed := make([]fixChangedFile, 0, 24)
+	for i := 0; i < 24; i++ {
+		changed = append(changed, fixChangedFile{Path: fmt.Sprintf("src/file-%02d.go", i), Added: i + 1, Deleted: i})
+	}
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "",
+			},
+			Meta: nil,
+			Risk: fixRiskSnapshot{ChangedFiles: changed},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
+
+	for m.wizard.FocusArea != fixWizardFocusActions {
+		_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+	m.wizard.ActionFocus = fixWizardActionApply
+	m.wizard.BodyViewport.GotoTop()
+	if m.wizard.BodyViewport.AtBottom() {
+		t.Fatal("expected viewport to require review before apply")
+	}
+
+	viewBefore := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(viewBefore, "Review") {
+		t.Fatalf("expected Review action before reaching bottom, got %q", viewBefore)
+	}
+	if strings.Contains(viewBefore, "[Apply]") {
+		t.Fatalf("did not expect Apply action before reaching bottom, got %q", viewBefore)
+	}
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // Review
+	if !m.wizard.BodyViewport.AtBottom() {
+		t.Fatal("expected Review action to scroll viewport to bottom")
+	}
+	if m.wizard.FocusArea != fixWizardFocusActions || m.wizard.ActionFocus != fixWizardActionApply {
+		t.Fatalf("expected focus to remain on apply action, got focus=%v actionFocus=%d", m.wizard.FocusArea, m.wizard.ActionFocus)
+	}
+	if m.wizard.Applying {
+		t.Fatal("did not expect apply execution to start from Review action")
+	}
+
+	viewAfter := ansi.Strip(m.viewWizardContent())
+	if !strings.Contains(viewAfter, "Apply") {
+		t.Fatalf("expected Apply action after review scroll, got %q", viewAfter)
 	}
 }
 
@@ -3127,14 +3314,9 @@ func TestFixTUIWizardDownMovesFocusAtViewportBottom(t *testing.T) {
 		t.Fatal("expected wizard viewport to be at bottom")
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // should move to visual diff at bottom edge when changed files are shown
-	if m.wizard.FocusArea != fixWizardFocusDiff {
-		t.Fatalf("focus area after down at bottom = %v, want visual diff", m.wizard.FocusArea)
-	}
-
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // visual diff -> actions
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // should move to actions at bottom edge
 	if m.wizard.FocusArea != fixWizardFocusActions {
-		t.Fatalf("focus area after second down at bottom = %v, want actions", m.wizard.FocusArea)
+		t.Fatalf("focus area after down at bottom = %v, want actions", m.wizard.FocusArea)
 	}
 }
 

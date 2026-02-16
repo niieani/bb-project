@@ -118,7 +118,18 @@ func (a *App) generateLumenCommitMessage(repoPath string) (string, error) {
 	if err := a.Git.AddAll(repoPath); err != nil {
 		return "", fmt.Errorf("git add -A failed before lumen draft: %w", err)
 	}
+	return a.runLumenDraft(repoPath, runtime)
+}
 
+func (a *App) generateLumenCommitMessageFromStagedDiff(repoPath string) (string, error) {
+	runtime, err := a.resolveLumenRuntime()
+	if err != nil {
+		return "", err
+	}
+	return a.runLumenDraft(repoPath, runtime)
+}
+
+func (a *App) runLumenDraft(repoPath string, runtime lumenRuntime) (string, error) {
 	run := a.RunCommandInDir
 	if run == nil {
 		run = defaultRunCommandInDir

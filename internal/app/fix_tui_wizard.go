@@ -45,6 +45,7 @@ type fixWizardState struct {
 	GitHubOwner      string
 	RemoteProtocol   string
 	FetchPrune       bool
+	LumenAutoCommit  bool
 	ForkRemoteExists bool
 	Action           string
 	SyncStrategy     FixSyncStrategy
@@ -116,7 +117,6 @@ type fixWizardFocusArea int
 const (
 	fixWizardFocusActions fixWizardFocusArea = iota
 	fixWizardFocusCommit
-	fixWizardFocusDiff
 	fixWizardFocusProjectName
 	fixWizardFocusForkBranch
 	fixWizardFocusGitignore
@@ -266,10 +266,11 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	m.wizard.ProjectName = projectNameInput
 	m.wizard.ShowGitignoreToggle = showGitignoreToggle
 	m.wizard.GenerateGitignore = showGitignoreToggle
-	githubOwner, defaultVis, remoteProtocol, fetchPrune := m.detectWizardDefaults()
+	githubOwner, defaultVis, remoteProtocol, fetchPrune, lumenAutoCommit := m.detectWizardDefaults()
 	m.wizard.GitHubOwner = githubOwner
 	m.wizard.RemoteProtocol = remoteProtocol
 	m.wizard.FetchPrune = fetchPrune
+	m.wizard.LumenAutoCommit = lumenAutoCommit
 	m.wizard.ForkRemoteExists = false
 	if m.app != nil && githubOwner != "" {
 		if remoteNames, err := m.app.Git.RemoteNames(decision.RepoPath); err == nil {
@@ -625,16 +626,17 @@ func (m *fixTUIModel) updateRepoAfterWizardApply(updated fixRepoState) {
 	m.rebuildList(path)
 }
 
-func (m *fixTUIModel) detectWizardDefaults() (owner string, visibility domain.Visibility, remoteProtocol string, fetchPrune bool) {
+func (m *fixTUIModel) detectWizardDefaults() (owner string, visibility domain.Visibility, remoteProtocol string, fetchPrune bool, lumenAutoCommit bool) {
 	visibility = domain.VisibilityPrivate
 	remoteProtocol = "ssh"
 	fetchPrune = true
+	lumenAutoCommit = false
 	if m.app == nil {
-		return "", visibility, remoteProtocol, fetchPrune
+		return "", visibility, remoteProtocol, fetchPrune, lumenAutoCommit
 	}
 	cfg, _, err := m.app.loadContext()
 	if err != nil {
-		return "", visibility, remoteProtocol, fetchPrune
+		return "", visibility, remoteProtocol, fetchPrune, lumenAutoCommit
 	}
 	owner = strings.TrimSpace(cfg.GitHub.Owner)
 	if strings.EqualFold(strings.TrimSpace(cfg.GitHub.RemoteProtocol), "https") {
@@ -644,7 +646,8 @@ func (m *fixTUIModel) detectWizardDefaults() (owner string, visibility domain.Vi
 		visibility = domain.VisibilityPublic
 	}
 	fetchPrune = cfg.Sync.FetchPrune
-	return owner, visibility, remoteProtocol, fetchPrune
+	lumenAutoCommit = cfg.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty
+	return owner, visibility, remoteProtocol, fetchPrune, lumenAutoCommit
 }
 
 func (m *fixTUIModel) validateWizardInputs(opts fixApplyOptions) error {
@@ -689,7 +692,7 @@ func (m *fixTUIModel) syncWizardFieldFocus() {
 }
 
 func (m *fixTUIModel) wizardFocusOrder() []fixWizardFocusArea {
-	order := make([]fixWizardFocusArea, 0, 7)
+	order := make([]fixWizardFocusArea, 0, 6)
 	if m.wizard.EnableCommitMessage {
 		order = append(order, fixWizardFocusCommit)
 	}
@@ -704,9 +707,6 @@ func (m *fixTUIModel) wizardFocusOrder() []fixWizardFocusArea {
 	}
 	if m.wizard.Action == FixActionCreateProject {
 		order = append(order, fixWizardFocusVisibility)
-	}
-	if m.wizardHasVisualDiffButton() {
-		order = append(order, fixWizardFocusDiff)
 	}
 	order = append(order, fixWizardFocusActions)
 	return order
@@ -831,6 +831,12 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.syncWizardViewport()
 		return m, nil
 	}
+	if isWizardVisualDiffShortcut(msg) {
+		if m.wizardHasVisualDiffButton() {
+			return m, m.launchWizardVisualDiff()
+		}
+		return m, nil
+	}
 	if m.wizard.Applying || m.wizard.CommitGenerating {
 		return m, nil
 	}
@@ -885,29 +891,6 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.wizard.CommitMessage, cmd = m.wizard.CommitMessage.Update(msg)
 		m.errText = ""
 		return m, cmd
-	}
-	if m.wizard.FocusArea == fixWizardFocusDiff {
-		if key.Matches(msg, m.keys.Cancel) {
-			m.viewMode = fixViewList
-			m.status = "cancelled remaining risky confirmations"
-			return m, nil
-		}
-		switch msg.String() {
-		case "enter":
-			return m, m.launchWizardVisualDiff()
-		case "down":
-			if m.wizardMoveFocus(1, false) {
-				return m, nil
-			}
-			m.scrollWizardDown(1)
-			return m, nil
-		case "up":
-			if m.wizardMoveFocus(-1, false) {
-				return m, nil
-			}
-			m.scrollWizardUp(1)
-			return m, nil
-		}
 	}
 	if m.wizard.FocusArea == fixWizardFocusProjectName {
 		if key.Matches(msg, m.keys.Cancel) {
@@ -1011,6 +994,11 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case fixWizardActionSkip:
 			m.skipWizardCurrent()
 		case fixWizardActionApply:
+			if m.wizardNeedsReviewBeforeApply() {
+				m.wizard.BodyViewport.GotoBottom()
+				m.status = "reviewed full context; press enter again to apply"
+				return m, nil
+			}
 			return m, m.applyWizardCurrent()
 		default:
 			m.viewMode = fixViewList
@@ -1218,7 +1206,7 @@ func (m *fixTUIModel) viewWizardContent() string {
 	m.syncWizardViewport()
 
 	controls := m.viewWizardStaticControls()
-	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus), m.wizardBodyLineWidth())
+	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus, m.wizardPrimaryActionLabel()), m.wizardBodyLineWidth())
 	if m.wizard.Applying {
 		actions = hintStyle.Render(m.clampSingleLine(m.wizardApplyingStatusLine(), m.wizardBodyLineWidth()))
 	} else if m.wizard.CommitGenerating {
@@ -1348,18 +1336,37 @@ func (m *fixTUIModel) renderWizardCommitInputWithGenerateButton() string {
 		buttonLabel = m.wizard.CommitGenerateSpinner.View()
 	}
 	buttonFocused := m.wizard.FocusArea == fixWizardFocusCommit && m.wizard.CommitButtonFocused && !m.wizard.CommitGenerating
-	button := buttonStyle
-	if m.wizard.CommitGenerating {
-		button = buttonDisabledStyle
-	} else if buttonFocused {
-		button = buttonFocusStyle
-	}
+	button := m.renderWizardCommitGenerateButton(buttonLabel, lipgloss.Height(input), buttonFocused)
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		input,
 		" ",
-		button.Render(renderButtonLabel(buttonLabel, buttonFocused)),
+		button,
 	)
+}
+
+func (m *fixTUIModel) renderWizardCommitGenerateButton(label string, totalHeight int, focused bool) string {
+	style := inputStyle.Copy().
+		Width(8).
+		Align(lipgloss.Center, lipgloss.Center)
+	if focused {
+		style = inputFocusStyle.Copy().
+			Width(8).
+			Align(lipgloss.Center, lipgloss.Center)
+	}
+	if m.wizard.CommitGenerating {
+		style = inputStyle.Copy().
+			Width(8).
+			Align(lipgloss.Center, lipgloss.Center).
+			BorderForeground(mutedTextColor)
+	}
+
+	innerHeight := totalHeight - style.GetVerticalFrameSize()
+	if innerHeight < 1 {
+		innerHeight = 1
+	}
+	style = style.Height(innerHeight)
+	return style.Render(label)
 }
 
 func (m *fixTUIModel) viewWizardTopLine() string {
@@ -1475,20 +1482,21 @@ func (m *fixTUIModel) viewWizardContextContent() string {
 
 func (m *fixTUIModel) wizardActionPlanContext() fixActionPlanContext {
 	ctx := fixActionPlanContext{
-		Operation:               m.wizard.Operation,
-		Branch:                  strings.TrimSpace(m.wizard.Branch),
-		Upstream:                strings.TrimSpace(m.wizard.Upstream),
-		HeadSHA:                 strings.TrimSpace(m.wizard.HeadSHA),
-		OriginURL:               strings.TrimSpace(m.wizard.OriginURL),
-		SyncStrategy:            m.wizard.SyncStrategy,
-		PreferredRemote:         strings.TrimSpace(m.wizard.PreferredRemote),
-		GitHubOwner:             strings.TrimSpace(m.wizard.GitHubOwner),
-		RemoteProtocol:          strings.TrimSpace(m.wizard.RemoteProtocol),
-		ForkRemoteExists:        m.wizard.ForkRemoteExists,
-		RepoName:                strings.TrimSpace(m.wizard.RepoName),
-		CreateProjectVisibility: m.wizard.Visibility,
-		MissingRootGitignore:    m.wizard.Risk.MissingRootGitignore,
-		FetchPrune:              m.wizard.FetchPrune,
+		Operation:                          m.wizard.Operation,
+		Branch:                             strings.TrimSpace(m.wizard.Branch),
+		Upstream:                           strings.TrimSpace(m.wizard.Upstream),
+		HeadSHA:                            strings.TrimSpace(m.wizard.HeadSHA),
+		OriginURL:                          strings.TrimSpace(m.wizard.OriginURL),
+		SyncStrategy:                       m.wizard.SyncStrategy,
+		PreferredRemote:                    strings.TrimSpace(m.wizard.PreferredRemote),
+		GitHubOwner:                        strings.TrimSpace(m.wizard.GitHubOwner),
+		RemoteProtocol:                     strings.TrimSpace(m.wizard.RemoteProtocol),
+		ForkRemoteExists:                   m.wizard.ForkRemoteExists,
+		RepoName:                           strings.TrimSpace(m.wizard.RepoName),
+		CreateProjectVisibility:            m.wizard.Visibility,
+		MissingRootGitignore:               m.wizard.Risk.MissingRootGitignore,
+		FetchPrune:                         m.wizard.FetchPrune,
+		AutoGenerateCommitMessageWhenEmpty: m.wizard.LumenAutoCommit,
 	}
 	if m.wizard.EnableProjectName {
 		ctx.CreateProjectName = sanitizeGitHubRepositoryNameInput(m.wizard.ProjectName.Value())
@@ -1570,19 +1578,27 @@ func (m *fixTUIModel) renderWizardChangedFilesBlock() string {
 	title, description := m.wizardChangedFilesFieldMeta()
 	value := m.renderChangedFilesList()
 	if m.wizardHasVisualDiffButton() {
-		value += "\n\n" + m.renderWizardVisualDiffButton()
+		value += "\n\n" + m.renderWizardVisualDiffHint()
 	}
-	return renderFieldBlock(m.wizard.FocusArea == fixWizardFocusDiff, title, description, value, "")
+	return renderFieldBlock(false, title, description, value, "")
 }
 
-func (m *fixTUIModel) renderWizardVisualDiffButton() string {
-	focused := m.wizard.FocusArea == fixWizardFocusDiff
-	style := buttonStyle
-	if focused {
-		style = buttonFocusStyle
+func (m *fixTUIModel) renderWizardVisualDiffHint() string {
+	shortcut := lipgloss.NewStyle().
+		Foreground(textColor).
+		Background(lipgloss.AdaptiveColor{Light: "#ECF3FF", Dark: "#1C2738"}).
+		Padding(0, 1).
+		Render("alt+v")
+	return hintStyle.Render("Press ") + shortcut + hintStyle.Render(" to open visual diff viewer (lumen).")
+}
+
+func isWizardVisualDiffShortcut(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "alt+v":
+		return true
+	default:
+		return false
 	}
-	button := style.Render(renderButtonLabel("◫", focused))
-	return button + "\n" + hintStyle.Render("Open visual diff viewer (Lumen).")
 }
 
 func renderWizardCommandLine(command string) string {
@@ -1596,7 +1612,7 @@ func renderWizardCommandLine(command string) string {
 func (m *fixTUIModel) syncWizardViewport() {
 	content := m.viewWizardContextContent()
 	controls := m.viewWizardStaticControls()
-	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus), m.wizardBodyLineWidth())
+	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus, m.wizardPrimaryActionLabel()), m.wizardBodyLineWidth())
 	// Non-scrollable rows:
 	// - top indicator row
 	// - bottom indicator row
@@ -1623,6 +1639,17 @@ func (m *fixTUIModel) syncWizardViewport() {
 	m.wizard.BodyViewport.Height = height
 	m.wizard.BodyViewport.SetContent(content)
 	m.wizard.BodyViewport.SetYOffset(offset)
+}
+
+func (m *fixTUIModel) wizardNeedsReviewBeforeApply() bool {
+	return m.wizardHasContextOverflow() && !m.wizard.BodyViewport.AtBottom()
+}
+
+func (m *fixTUIModel) wizardPrimaryActionLabel() string {
+	if m.wizardNeedsReviewBeforeApply() {
+		return "Review"
+	}
+	return "Apply"
 }
 
 func (m *fixTUIModel) wizardViewportSize(contentHeight int, contentWidth int, staticLines int) (int, int) {
@@ -2208,7 +2235,7 @@ func summaryManualGuidanceForReason(reason domain.UnsyncableReason) string {
 	}
 }
 
-func renderWizardActionButtons(focus int) string {
+func renderWizardActionButtons(focus int, primaryAction string) string {
 	cancelStyle := buttonDangerStyle
 	skipStyle := buttonStyle
 	applyStyle := buttonPrimaryStyle
@@ -2230,7 +2257,7 @@ func renderWizardActionButtons(focus int) string {
 		lipgloss.Top,
 		cancelStyle.Render(renderButtonLabel("Cancel", cancelFocused)),
 		skipStyle.Render(renderButtonLabel("Skip", skipFocused)),
-		applyStyle.Render(renderButtonLabel("Apply", applyFocused)),
+		applyStyle.Render(renderButtonLabel(primaryAction, applyFocused)),
 	)
 }
 
