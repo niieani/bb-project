@@ -1660,7 +1660,27 @@ func (m *fixTUIModel) viewFixSummary() string {
 	notClonedStyle := renderFixSummaryPill(fmt.Sprintf("%d not cloned", notCloned), warningColor)
 	syncStyle := renderFixSummaryPill(fmt.Sprintf("%d syncable", syncable), successColor)
 	ignoredStyle := renderFixSummaryPill(fmt.Sprintf("%d ignored", ignored), mutedTextColor)
-	return lipgloss.JoinHorizontal(lipgloss.Top, totalStyle, " ", pendingStyle, "  ", autoStyle, " ", blockedStyle, " ", notClonedStyle, " ", syncStyle, " ", ignoredStyle)
+	pills := lipgloss.JoinHorizontal(lipgloss.Top, totalStyle, " ", pendingStyle, "  ", autoStyle, " ", blockedStyle, " ", notClonedStyle, " ", syncStyle, " ", ignoredStyle)
+	summaryWidth := m.repoDetailsLineWidth()
+	if summaryWidth <= 0 || lipgloss.Width(pills) <= summaryWidth {
+		return pills
+	}
+	return m.viewFixSummaryCompactText(total, pending, fixable, blocked, notCloned, syncable, ignored, summaryWidth)
+}
+
+func (m *fixTUIModel) viewFixSummaryCompactText(total int, pending int, fixable int, blocked int, notCloned int, syncable int, ignored int, width int) string {
+	segments := []string{
+		fmt.Sprintf("repos: %d", total),
+		fmt.Sprintf("selected: %d", pending),
+		fmt.Sprintf("fixable: %d", fixable),
+		fmt.Sprintf("unsyncable: %d", blocked),
+		fmt.Sprintf("not cloned: %d", notCloned),
+		fmt.Sprintf("syncable: %d", syncable),
+		fmt.Sprintf("ignored: %d", ignored),
+	}
+	separator := hintStyle.Render(" · ")
+	lines := wrapStyledSegments(segments, separator, width)
+	return strings.Join(lines, "\n")
 }
 
 func (m *fixTUIModel) viewContentWidth() int {

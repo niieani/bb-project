@@ -4619,6 +4619,72 @@ func TestFixTUISelectedDetailsWrapAvoidsOrphanSelectedFixValueLine(t *testing.T)
 	}
 }
 
+func TestFixTUIFixSummaryFallsBackToWrappedTextWhenPillsDoNotFit(t *testing.T) {
+	t.Parallel()
+
+	repos := make([]fixRepoState, 0, 12)
+	for i := 0; i < 12; i++ {
+		repos = append(repos, fixRepoState{
+			Record: domain.MachineRepoRecord{
+				Name:      fmt.Sprintf("repo-%02d", i),
+				Path:      fmt.Sprintf("/repos/repo-%02d", i),
+				OriginURL: fmt.Sprintf("git@github.com:you/repo-%02d.git", i),
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{
+				OriginURL: fmt.Sprintf("https://github.com/you/repo-%02d.git", i),
+				AutoPush:  domain.AutoPushModeDisabled,
+			},
+		})
+	}
+
+	m := newFixTUIModelForTest(repos)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 92, Height: 24})
+
+	summary := ansi.Strip(m.viewFixSummary())
+	if strings.Contains(summary, "╭") || strings.Contains(summary, "╮") || strings.Contains(summary, "╰") || strings.Contains(summary, "╯") {
+		t.Fatalf("expected narrow summary fallback without pill boxes, got %q", summary)
+	}
+	if !strings.Contains(summary, "repos:") || !strings.Contains(summary, "selected:") || !strings.Contains(summary, "fixable:") {
+		t.Fatalf("expected key/value summary entries, got %q", summary)
+	}
+	if !strings.Contains(summary, " · ") {
+		t.Fatalf("expected dot-separated summary entries, got %q", summary)
+	}
+	summaryWidth := m.repoDetailsLineWidth()
+	for _, line := range strings.Split(summary, "\n") {
+		if w := ansi.StringWidth(line); summaryWidth > 0 && w > summaryWidth {
+			t.Fatalf("summary line exceeds available width: got=%d want<=%d line=%q summary=%q", w, summaryWidth, line, summary)
+		}
+	}
+}
+
+func TestFixTUIFixSummaryUsesPillsWhenThereIsEnoughWidth(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 170, Height: 24})
+
+	summary := ansi.Strip(m.viewFixSummary())
+	if !strings.Contains(summary, "╭") || !strings.Contains(summary, "╮") {
+		t.Fatalf("expected wide summary to keep pill boxes, got %q", summary)
+	}
+}
+
 func TestClassifyFixRepoMarksUnsyncableRepoAsFixableWhenReasonsAreCoverable(t *testing.T) {
 	t.Parallel()
 

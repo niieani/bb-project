@@ -202,6 +202,7 @@ Rules:
 
 - Default selections should be no-op (explicitly show `-` / "no action") rather than auto-selecting a mutating action.
 - Keep table cell content plain text (avoid embedding ANSI/lipgloss inside cell strings); style at the row/column layer instead.
+- Make summary/status chips responsive: if boxed chips cannot fit in one row, degrade to wrapped dot-separated key/value text instead of allowing overflow/border corruption.
 - Keep the selected row visible while navigating; viewport must follow the cursor.
 - If list height can change based on below-list details, reserve height against worst-case visible details so single-step cursor movement does not trigger sudden page re-bucketing (no large backward/forward viewport jumps on a one-row move).
 - Keep list pages top-anchored and avoid artificial spacer rows between the main panel and footer; absorb available vertical space by sizing the list viewport itself.
