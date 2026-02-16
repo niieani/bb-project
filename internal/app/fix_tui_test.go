@@ -3623,7 +3623,7 @@ func TestFixTUISelectFixesColumnPrependsSelectedSquares(t *testing.T) {
 	}
 }
 
-func TestFixTUIRepoListShowsStickyCurrentCatalogLine(t *testing.T) {
+func TestFixTUIRepoListStickyCatalogDoesNotDuplicateVisibleHeader(t *testing.T) {
 	t.Parallel()
 
 	repos := []fixRepoState{
@@ -3655,16 +3655,68 @@ func TestFixTUIRepoListShowsStickyCurrentCatalogLine(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 170, Height: 24})
 
-	m.setCursor(0)
-	lines := strings.Split(ansi.Strip(m.viewRepoList()), "\n")
-	if len(lines) < 2 || !strings.Contains(lines[1], "Catalog: software (default)") {
-		t.Fatalf("expected sticky catalog line for selected default-catalog repo, got %q", strings.Join(lines, "\n"))
+	view := ansi.Strip(m.viewRepoList())
+	if strings.Count(view, "Catalog: software (default)") != 1 {
+		t.Fatalf("expected catalog header to appear once without sticky duplication at top, got %q", view)
 	}
+}
 
-	m.setCursor(1)
-	lines = strings.Split(ansi.Strip(m.viewRepoList()), "\n")
-	if len(lines) < 2 || !strings.Contains(lines[1], "Catalog: references") {
-		t.Fatalf("expected sticky catalog line to follow selected repo catalog, got %q", strings.Join(lines, "\n"))
+func TestFixTUIRepoListStickyCatalogTracksTopVisibleCatalogNotCursor(t *testing.T) {
+	t.Parallel()
+
+	repos := make([]fixRepoState, 0, 8)
+	for i := 0; i < 6; i++ {
+		repos = append(repos, fixRepoState{
+			Record: domain.MachineRepoRecord{
+				Name:      fmt.Sprintf("projects-%d", i),
+				Path:      fmt.Sprintf("/repos/projects-%d", i),
+				Catalog:   "projects",
+				OriginURL: "git@github.com:you/projects.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta:             &domain.RepoMetadataFile{OriginURL: "https://github.com/you/projects.git", AutoPush: domain.AutoPushModeDisabled},
+			IsDefaultCatalog: true,
+		})
+	}
+	repos = append(repos,
+		fixRepoState{
+			Record: domain.MachineRepoRecord{
+				Name:      "references-a",
+				Path:      "/repos/references-a",
+				Catalog:   "references",
+				OriginURL: "git@github.com:you/references-a.git",
+				Upstream:  "origin/main",
+				Behind:    1,
+			},
+			Meta:             &domain.RepoMetadataFile{OriginURL: "https://github.com/you/references-a.git", AutoPush: domain.AutoPushModeDisabled},
+			IsDefaultCatalog: false,
+		},
+		fixRepoState{
+			Record: domain.MachineRepoRecord{
+				Name:      "references-b",
+				Path:      "/repos/references-b",
+				Catalog:   "references",
+				OriginURL: "git@github.com:you/references-b.git",
+				Upstream:  "origin/main",
+				Behind:    1,
+			},
+			Meta:             &domain.RepoMetadataFile{OriginURL: "https://github.com/you/references-b.git", AutoPush: domain.AutoPushModeDisabled},
+			IsDefaultCatalog: false,
+		},
+	)
+
+	m := newFixTUIModelForTest(repos)
+	m.repoList.SetSize(170, 6)
+	m.setCursor(6) // first references repo on page where top visible row is still projects catalog
+
+	view := ansi.Strip(m.viewRepoList())
+	lines := strings.Split(view, "\n")
+	if len(lines) < 2 || !strings.Contains(lines[1], "Catalog: projects (default)") {
+		t.Fatalf("expected sticky catalog to follow top visible rows, got %q", view)
+	}
+	if strings.Contains(lines[1], "Catalog: references") {
+		t.Fatalf("sticky catalog should not follow cursor catalog when top rows are projects, got %q", view)
 	}
 }
 

@@ -1311,19 +1311,74 @@ func (m *fixTUIModel) viewRepoList() string {
 }
 
 func (m *fixTUIModel) viewStickyCatalogHeader() string {
-	repo, ok := m.currentRepo()
-	if !ok {
+	label, ok := m.stickyCatalogLabelForViewport()
+	if !ok || strings.TrimSpace(label) == "" {
 		return ""
 	}
-	catalog := strings.TrimSpace(repo.Record.Catalog)
-	if catalog == "" {
-		catalog = "unknown"
-	}
-	label := fmt.Sprintf("Catalog: %s", catalog)
-	if repo.IsDefaultCatalog {
-		label += " (default)"
-	}
 	return fixCatalogHeaderStyle.Render(label)
+}
+
+func (m *fixTUIModel) stickyCatalogLabelForViewport() (string, bool) {
+	items := m.repoList.Items()
+	if len(items) == 0 {
+		return "", false
+	}
+	start, end := m.repoList.Paginator.GetSliceBounds(len(items))
+	if start < 0 || start >= len(items) || end <= start {
+		return "", false
+	}
+	if end > len(items) {
+		end = len(items)
+	}
+
+	firstRepo := -1
+	firstHeader := -1
+	for i := start; i < end; i++ {
+		row, ok := items[i].(fixListItem)
+		if !ok {
+			continue
+		}
+		if row.Kind == fixListItemCatalogHeader && firstHeader == -1 {
+			firstHeader = i
+		}
+		if row.Kind == fixListItemRepo {
+			firstRepo = i
+			break
+		}
+	}
+	if firstRepo < 0 {
+		return "", false
+	}
+	// When a catalog header is already visible before the first repo row on this
+	// page, do not render an extra sticky line.
+	if firstHeader >= 0 && firstHeader < firstRepo {
+		return "", false
+	}
+
+	for i := firstRepo; i >= 0; i-- {
+		row, ok := items[i].(fixListItem)
+		if !ok {
+			continue
+		}
+		if row.Kind != fixListItemCatalogHeader {
+			continue
+		}
+		name := strings.TrimSpace(row.Name)
+		if name != "" {
+			return name, true
+		}
+		break
+	}
+
+	row, ok := items[firstRepo].(fixListItem)
+	if !ok {
+		return "", false
+	}
+	catalog := strings.TrimSpace(row.Catalog)
+	if catalog == "" {
+		return "", false
+	}
+	return fmt.Sprintf("Catalog: %s", catalog), true
 }
 
 func (m *fixTUIModel) viewRepoHeader() string {
