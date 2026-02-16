@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/niieani/bb-project/compare/v0.2.0...v0.3.0) (2026-02-16)
+
+
+### Features
+
+* **sync:** enforce catalog-scoped reconciliation and explicit clone backfill flow ([df35884](https://github.com/niieani/bb-project/commit/df358847605006bc304607a84ce43a3538a03a9c))
+
+
+### Bug Fixes
+
+* **release:** run goreleaser within release-please and support tag backfills ([3b88837](https://github.com/niieani/bb-project/commit/3b88837df3e4260617f3e98aa305c0d3ff34d083))
+
 ## [0.2.0](https://github.com/niieani/bb-project/compare/v0.1.0...v0.2.0) (2026-02-16)
 
 
