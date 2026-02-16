@@ -2,5 +2,5 @@
 .DS_Store
 
 # Local vendor symlink references
-references/vendor/
+references/
 /bb
