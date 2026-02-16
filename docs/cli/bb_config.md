@@ -2,6 +2,14 @@
 
 Launch interactive configuration wizard.
 
+### Synopsis
+
+Launch interactive configuration wizard.
+
+The onboarding flow includes a GitHub CLI prerequisite check. It reports whether gh
+is installed and authenticated, and shows remediation guidance when required for
+GitHub operations.
+
 ```
 bb config [flags]
 ```

@@ -1634,6 +1634,12 @@ func (m *configWizardModel) viewIntro() string {
 	b.WriteString(labelStyle.Render("Session mode"))
 	b.WriteString("\n")
 	b.WriteString(renderStatusPill(mode))
+	if prerequisite := githubCLIPrerequisiteMessage(m.input.GitHubCLIStatus); prerequisite != "" {
+		b.WriteString("\n\n")
+		b.WriteString(labelStyle.Render("GitHub CLI prerequisite"))
+		b.WriteString("\n")
+		b.WriteString(prerequisite)
+	}
 	b.WriteString("\n\n")
 	b.WriteString(labelStyle.Render("Files that may be updated"))
 	b.WriteString("\n")
@@ -1647,7 +1653,11 @@ func (m *configWizardModel) viewGitHub() string {
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("GitHub & Transport"))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Connect bb to your GitHub defaults for repository creation and origin configuration."))
+	b.WriteString(hintStyle.Render("Connect bb to your GitHub defaults for repository creation and origin configuration. GitHub operations require gh in PATH and an authenticated gh session."))
+	if prerequisite := githubCLIPrerequisiteMessage(m.input.GitHubCLIStatus); prerequisite != "" {
+		b.WriteString("\n")
+		b.WriteString(prerequisite)
+	}
 	b.WriteString("\n\n")
 	b.WriteString(renderFieldBlock(
 		!m.focusTabs && m.githubFocus == 0,
@@ -2023,6 +2033,23 @@ func renderStatusPill(value string) string {
 		Padding(0, 1).
 		Bold(true).
 		Render(strings.ToUpper(value))
+}
+
+func githubCLIPrerequisiteMessage(status GitHubCLIStatus) string {
+	if !status.Checked {
+		return ""
+	}
+	if !status.Installed {
+		return warnStyle.Render("GitHub operations require gh. Install with `brew install gh`, then run `gh auth login`.")
+	}
+	if !status.Authenticated {
+		msg := "gh is installed but not authenticated. Run `gh auth login`, then verify with `gh auth status`."
+		if details := strings.TrimSpace(status.AuthStatus); details != "" {
+			msg = msg + " Current status: " + details
+		}
+		return warnStyle.Render(msg)
+	}
+	return hintStyle.Render("gh is installed and authenticated (`gh auth status`).")
 }
 
 func errorText(err error) string {

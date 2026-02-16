@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +80,21 @@ func TestCreateRemoteRepoUsesAttachedCommandForGitHubCLI(t *testing.T) {
 	app.SetVerbose(false)
 	t.Setenv("PATH", "")
 	t.Setenv("BB_TEST_REMOTE_ROOT", "")
+	app.LookPath = func(file string) (string, error) {
+		if file == "gh" {
+			return "/usr/local/bin/gh", nil
+		}
+		return "", errors.New("not found")
+	}
+	app.RunCommand = func(name string, args ...string) (string, error) {
+		if name != "gh" {
+			t.Fatalf("unexpected command %q", name)
+		}
+		if !slices.Equal(args, []string{"auth", "status"}) {
+			t.Fatalf("unexpected args: %#v", args)
+		}
+		return "logged in", nil
+	}
 
 	type commandCall struct {
 		dir  string
@@ -116,6 +132,26 @@ func TestCreateRemoteRepoUsesAttachedCommandForGitHubCLI(t *testing.T) {
 	wantArgs := []string{"repo", "create", "you/demo", "--public"}
 	if !slices.Equal(calls[0].args, wantArgs) {
 		t.Fatalf("attached command args = %#v, want %#v", calls[0].args, wantArgs)
+	}
+}
+
+func TestCreateRemoteRepoReturnsHelpfulErrorWhenGHMissing(t *testing.T) {
+	app := New(state.NewPaths(t.TempDir()), os.Stdout, os.Stderr)
+	app.SetVerbose(false)
+	t.Setenv("BB_TEST_REMOTE_ROOT", "")
+	app.LookPath = func(file string) (string, error) {
+		if file == "gh" {
+			return "", errors.New("not found")
+		}
+		return "", errors.New("not found")
+	}
+
+	_, err := app.createRemoteRepo("you", "demo", domain.VisibilityPrivate, "ssh", t.TempDir())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "gh auth login") {
+		t.Fatalf("expected login instruction in error, got: %v", err)
 	}
 }
 

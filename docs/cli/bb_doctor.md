@@ -2,6 +2,14 @@
 
 Report unsyncable repositories and reasons.
 
+### Synopsis
+
+Report unsyncable repositories and reasons.
+
+When GitHub integration is configured (or selected repositories use GitHub remotes),
+doctor also checks GitHub CLI prerequisites and emits warnings when gh is missing
+or unauthenticated, including remediation guidance.
+
 ```
 bb doctor [flags]
 ```

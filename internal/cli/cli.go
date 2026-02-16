@@ -582,7 +582,14 @@ func newDoctorCommand(runtime *runtimeState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Report unsyncable repositories and reasons.",
-		Args:  cobra.NoArgs,
+		Long: strings.TrimSpace(`
+Report unsyncable repositories and reasons.
+
+When GitHub integration is configured (or selected repositories use GitHub remotes),
+doctor also checks GitHub CLI prerequisites and emits warnings when gh is missing
+or unauthenticated, including remediation guidance.
+`),
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			runner, err := runtime.appRunner()
 			if err != nil {
@@ -852,7 +859,14 @@ func newConfigCommand(runtime *runtimeState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "config",
 		Short: "Launch interactive configuration wizard.",
-		Args:  cobra.NoArgs,
+		Long: strings.TrimSpace(`
+Launch interactive configuration wizard.
+
+The onboarding flow includes a GitHub CLI prerequisite check. It reports whether gh
+is installed and authenticated, and shows remediation guidance when required for
+GitHub operations.
+`),
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			runner, err := runtime.appRunner()
 			if err != nil {
