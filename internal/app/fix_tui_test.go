@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"bb-project/internal/domain"
 	"bb-project/internal/state"
@@ -749,6 +750,7 @@ func TestFixTUIRevalidateShortcutEntersBusyState(t *testing.T) {
 	if !m.revalidating {
 		t.Fatal("expected revalidate key to set in-progress state")
 	}
+	rawTitleLine := firstNonEmptyLine(strings.Split(m.View(), "\n"))
 	titleLine := firstNonEmptyLine(strings.Split(ansi.Strip(m.View()), "\n"))
 	if !strings.Contains(titleLine, "bb") || !strings.Contains(titleLine, "fix") {
 		t.Fatalf("expected compact titled border line, got %q", titleLine)
@@ -756,8 +758,29 @@ func TestFixTUIRevalidateShortcutEntersBusyState(t *testing.T) {
 	if !strings.Contains(titleLine, m.revalidateSpinner.View()) {
 		t.Fatalf("expected spinner in bordered title while revalidating, got %q", titleLine)
 	}
+	accentTopCorner := lipgloss.NewStyle().Foreground(accentColor).Render("╭")
+	if !strings.Contains(rawTitleLine, accentTopCorner) {
+		t.Fatalf("expected top border corner to use busy accent color, got %q", rawTitleLine)
+	}
 	if got := m.mainContentPanelStyle().GetBorderTopForeground(); !reflect.DeepEqual(got, accentColor) {
 		t.Fatalf("busy border color = %#v, want accent %#v", got, accentColor)
+	}
+}
+
+func TestRenderPanelWithTopTitleUsesPanelTopBorderColor(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(prev)
+	})
+
+	panel := panelStyle.Copy().Width(56).BorderForeground(accentColor)
+	view := renderPanelWithTopTitle(panel, "bb fix", "content")
+	topLine := firstNonEmptyLine(strings.Split(view, "\n"))
+
+	accentTopCorner := lipgloss.NewStyle().Foreground(accentColor).Render("╭")
+	if !strings.Contains(topLine, accentTopCorner) {
+		t.Fatalf("expected top border corner to use panel top border color, got %q", topLine)
 	}
 }
 

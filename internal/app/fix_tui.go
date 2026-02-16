@@ -798,9 +798,6 @@ var (
 					Foreground(lipgloss.Color("81"))
 
 	fixPageStyle = lipgloss.NewStyle().Padding(0, 2)
-
-	fixTopBorderStyle = lipgloss.NewStyle().
-				Foreground(borderColor)
 )
 
 const fixListColumnGap = "  "
@@ -1397,14 +1394,26 @@ func renderPanelWithTopTitle(panel lipgloss.Style, title string, content string)
 	if fillWidth < 0 {
 		fillWidth = 0
 	}
-	topLine := fixTopBorderStyle.Render(border.TopLeft) +
-		fixTopBorderStyle.Render(prefix) +
+	topBorderStyle := panelTopBorderStyle(panel)
+	topLine := topBorderStyle.Render(border.TopLeft) +
+		topBorderStyle.Render(prefix) +
 		titleText +
-		fixTopBorderStyle.Render(strings.Repeat(border.Top, fillWidth)) +
-		fixTopBorderStyle.Render(border.TopRight)
+		topBorderStyle.Render(strings.Repeat(border.Top, fillWidth)) +
+		topBorderStyle.Render(border.TopRight)
 
 	lines[0] = topLine
 	return strings.Join(lines, "\n")
+}
+
+func panelTopBorderStyle(panel lipgloss.Style) lipgloss.Style {
+	style := lipgloss.NewStyle().Foreground(borderColor)
+	if fg := panel.GetBorderTopForeground(); fg != nil {
+		style = style.Foreground(fg)
+	}
+	if bg := panel.GetBorderTopBackground(); bg != nil {
+		style = style.Background(bg)
+	}
+	return style
 }
 
 func (m *fixTUIModel) mainContentPanelStyle() lipgloss.Style {
