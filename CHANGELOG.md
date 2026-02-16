@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.4.0](https://github.com/niieani/bb-project/compare/v0.3.0...v0.4.0) (2026-02-16)
+
+
+### Features
+
+* **fix-tui:** compact `bb fix` list chrome, reclaim table space, and add `not cloned` tier ([04b4e64](https://github.com/niieani/bb-project/commit/04b4e6499bc92e01daf4add5863975efa1e11a6d))
+* **fix-tui:** run current fix on `enter` when no fixes are selected ([f34fadb](https://github.com/niieani/bb-project/commit/f34fadb188bd9bdc18d787ec2a0386bca0507cc9))
+* **fix-tui:** standardize bordered list header pattern and tighten footer/details rendering ([86f1c1e](https://github.com/niieani/bb-project/commit/86f1c1e5ed866046ebde56ac84064cdf84ede766))
+* **fix:** probe GitHub push access via `gh`, refresh unknown access in `bb fix`, and block push fixes when access is unknown ([8db4beb](https://github.com/niieani/bb-project/commit/8db4beb457d4f690660e0c5de941e2077a1b3cc1))
+
+
+### Bug Fixes
+
+* **fix-tui:** keep list panel top-anchored by removing render-time top padding ([24264d9](https://github.com/niieani/bb-project/commit/24264d9bae5063c7bcfe36f158bad25bb84051aa))
+* **fix-tui:** keep responsive summary fallback visually consistent with pill stats ([104e778](https://github.com/niieani/bb-project/commit/104e778d539b6da8ec1aaccdefcf54f99f8d4b36))
+* **fix-tui:** keep titled top border color in sync during `r` revalidation ([3fec908](https://github.com/niieani/bb-project/commit/3fec908cc4b8476a22a0d7303466f3160729c330))
+* **fix-tui:** make list-mode stats responsive on narrow widths to prevent broken pill layout ([0e47881](https://github.com/niieani/bb-project/commit/0e478819ca80202e3677a1bdd78c2b3620f30bb1))
+* **fix-tui:** remove inter-panel blank rows by expanding list viewport to fill available height ([43c67f1](https://github.com/niieani/bb-project/commit/43c67f13a63a9e582c1648111373d6fba23034b5))
+* **fix-tui:** restore sticky footer while keeping top anchor stable when details wrap ([97f98d9](https://github.com/niieani/bb-project/commit/97f98d9d1666a5586eb322bfbec73a8890d49396))
+* **fix-tui:** stabilize list-mode layout under wrapped details without scroll jumps ([8571691](https://github.com/niieani/bb-project/commit/8571691017c4bd39992f9f47fc4bf440f92a20d7))
+* **fix-tui:** stop single-step list jumps when wrapped details change by removing selection-driven viewport re-bucketing ([d8ad90c](https://github.com/niieani/bb-project/commit/d8ad90c2c3c70efb578872d12868271b9211c87e))
+* **fix-ui:** normalize interactive `bb fix` startup progress and hide noisy push-probe error dumps ([a3d5fe1](https://github.com/niieani/bb-project/commit/a3d5fe15e220ef3977ff3c005901192e378a0259))
+* **push-access:** trust GitHub viewerPermission and skip dry-run when GH already knows access ([32b9ee6](https://github.com/niieani/bb-project/commit/32b9ee66260f07f016fc2e31363ebe5332f4572b))
+* **scan:** re-probe unknown push_access during metadata load for scan ([1753817](https://github.com/niieani/bb-project/commit/1753817be3bade4e823d103062c5bab863f7af74))
+
 ## [0.3.0](https://github.com/niieani/bb-project/compare/v0.2.0...v0.3.0) (2026-02-16)
 
 
