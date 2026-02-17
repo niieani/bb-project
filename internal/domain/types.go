@@ -58,6 +58,7 @@ const (
 	ReasonTargetPathRepoMismatch UnsyncableReason = "target_path_repo_mismatch"
 	ReasonCloneRequired          UnsyncableReason = "clone_required"
 	ReasonCatalogNotMapped       UnsyncableReason = "catalog_not_mapped"
+	ReasonCatalogMismatch        UnsyncableReason = "catalog_mismatch"
 )
 
 type Catalog struct {
@@ -76,6 +77,7 @@ type ConfigFile struct {
 	Clone          CloneConfig     `yaml:"clone"`
 	Link           LinkConfig      `yaml:"link"`
 	Sync           SyncConfig      `yaml:"sync"`
+	Move           MoveConfig      `yaml:"move"`
 	Scheduler      SchedulerConfig `yaml:"scheduler"`
 	Notify         NotifyConfig    `yaml:"notify"`
 	Integrations   Integrations    `yaml:"integrations"`
@@ -119,6 +121,10 @@ type SyncConfig struct {
 	ScanFreshnessSeconds    int  `yaml:"scan_freshness_seconds"`
 }
 
+type MoveConfig struct {
+	PostHooks []string `yaml:"post_hooks,omitempty"`
+}
+
 type SchedulerConfig struct {
 	IntervalMinutes int `yaml:"interval_minutes"`
 }
@@ -142,6 +148,7 @@ type LumenIntegrationConfig struct {
 type RepoMetadataFile struct {
 	Version                  int          `yaml:"version"`
 	RepoKey                  string       `yaml:"repo_key"`
+	PreviousRepoKeys         []string     `yaml:"previous_repo_keys,omitempty"`
 	Name                     string       `yaml:"name"`
 	OriginURL                string       `yaml:"origin_url"`
 	Visibility               Visibility   `yaml:"visibility"`
@@ -169,6 +176,9 @@ type MachineFile struct {
 
 type MachineRepoRecord struct {
 	RepoKey             string             `yaml:"repo_key"`
+	ExpectedRepoKey     string             `yaml:"expected_repo_key,omitempty"`
+	ExpectedCatalog     string             `yaml:"expected_catalog,omitempty"`
+	ExpectedPath        string             `yaml:"expected_path,omitempty"`
 	Name                string             `yaml:"name"`
 	Catalog             string             `yaml:"catalog"`
 	Path                string             `yaml:"path"`

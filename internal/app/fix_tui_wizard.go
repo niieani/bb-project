@@ -65,7 +65,7 @@ type fixWizardState struct {
 	EnableCreateProjectStageCommit bool
 	CreateProjectStageCommit       bool
 
-	EnableStashMode   bool
+	EnableStashMode      bool
 	StashIncludeUnstaged bool
 
 	EnableForkBranchRename bool
@@ -2425,6 +2425,8 @@ func summaryUnsyncableReasonLabel(reason domain.UnsyncableReason) string {
 		return "Target path points to a different repository"
 	case domain.ReasonCloneRequired:
 		return "Repository is known but not cloned locally"
+	case domain.ReasonCatalogMismatch:
+		return "Repository is in a different local catalog path than expected"
 	case domain.ReasonCatalogNotMapped:
 		return "Catalog exists on other machines but is not mapped locally"
 	default:
@@ -2464,6 +2466,8 @@ func summaryManualGuidanceForReason(reason domain.UnsyncableReason) string {
 		return "Fix the target path mismatch manually, then rerun revalidation."
 	case domain.ReasonCloneRequired:
 		return "Run the clone fix action to create a local copy."
+	case domain.ReasonCatalogMismatch:
+		return "Run move-to-catalog to relocate this local repository to the expected catalog path."
 	case domain.ReasonCatalogNotMapped:
 		return "Open `bb config` and map this catalog to a local root path."
 	default:

@@ -393,6 +393,26 @@ Updates `auto_push` mode in repo metadata:
 
 Sets the repo-level preferred remote used when `bb` needs to choose a remote for operations (for example upstream setup and branch tracking).
 
+### `bb repo move <repo> --catalog <target> [flags]`
+
+Moves a managed repository to another catalog and updates shared metadata so other machines can converge.
+
+Flags:
+
+- `--catalog <name>` (required)
+- `--as <catalog-relative-path>`
+- `--dry-run`
+- `--no-hooks`
+
+Behavior:
+
+- Resolves `<repo>` using existing local selector rules.
+- Validates destination path safety before applying.
+- Moves local directory to the new catalog path.
+- Rewrites metadata to the new `repo_key` and records old key history.
+- On other machines, stale local paths surface as non-blocking `catalog_mismatch` and can be remediated with `bb fix` action `move-to-catalog`.
+- Runs `move.post_hooks` unless `--no-hooks`.
+
 ### `bb catalog` subcommands
 
 - `bb catalog add <name> <root>`
@@ -458,6 +478,8 @@ clone:
 link:
   target_dir: references
   absolute: false
+move:
+  post_hooks: []
 sync:
   auto_discover: true
   include_untracked_as_dirty: true
@@ -484,6 +506,7 @@ Important notes:
 - v1 supports only `state_transport.mode: external`.
 - `github.owner` is required (`bb init` fails if blank).
 - `scheduler.interval_minutes` controls cadence used by `bb scheduler install`.
+- `move.post_hooks` run after a successful repository move (`bb repo move` and `bb fix ... move-to-catalog`) on each machine where the move executes.
 - set `integrations.lumen.show_install_tip: false` to hide Lumen install/config tips.
 - set `integrations.lumen.auto_generate_commit_message_when_empty: true` to run `lumen draft` automatically in commit-producing `bb fix` actions when commit message is empty/`auto`.
 
@@ -542,6 +565,7 @@ Unsyncable reasons include:
 - `target_path_nonempty_not_repo`
 - `target_path_repo_mismatch`
 - `clone_required` (non-blocking)
+- `catalog_mismatch` (non-blocking)
 - `catalog_not_mapped` (non-blocking)
 
 ## Notification Behavior

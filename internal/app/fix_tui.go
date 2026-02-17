@@ -2795,6 +2795,8 @@ func fixActionSelectionPriority(action string) int {
 		return 72
 	case FixActionClone:
 		return 45
+	case FixActionMoveToCatalog:
+		return 46
 	case FixActionCreateProject:
 		return 50
 	case FixActionSetUpstreamPush:
@@ -2998,6 +3000,8 @@ func fixActionStyleFor(action string) lipgloss.Style {
 		return fixActionCreateProjectStyle
 	case FixActionClone:
 		return fixActionCloneStyle
+	case FixActionMoveToCatalog:
+		return fixActionCloneStyle
 	case FixActionForkAndRetarget:
 		return fixActionForkStyle
 	case FixActionSyncWithUpstream:
@@ -3193,6 +3197,8 @@ func fixReasonCoveredByActions(reason domain.UnsyncableReason, has map[string]bo
 		return has[FixActionPullFFOnly]
 	case domain.ReasonCloneRequired:
 		return has[FixActionClone]
+	case domain.ReasonCatalogMismatch:
+		return has[FixActionMoveToCatalog]
 	case domain.ReasonCatalogNotMapped:
 		return false
 	default:

@@ -40,6 +40,7 @@ type appRunner interface {
 	RunRepoPreferredRemote(repoSelector string, preferredRemote string) (int, error)
 	RunRepoPushAccessSet(repoSelector string, pushAccess string) (int, error)
 	RunRepoPushAccessRefresh(repoSelector string) (int, error)
+	RunRepoMove(opts app.RepoMoveOptions) (int, error)
 	RunCatalogAdd(name, root string) (int, error)
 	RunCatalogRM(name string) (int, error)
 	RunCatalogDefault(name string) (int, error)
@@ -777,7 +778,36 @@ func newRepoCommand(runtime *runtimeState) *cobra.Command {
 		},
 	}
 
-	repoCmd.AddCommand(policyCmd, remoteCmd, accessSetCmd, accessRefreshCmd)
+	var moveCatalog string
+	var moveAs string
+	var moveDryRun bool
+	var moveNoHooks bool
+	moveCmd := &cobra.Command{
+		Use:   "move <repo>",
+		Short: "Move a repository to a different catalog path.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			runner, err := runtime.appRunner()
+			if err != nil {
+				return withExitCode(2, err)
+			}
+			code, err := runner.RunRepoMove(app.RepoMoveOptions{
+				Selector:      args[0],
+				TargetCatalog: moveCatalog,
+				As:            moveAs,
+				DryRun:        moveDryRun,
+				NoHooks:       moveNoHooks,
+			})
+			return withExitCode(code, err)
+		},
+	}
+	moveCmd.Flags().StringVar(&moveCatalog, "catalog", "", "Target catalog name.")
+	moveCmd.Flags().StringVar(&moveAs, "as", "", "Target catalog-relative path override.")
+	moveCmd.Flags().BoolVar(&moveDryRun, "dry-run", false, "Preview move without mutating files or metadata.")
+	moveCmd.Flags().BoolVar(&moveNoHooks, "no-hooks", false, "Skip configured post-move hooks.")
+	_ = moveCmd.MarkFlagRequired("catalog")
+
+	repoCmd.AddCommand(policyCmd, remoteCmd, accessSetCmd, accessRefreshCmd, moveCmd)
 	return repoCmd
 }
 

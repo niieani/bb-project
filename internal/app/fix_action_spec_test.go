@@ -24,6 +24,7 @@ func TestFixActionSpecsHaveCoreMetadata(t *testing.T) {
 		FixActionPullFFOnly,
 		FixActionSetUpstreamPush,
 		FixActionEnableAutoPush,
+		FixActionMoveToCatalog,
 	}
 
 	for _, action := range actions {
@@ -63,6 +64,7 @@ func TestFixActionRiskUsesSharedSpec(t *testing.T) {
 		{action: FixActionSyncWithUpstream, risky: true},
 		{action: FixActionPullFFOnly, risky: false},
 		{action: FixActionEnableAutoPush, risky: false},
+		{action: FixActionMoveToCatalog, risky: false},
 		{action: "unknown-action", risky: false},
 	}
 
@@ -139,20 +141,20 @@ func TestFixActionPlanCreateProjectIncludesGhAndMetadataWrite(t *testing.T) {
 	t.Parallel()
 
 	plan := fixActionPlanFor(FixActionCreateProject, fixActionPlanContext{
-		Branch:                  "main",
-		Upstream:                "",
-		OriginURL:               "",
-		HasDirtyTracked:         true,
-		GitHubOwner:             "acme",
-		RemoteProtocol:          "https",
-		RepoName:                "api",
-		PreferredRemote:         "origin",
-		CreateProjectName:       "api",
-		CreateProjectVisibility: domain.VisibilityPublic,
+		Branch:                   "main",
+		Upstream:                 "",
+		OriginURL:                "",
+		HasDirtyTracked:          true,
+		GitHubOwner:              "acme",
+		RemoteProtocol:           "https",
+		RepoName:                 "api",
+		PreferredRemote:          "origin",
+		CreateProjectName:        "api",
+		CreateProjectVisibility:  domain.VisibilityPublic,
 		CreateProjectStageCommit: true,
-		GenerateGitignore:       true,
-		GitignorePatterns:       []string{"node_modules/"},
-		MissingRootGitignore:    true,
+		GenerateGitignore:        true,
+		GitignorePatterns:        []string{"node_modules/"},
+		MissingRootGitignore:     true,
 	})
 
 	if !planContains(plan, true, "gh repo create") {
@@ -185,16 +187,16 @@ func TestFixActionPlanCreateProjectSkipsStageCommitWhenToggleDisabled(t *testing
 	t.Parallel()
 
 	plan := fixActionPlanFor(FixActionCreateProject, fixActionPlanContext{
-		Branch:                  "main",
-		Upstream:                "",
-		OriginURL:               "",
-		HasDirtyTracked:         true,
-		GitHubOwner:             "acme",
-		RemoteProtocol:          "https",
-		RepoName:                "api",
-		PreferredRemote:         "origin",
-		CreateProjectName:       "api",
-		CreateProjectVisibility: domain.VisibilityPublic,
+		Branch:                   "main",
+		Upstream:                 "",
+		OriginURL:                "",
+		HasDirtyTracked:          true,
+		GitHubOwner:              "acme",
+		RemoteProtocol:           "https",
+		RepoName:                 "api",
+		PreferredRemote:          "origin",
+		CreateProjectName:        "api",
+		CreateProjectVisibility:  domain.VisibilityPublic,
 		CreateProjectStageCommit: false,
 	})
 
@@ -210,8 +212,8 @@ func TestFixActionPlanStashSupportsStagedOnlyAndStagedPlusUnstagedModes(t *testi
 	t.Parallel()
 
 	stagedOnly := fixActionPlanFor(FixActionStash, fixActionPlanContext{
-		StashMessage:           "checkpoint staged only",
-		StashIncludeUnstaged:   false,
+		StashMessage:         "checkpoint staged only",
+		StashIncludeUnstaged: false,
 	})
 	if planContains(stagedOnly, true, "git add -A") {
 		t.Fatalf("did not expect stage-all command in staged-only stash plan, got %#v", stagedOnly)
@@ -221,8 +223,8 @@ func TestFixActionPlanStashSupportsStagedOnlyAndStagedPlusUnstagedModes(t *testi
 	}
 
 	stageAll := fixActionPlanFor(FixActionStash, fixActionPlanContext{
-		StashMessage:           "checkpoint all dirty changes",
-		StashIncludeUnstaged:   true,
+		StashMessage:         "checkpoint all dirty changes",
+		StashIncludeUnstaged: true,
 	})
 	if !planContains(stageAll, true, "git add -A") {
 		t.Fatalf("expected stage-all command in staged+unstaged stash plan, got %#v", stageAll)

@@ -8,6 +8,9 @@ func TestHasBlockingUnsyncableReason(t *testing.T) {
 	if HasBlockingUnsyncableReason([]UnsyncableReason{ReasonCloneRequired}) {
 		t.Fatal("expected clone_required to be non-blocking")
 	}
+	if HasBlockingUnsyncableReason([]UnsyncableReason{ReasonCatalogMismatch}) {
+		t.Fatal("expected catalog_mismatch to be non-blocking")
+	}
 	if HasBlockingUnsyncableReason([]UnsyncableReason{ReasonCatalogNotMapped}) {
 		t.Fatal("expected catalog_not_mapped to be non-blocking")
 	}

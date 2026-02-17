@@ -29,6 +29,7 @@ const (
 	FixActionPullFFOnly         = "pull-ff-only"
 	FixActionSetUpstreamPush    = "set-upstream-push"
 	FixActionEnableAutoPush     = "enable-auto-push"
+	FixActionMoveToCatalog      = "move-to-catalog"
 
 	DefaultFixCommitMessage              = "bb: checkpoint local changes before sync"
 	DefaultFixCreateProjectCommitMessage = "chore: bootstrap repository files"
@@ -292,6 +293,12 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	if containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonCloneRequired) {
 		actions = append(actions, FixActionClone)
 	}
+	if containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonCatalogMismatch) &&
+		strings.TrimSpace(rec.ExpectedRepoKey) != "" &&
+		strings.TrimSpace(rec.ExpectedCatalog) != "" &&
+		strings.TrimSpace(rec.ExpectedPath) != "" {
+		actions = append(actions, FixActionMoveToCatalog)
+	}
 	if rec.OriginURL != "" &&
 		rec.Upstream != "" &&
 		rec.Diverged &&
@@ -453,6 +460,15 @@ func ineligibleFixReason(action string, rec domain.MachineRepoRecord, ctx fixEli
 	if action == FixActionStash {
 		if !rec.HasDirtyTracked && !rec.HasUntracked {
 			return "stash is blocked: no local changes to stash"
+		}
+		return ""
+	}
+	if action == FixActionMoveToCatalog {
+		if !containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonCatalogMismatch) {
+			return "move-to-catalog is blocked: catalog mismatch was not detected"
+		}
+		if strings.TrimSpace(rec.ExpectedRepoKey) == "" || strings.TrimSpace(rec.ExpectedCatalog) == "" || strings.TrimSpace(rec.ExpectedPath) == "" {
+			return "move-to-catalog is blocked: expected target is missing; run `bb sync` to refresh move metadata"
 		}
 		return ""
 	}
@@ -914,6 +930,15 @@ func (a *App) applyFixActionWithObserver(
 	if err := a.refreshFixRepoSnapshotLocked(cfg, &machine, repoPath); err != nil && !isFixProjectNotFoundInSnapshot(err) {
 		return fixRepoState{}, err
 	}
+	if action == FixActionMoveToCatalog {
+		metas, err := state.LoadAllRepoMetadata(a.Paths)
+		if err != nil {
+			return fixRepoState{}, err
+		}
+		if err := a.augmentFixMachineWithKnownRepos(&machine, includeCatalogs, repoMetadataByKey(metas)); err != nil {
+			return fixRepoState{}, err
+		}
+	}
 	target, err := a.loadFixRepoByPathUnlocked(machine, repoPath)
 	if err != nil && action != FixActionClone {
 		return fixRepoState{}, err
@@ -959,13 +984,25 @@ func (a *App) applyFixActionWithObserver(
 		return fixRepoState{}, err
 	}
 
+	refreshedPath := strings.TrimSpace(target.Record.Path)
+	if action == FixActionMoveToCatalog {
+		if expectedPath := strings.TrimSpace(target.Record.ExpectedPath); expectedPath != "" {
+			refreshedPath = expectedPath
+		}
+		reloadedMachine, loadErr := state.LoadMachine(a.Paths, machine.MachineID)
+		if loadErr != nil {
+			return fixRepoState{}, loadErr
+		}
+		machine = reloadedMachine
+	}
+
 	if err := runFixApplyStep(observer, refreshEntry, func() error {
-		return a.refreshFixRepoSnapshotLocked(cfg, &machine, target.Record.Path)
+		return a.refreshFixRepoSnapshotLocked(cfg, &machine, refreshedPath)
 	}); err != nil {
 		return fixRepoState{}, err
 	}
 
-	return a.loadFixRepoByPathUnlocked(machine, target.Record.Path)
+	return a.loadFixRepoByPathUnlocked(machine, refreshedPath)
 }
 
 func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, error) {
@@ -996,8 +1033,7 @@ func (a *App) loadFixReposUnlocked(machine domain.MachineFile) ([]fixRepoState, 
 func repoMetadataByKey(metas []domain.RepoMetadataFile) map[string]*domain.RepoMetadataFile {
 	metaByRepoKey := make(map[string]*domain.RepoMetadataFile, len(metas))
 	for i := range metas {
-		meta := metas[i]
-		metaByRepoKey[meta.RepoKey] = &meta
+		metaByRepoKey[metas[i].RepoKey] = &metas[i]
 	}
 	return metaByRepoKey
 }
@@ -1018,12 +1054,26 @@ func (a *App) augmentFixMachineWithKnownRepos(
 	for _, catalog := range selectedCatalogs {
 		selectedCatalogMap[catalog.Name] = catalog
 	}
+	metas := make([]domain.RepoMetadataFile, 0, len(metaByRepoKey))
+	for _, meta := range metaByRepoKey {
+		if meta == nil {
+			continue
+		}
+		metas = append(metas, *meta)
+	}
+	moveIndex, err := buildRepoMoveIndex(metas)
+	if err != nil {
+		return err
+	}
 	keys := make([]string, 0, len(metaByRepoKey))
 	for key := range metaByRepoKey {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	for _, repoKey := range keys {
+		if _, historical := moveIndex[strings.TrimSpace(repoKey)]; historical {
+			continue
+		}
 		meta := metaByRepoKey[repoKey]
 		if meta == nil {
 			continue
@@ -1040,6 +1090,22 @@ func (a *App) augmentFixMachineWithKnownRepos(
 			continue
 		}
 		targetPath := filepath.Join(targetCatalog.Root, filepath.FromSlash(keyRelativePath))
+		staleMatches := findLocalMatchesByRepoKeys(machine.Repos, meta.PreviousRepoKeys, selectedCatalogMap)
+		if len(staleMatches) > 0 {
+			for _, idx := range staleMatches {
+				machine.Repos[idx].Syncable = false
+				machine.Repos[idx].UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
+				machine.Repos[idx].ExpectedRepoKey = meta.RepoKey
+				machine.Repos[idx].ExpectedCatalog = keyCatalog
+				machine.Repos[idx].ExpectedPath = targetPath
+				machine.Repos[idx].StateHash = domain.ComputeStateHash(machine.Repos[idx])
+			}
+			continue
+		}
+		if len(meta.PreviousRepoKeys) > 0 {
+			// Move history exists but this machine has never cloned the repo locally.
+			continue
+		}
 		pathConflictReason, err := validateTargetPath(a.Git, targetPath, meta.OriginURL, meta.PreferredRemote)
 		if err != nil {
 			return err
@@ -1108,6 +1174,9 @@ func (a *App) refreshFixRepoSnapshotLocked(cfg domain.ConfigFile, machine *domai
 		return fmt.Errorf("project %q not found in machine snapshot", repoPath)
 	}
 	if strings.TrimSpace(previous.Path) == "" {
+		return nil
+	}
+	if containsUnsyncableReason(previous.UnsyncableReasons, domain.ReasonCatalogMismatch) {
 		return nil
 	}
 	if containsUnsyncableReason(previous.UnsyncableReasons, domain.ReasonCloneRequired) && !a.Git.IsGitRepo(previous.Path) {
@@ -1662,6 +1731,45 @@ func (a *App) executeFixAction(
 			meta.AutoPush = targetMode
 			return state.SaveRepoMetadata(a.Paths, meta)
 		})
+	case FixActionMoveToCatalog:
+		expectedRepoKey := strings.TrimSpace(target.Record.ExpectedRepoKey)
+		expectedCatalog := strings.TrimSpace(target.Record.ExpectedCatalog)
+		expectedPath := strings.TrimSpace(target.Record.ExpectedPath)
+		if expectedRepoKey == "" || expectedCatalog == "" || expectedPath == "" {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "move-to-catalog is blocked: expected target is missing; run `bb sync` to refresh move metadata",
+			}
+		}
+		parsedCatalog, parsedRelative, _, err := domain.ParseRepoKey(expectedRepoKey)
+		if err != nil {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: fmt.Sprintf("move-to-catalog is blocked: invalid expected_repo_key %q", expectedRepoKey),
+			}
+		}
+		if parsedCatalog != expectedCatalog {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: fmt.Sprintf("move-to-catalog is blocked: expected_repo_key %q does not match expected_catalog %q", expectedRepoKey, expectedCatalog),
+			}
+		}
+		cfgSnapshot, machineSnapshot, err := a.loadContext()
+		if err != nil {
+			return err
+		}
+		return runStep("move-run", fixActionPlanEntry{
+			ID:      "move-run",
+			Command: false,
+			Summary: fmt.Sprintf("Move repository from %s to %s.", target.Record.Path, expectedPath),
+		}, func() error {
+			_, err := a.runRepoMoveLocked(cfgSnapshot, &machineSnapshot, RepoMoveOptions{
+				Selector:      target.Record.Path,
+				TargetCatalog: expectedCatalog,
+				As:            parsedRelative,
+			})
+			return err
+		})
 	case FixActionClone:
 		if strings.TrimSpace(target.Record.RepoKey) == "" {
 			return errors.New("repo_key is required for clone")
@@ -1814,6 +1922,9 @@ func (a *App) buildFixActionPlanContext(cfg domain.ConfigFile, target fixRepoSta
 		RemoteProtocol:                     strings.TrimSpace(cfg.GitHub.RemoteProtocol),
 		ForkRemoteExists:                   forkRemoteExists,
 		RepoName:                           strings.TrimSpace(target.Record.Name),
+		ExpectedRepoKey:                    strings.TrimSpace(target.Record.ExpectedRepoKey),
+		ExpectedCatalog:                    strings.TrimSpace(target.Record.ExpectedCatalog),
+		ExpectedPath:                       strings.TrimSpace(target.Record.ExpectedPath),
 		CommitMessage:                      strings.TrimSpace(opts.CommitMessage),
 		StashMessage:                       strings.TrimSpace(opts.StashMessage),
 		StashIncludeUnstaged:               optionBoolOrDefault(opts.StashIncludeUnstaged, true),

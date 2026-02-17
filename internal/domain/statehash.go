@@ -9,6 +9,9 @@ import (
 
 func ComputeStateHash(record MachineRepoRecord) string {
 	payload := struct {
+		ExpectedRepoKey     string             `json:"expected_repo_key,omitempty"`
+		ExpectedCatalog     string             `json:"expected_catalog,omitempty"`
+		ExpectedPath        string             `json:"expected_path,omitempty"`
 		Branch              string             `json:"branch"`
 		HeadSHA             string             `json:"head_sha"`
 		Upstream            string             `json:"upstream"`
@@ -22,6 +25,9 @@ func ComputeStateHash(record MachineRepoRecord) string {
 		Syncable            bool               `json:"syncable"`
 		UnsyncableReasons   []UnsyncableReason `json:"unsyncable_reasons"`
 	}{
+		ExpectedRepoKey:     record.ExpectedRepoKey,
+		ExpectedCatalog:     record.ExpectedCatalog,
+		ExpectedPath:        record.ExpectedPath,
 		Branch:              record.Branch,
 		HeadSHA:             record.HeadSHA,
 		Upstream:            record.Upstream,

@@ -25,25 +25,7 @@ bb fix [project] [action] [flags]
   -q, --quiet   Suppress verbose bb logs.
 ```
 
-### Interactive mode notes
-
-- `bb fix` list mode renders a compact bordered title (`bb fix · Interactive remediation for unsyncable repositories`) and a compact selected-repo details line to reduce vertical space usage.
-- Risky fixes (`push`, `sync-with-upstream`, `set-upstream-push`, `stage-commit-push`, `stash`, `create-project`) open a confirmation wizard before execution.
-- `create-project` wizard includes a default-on `Stage & commit before initial push` toggle.
-- `stash` wizard supports `Staged + unstaged` and `Staged only` modes, plus stash-name generation via the `✨` Lumen button.
-- Wizard summary includes commits created by each applied step (short SHA + commit subject), including auto-generated commit messages.
-- When `Publish as new branch (optional)` is set, `bb fix` creates and switches to that branch before staging/committing, leaving the original branch ref untouched.
-- Busy list-mode states recolor the full primary border consistently, including the titled top edge.
-- Selected-repo metadata wraps on segment separators (` · `) so labels stay attached to values.
-- In list mode, `enter` runs selected fixes; when none are selected, it runs the currently browsed fix for the selected repo.
-- In list mode, `i` toggles session ignore for the selected repo (ignore/unignore).
-- List ordering is by catalog (default first), then state tier: `fixable`, `unsyncable`, `not cloned`, `syncable`, `ignored`.
-- Repositories marked with `clone_required` are shown as `not cloned`.
-- Before computing fix eligibility, `bb fix` re-probes repositories whose cached `push_access` is `unknown`.
-- For GitHub origins (including `*.github.com` aliases), the probe treats `gh` viewer permission as authoritative when available; it falls back to `git push --dry-run` only when `gh` cannot determine access.
-- Repositories that still have `push_access=unknown` after probing do not get push-related fix actions; run `bb repo access-refresh <repo>` after resolving probe blockers.
-- Startup loading shows phase-based progress and collapses noisy multiline probe/auth errors into concise status text while checks continue.
-
 ### SEE ALSO
 
 * [bb](bb.md)	 - Keep Git repositories consistent across machines.
+

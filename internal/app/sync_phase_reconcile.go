@@ -19,8 +19,15 @@ func (a *App) ensureFromWinners(
 	opts SyncOptions,
 ) error {
 	a.logf("sync: reconciling %d repo metadata entries", len(repoMetas))
+	moveIndex, err := buildRepoMoveIndex(repoMetas)
+	if err != nil {
+		return err
+	}
 	warnedUnmappedCatalogs := map[string]bool{}
 	for _, meta := range repoMetas {
+		if _, historical := moveIndex[strings.TrimSpace(meta.RepoKey)]; historical {
+			continue
+		}
 		if strings.TrimSpace(meta.RepoKey) == "" || strings.TrimSpace(meta.OriginURL) == "" {
 			continue
 		}
@@ -40,10 +47,39 @@ func (a *App) ensureFromWinners(
 					warnedUnmappedCatalogs[keyCatalog] = true
 				}
 			}
+			staleMatches := findLocalMatchesByRepoKeys(machine.Repos, meta.PreviousRepoKeys, selectedCatalogMap)
+			for _, idx := range staleMatches {
+				a.markCatalogMismatch(
+					&machine.Repos[idx],
+					meta.RepoKey,
+					keyCatalog,
+					"",
+					true,
+				)
+			}
 			continue
 		}
 
 		matches := findLocalMatches(machine.Repos, meta.RepoKey, selectedCatalogMap)
+		targetPath := filepath.Join(targetCatalog.Root, filepath.FromSlash(keyRelativePath))
+		staleMatches := findLocalMatchesByRepoKeys(machine.Repos, meta.PreviousRepoKeys, selectedCatalogMap)
+		if len(matches) == 0 && len(staleMatches) > 0 {
+			for _, idx := range staleMatches {
+				a.markCatalogMismatch(
+					&machine.Repos[idx],
+					meta.RepoKey,
+					targetCatalog.Name,
+					targetPath,
+					false,
+				)
+			}
+			continue
+		}
+		if len(matches) == 0 && len(staleMatches) == 0 && len(meta.PreviousRepoKeys) > 0 {
+			// Repository was moved on another machine. If this machine never had the old path,
+			// treat it as a no-op and avoid synthesizing clone_required.
+			continue
+		}
 
 		winner, ok := selectWinnerForRepo(allMachines, meta.RepoKey)
 		if !ok {
@@ -59,7 +95,6 @@ func (a *App) ensureFromWinners(
 			}
 		}
 
-		targetPath := filepath.Join(targetCatalog.Root, filepath.FromSlash(keyRelativePath))
 		a.logf("sync: repo %s winner=%s branch=%s target=%s", meta.RepoKey, winner.MachineID, winner.Record.Branch, targetPath)
 
 		pathConflictReason, err := validateTargetPath(a.Git, targetPath, meta.OriginURL, meta.PreferredRemote)
@@ -177,6 +212,34 @@ func findLocalMatches(records []domain.MachineRepoRecord, repoKey string, select
 			continue
 		}
 		if _, ok := selected[rec.Catalog]; !ok {
+			continue
+		}
+		idx = append(idx, i)
+	}
+	return idx
+}
+
+func findLocalMatchesByRepoKeys(records []domain.MachineRepoRecord, repoKeys []string, selected map[string]domain.Catalog) []int {
+	if len(repoKeys) == 0 {
+		return nil
+	}
+	allowedKeys := make(map[string]struct{}, len(repoKeys))
+	for _, repoKey := range repoKeys {
+		repoKey = strings.TrimSpace(repoKey)
+		if repoKey == "" {
+			continue
+		}
+		allowedKeys[repoKey] = struct{}{}
+	}
+	if len(allowedKeys) == 0 {
+		return nil
+	}
+	idx := make([]int, 0, 2)
+	for i, rec := range records {
+		if _, ok := selected[rec.Catalog]; !ok {
+			continue
+		}
+		if _, ok := allowedKeys[strings.TrimSpace(rec.RepoKey)]; !ok {
 			continue
 		}
 		idx = append(idx, i)
@@ -331,4 +394,26 @@ func (a *App) addOrUpdateSyntheticUnsyncable(machine *domain.MachineFile, meta d
 	}
 	rec.StateHash = domain.ComputeStateHash(rec)
 	machine.Repos = append(machine.Repos, rec)
+}
+
+func (a *App) markCatalogMismatch(
+	rec *domain.MachineRepoRecord,
+	expectedRepoKey string,
+	expectedCatalog string,
+	expectedPath string,
+	catalogNotMapped bool,
+) {
+	if rec == nil {
+		return
+	}
+	rec.Syncable = false
+	reasons := []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
+	if catalogNotMapped {
+		reasons = append(reasons, domain.ReasonCatalogNotMapped)
+	}
+	rec.UnsyncableReasons = reasons
+	rec.ExpectedRepoKey = strings.TrimSpace(expectedRepoKey)
+	rec.ExpectedCatalog = strings.TrimSpace(expectedCatalog)
+	rec.ExpectedPath = strings.TrimSpace(expectedPath)
+	rec.StateHash = domain.ComputeStateHash(*rec)
 }

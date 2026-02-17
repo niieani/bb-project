@@ -39,6 +39,7 @@ type fakeApp struct {
 	repoAccessSelector  string
 	repoAccessValue     string
 	repoRefreshSelector string
+	repoMoveOpts        app.RepoMoveOptions
 
 	catalogAddName string
 	catalogAddRoot string
@@ -77,6 +78,8 @@ type fakeApp struct {
 	repoAccessErr   error
 	repoRefreshCode int
 	repoRefreshErr  error
+	repoMoveCode    int
+	repoMoveErr     error
 	catalogAddCode  int
 	catalogAddErr   error
 	catalogRMCode   int
@@ -187,6 +190,11 @@ func (f *fakeApp) RunRepoPushAccessSet(repoSelector string, pushAccess string) (
 func (f *fakeApp) RunRepoPushAccessRefresh(repoSelector string) (int, error) {
 	f.repoRefreshSelector = repoSelector
 	return f.repoRefreshCode, f.repoRefreshErr
+}
+
+func (f *fakeApp) RunRepoMove(opts app.RepoMoveOptions) (int, error) {
+	f.repoMoveOpts = opts
+	return f.repoMoveCode, f.repoMoveErr
 }
 
 func (f *fakeApp) RunCatalogAdd(name, root string) (int, error) {
@@ -783,6 +791,51 @@ func TestRunRepoPolicyValidationAndForwarding(t *testing.T) {
 		}
 		if fake.repoRefreshSelector != "demo" {
 			t.Fatalf("repo refresh selector = %q, want demo", fake.repoRefreshSelector)
+		}
+	})
+
+	t.Run("move requires catalog", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, calls, _ := runCLI(t, fake, []string{"repo", "move", "software/api"})
+		if code != 2 {
+			t.Fatalf("exit code = %d, want 2", code)
+		}
+		if calls != 0 {
+			t.Fatalf("app factory calls = %d, want 0", calls)
+		}
+		mustContain(t, stderr, "required")
+		mustContain(t, stderr, "catalog")
+	})
+
+	t.Run("move forwards values", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{
+			"repo", "move", "software/api",
+			"--catalog", "references",
+			"--as", "tools/api",
+			"--dry-run",
+			"--no-hooks",
+		})
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0", code)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr = %q, want empty", stderr)
+		}
+		if fake.repoMoveOpts.Selector != "software/api" {
+			t.Fatalf("selector = %q, want %q", fake.repoMoveOpts.Selector, "software/api")
+		}
+		if fake.repoMoveOpts.TargetCatalog != "references" {
+			t.Fatalf("catalog = %q, want %q", fake.repoMoveOpts.TargetCatalog, "references")
+		}
+		if fake.repoMoveOpts.As != "tools/api" {
+			t.Fatalf("as = %q, want %q", fake.repoMoveOpts.As, "tools/api")
+		}
+		if !fake.repoMoveOpts.DryRun {
+			t.Fatal("dry_run = false, want true")
+		}
+		if !fake.repoMoveOpts.NoHooks {
+			t.Fatal("no_hooks = false, want true")
 		}
 	})
 }

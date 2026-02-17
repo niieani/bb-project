@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -128,6 +129,120 @@ func TestApplyFixActionWithObserverLoadsOnlyTargetRepoState(t *testing.T) {
 	}
 	if filepath.Clean(updated.Record.Path) != filepath.Clean(apiPath) {
 		t.Fatalf("updated repo path = %q, want %q", updated.Record.Path, apiPath)
+	}
+}
+
+func TestApplyFixActionMoveToCatalog(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.February, 15, 13, 0, 0, 0, time.UTC)
+	app, paths := newFixApplyTestApp(t, now)
+
+	softwareRoot := filepath.Join(paths.Home, "software")
+	referencesRoot := filepath.Join(paths.Home, "references")
+	oldPath := filepath.Join(softwareRoot, "api")
+	newPath := filepath.Join(referencesRoot, "api")
+
+	for _, p := range []string{oldPath, referencesRoot} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", p, err)
+		}
+	}
+
+	if err := app.Git.InitRepo(oldPath); err != nil {
+		t.Fatalf("init repo: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(oldPath, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := app.Git.AddAll(oldPath); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := app.Git.Commit(oldPath, "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	rec := fixApplyTestRepoRecord("software/api", "api", "software", oldPath, "https://github.com/you/api.git")
+	rec.Syncable = false
+	rec.UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
+	rec.ExpectedRepoKey = "references/api"
+	rec.ExpectedCatalog = "references"
+	rec.ExpectedPath = newPath
+	rec.StateHash = domain.ComputeStateHash(rec)
+
+	machine := state.BootstrapMachine("fix-apply-host", "fix-apply-host", now)
+	machine.DefaultCatalog = "software"
+	machine.Catalogs = []domain.Catalog{
+		{Name: "software", Root: softwareRoot, RepoPathDepth: 1},
+		{Name: "references", Root: referencesRoot, RepoPathDepth: 1},
+	}
+	machine.Repos = []domain.MachineRepoRecord{rec}
+	machine.UpdatedAt = now
+	if err := state.SaveMachine(paths, machine); err != nil {
+		t.Fatalf("save machine: %v", err)
+	}
+
+	writeFixApplyTestMetadata(t, paths, rec.RepoKey, rec.Name, rec.OriginURL)
+
+	updated, err := app.applyFixActionWithObserver(
+		[]string{"software", "references"},
+		oldPath,
+		FixActionMoveToCatalog,
+		fixApplyOptions{Interactive: true},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("applyFixActionWithObserver failed: %v", err)
+	}
+	if filepath.Clean(updated.Record.Path) != filepath.Clean(newPath) {
+		t.Fatalf("updated path = %q, want %q", updated.Record.Path, newPath)
+	}
+	if updated.Record.RepoKey != "references/api" {
+		t.Fatalf("updated repo key = %q, want %q", updated.Record.RepoKey, "references/api")
+	}
+
+	if _, err := os.Stat(filepath.Join(newPath, ".git")); err != nil {
+		t.Fatalf("new path missing git metadata: %v", err)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("old path should be removed after move: %v", err)
+	}
+}
+
+func TestApplyFixActionMoveToCatalogRequiresExpectedTarget(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.February, 15, 13, 30, 0, 0, time.UTC)
+	app, paths := newFixApplyTestApp(t, now)
+
+	catalogRoot := filepath.Join(paths.Home, "software")
+	repoPath := filepath.Join(catalogRoot, "api")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo path: %v", err)
+	}
+	if err := app.Git.InitRepo(repoPath); err != nil {
+		t.Fatalf("init repo: %v", err)
+	}
+
+	rec := fixApplyTestRepoRecord("software/api", "api", "software", repoPath, "https://github.com/you/api.git")
+	rec.Syncable = false
+	rec.UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
+	rec.StateHash = domain.ComputeStateHash(rec)
+	writeFixApplyTestMachine(t, paths, now, catalogRoot, rec)
+	writeFixApplyTestMetadata(t, paths, rec.RepoKey, rec.Name, rec.OriginURL)
+
+	_, err := app.applyFixActionWithObserver(
+		[]string{"software"},
+		repoPath,
+		FixActionMoveToCatalog,
+		fixApplyOptions{Interactive: true},
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected move-to-catalog to be rejected without expected target fields")
+	}
+	if !strings.Contains(err.Error(), "expected target") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

@@ -230,6 +230,38 @@ func TestDefaultConfigCloneLinkDefaults(t *testing.T) {
 	if cfg.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty {
 		t.Fatal("integrations.lumen.auto_generate_commit_message_when_empty = true, want false")
 	}
+	if len(cfg.Move.PostHooks) != 0 {
+		t.Fatalf("move.post_hooks = %#v, want empty", cfg.Move.PostHooks)
+	}
+}
+
+func TestLoadConfigRoundTripMoveHooks(t *testing.T) {
+	t.Parallel()
+
+	paths := NewPaths(t.TempDir())
+	cfg := DefaultConfig()
+	cfg.GitHub.Owner = "you"
+	cfg.Move.PostHooks = []string{
+		"echo moved",
+		"my-hook --from \"$BB_MOVE_OLD_PATH\" --to \"$BB_MOVE_NEW_PATH\"",
+	}
+	if err := SaveConfig(paths, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	loaded, err := LoadConfig(paths)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if len(loaded.Move.PostHooks) != 2 {
+		t.Fatalf("move.post_hooks len = %d, want 2", len(loaded.Move.PostHooks))
+	}
+	if loaded.Move.PostHooks[0] != "echo moved" {
+		t.Fatalf("move.post_hooks[0] = %q, want %q", loaded.Move.PostHooks[0], "echo moved")
+	}
+	if loaded.Move.PostHooks[1] != "my-hook --from \"$BB_MOVE_OLD_PATH\" --to \"$BB_MOVE_NEW_PATH\"" {
+		t.Fatalf("move.post_hooks[1] = %q", loaded.Move.PostHooks[1])
+	}
 }
 
 func TestLoadConfigAllowsEmptyCloneCatalogPresetOverride(t *testing.T) {

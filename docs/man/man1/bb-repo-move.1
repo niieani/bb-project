@@ -1,0 +1,43 @@
+.nh
+.TH "BB" "1" "Feb 2026" "bb" ""
+
+.SH NAME
+bb-repo-move - Move a repository to a different catalog path.
+
+
+.SH SYNOPSIS
+\fBbb repo move  [flags]\fP
+
+
+.SH DESCRIPTION
+Move a repository to a different catalog path.
+
+
+.SH OPTIONS
+\fB--as\fP=""
+	Target catalog-relative path override.
+
+.PP
+\fB--catalog\fP=""
+	Target catalog name.
+
+.PP
+\fB--dry-run\fP[=false]
+	Preview move without mutating files or metadata.
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for move
+
+.PP
+\fB--no-hooks\fP[=false]
+	Skip configured post-move hooks.
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB-q\fP, \fB--quiet\fP[=false]
+	Suppress verbose bb logs.
+
+
+.SH SEE ALSO
+\fBbb-repo(1)\fP

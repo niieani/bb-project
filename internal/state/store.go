@@ -110,6 +110,9 @@ func DefaultConfig() domain.ConfigFile {
 			PullFFOnly:              true,
 			ScanFreshnessSeconds:    60,
 		},
+		Move: domain.MoveConfig{
+			PostHooks: []string{},
+		},
 		Scheduler: domain.SchedulerConfig{
 			IntervalMinutes: 60,
 		},
@@ -169,6 +172,9 @@ func LoadConfig(paths Paths) (domain.ConfigFile, error) {
 	}
 	if cfg.Scheduler.IntervalMinutes <= 0 {
 		cfg.Scheduler.IntervalMinutes = 60
+	}
+	if cfg.Move.PostHooks == nil {
+		cfg.Move.PostHooks = []string{}
 	}
 	return cfg, nil
 }

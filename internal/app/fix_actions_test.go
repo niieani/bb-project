@@ -228,6 +228,20 @@ func TestEligibleFixActions(t *testing.T) {
 			actions: []string{FixActionPush, FixActionEnableAutoPush},
 		},
 		{
+			name: "catalog mismatch offers move to catalog action",
+			rec: func() domain.MachineRepoRecord {
+				r := base
+				r.Syncable = false
+				r.UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
+				r.ExpectedRepoKey = "references/api"
+				r.ExpectedCatalog = "references"
+				r.ExpectedPath = "/tmp/references/api"
+				return r
+			}(),
+			ctx:     fixEligibilityContext{},
+			actions: []string{FixActionMoveToCatalog},
+		},
+		{
 			name: "secret-like uncommitted files block stage commit push",
 			rec: func() domain.MachineRepoRecord {
 				r := base

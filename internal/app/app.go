@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
@@ -93,6 +94,14 @@ type CloneOptions struct {
 	FilterSet  bool
 	Filter     string
 	Only       []string
+}
+
+type RepoMoveOptions struct {
+	Selector      string
+	TargetCatalog string
+	As            string
+	DryRun        bool
+	NoHooks       bool
 }
 
 type LinkOptions struct {
@@ -659,7 +668,7 @@ func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, name, origin st
 		}
 	}
 	normalized := normalizedRepoMetadata(meta)
-	if hasExisting && normalizedRepoMetadata(loaded) == normalized {
+	if hasExisting && repoMetadataEqual(loaded, normalized) {
 		return normalized, created, nil
 	}
 	if err := state.SaveRepoMetadata(a.Paths, normalized); err != nil {
@@ -673,7 +682,37 @@ func normalizedRepoMetadata(meta domain.RepoMetadataFile) domain.RepoMetadataFil
 	meta.Version = domain.Version
 	meta.PushAccess = domain.NormalizePushAccess(meta.PushAccess)
 	meta.AutoPush = domain.NormalizeAutoPushMode(meta.AutoPush)
+	meta.PreviousRepoKeys = normalizePreviousRepoKeys(meta.RepoKey, meta.PreviousRepoKeys)
 	return meta
+}
+
+func repoMetadataEqual(a domain.RepoMetadataFile, b domain.RepoMetadataFile) bool {
+	return reflect.DeepEqual(normalizedRepoMetadata(a), normalizedRepoMetadata(b))
+}
+
+func normalizePreviousRepoKeys(currentRepoKey string, keys []string) []string {
+	if len(keys) == 0 {
+		return nil
+	}
+	currentRepoKey = strings.TrimSpace(currentRepoKey)
+	out := make([]string, 0, len(keys))
+	seen := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" || key == currentRepoKey {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (a *App) loadRepoMetadataWithPushAccess(repoPath string, repoKey string, originURL string, shouldProbe bool) (domain.RepoMetadataFile, bool, error) {
@@ -693,7 +732,7 @@ func (a *App) loadRepoMetadataWithPushAccess(repoPath string, repoKey string, or
 	}
 	loaded := meta
 	normalized := normalizedRepoMetadata(meta)
-	changed := normalized != loaded
+	changed := !repoMetadataEqual(normalized, loaded)
 
 	updated := normalized
 	shouldProbeUnknown := domain.NormalizePushAccess(normalized.PushAccess) == domain.PushAccessUnknown
@@ -718,19 +757,19 @@ func (a *App) probeAndUpdateRepoPushAccess(repoPath string, originURL string, me
 	meta = normalizedRepoMetadata(meta)
 
 	if meta.PushAccessManualOverride && !force {
-		return meta, meta != original, nil
+		return meta, !repoMetadataEqual(meta, original), nil
 	}
 
 	remote, err := a.Git.EffectiveRemote(repoPath, meta.PreferredRemote)
 	if err != nil {
-		return meta, meta != original, nil
+		return meta, !repoMetadataEqual(meta, original), nil
 	}
 
 	needsProbe := force ||
 		meta.PushAccessCheckedAt.IsZero() ||
 		strings.TrimSpace(meta.PushAccessCheckedRemote) != strings.TrimSpace(remote)
 	if !needsProbe {
-		return meta, meta != original, nil
+		return meta, !repoMetadataEqual(meta, original), nil
 	}
 
 	if strings.TrimSpace(remote) == "" {
@@ -740,7 +779,7 @@ func (a *App) probeAndUpdateRepoPushAccess(repoPath string, originURL string, me
 		if force {
 			meta.PushAccessManualOverride = false
 		}
-		return meta, meta != original, nil
+		return meta, !repoMetadataEqual(meta, original), nil
 	}
 
 	if !shouldProbePushAccessForOrigin(originURL) {
@@ -750,7 +789,7 @@ func (a *App) probeAndUpdateRepoPushAccess(repoPath string, originURL string, me
 		if force {
 			meta.PushAccessManualOverride = false
 		}
-		return meta, meta != original, nil
+		return meta, !repoMetadataEqual(meta, original), nil
 	}
 
 	if access, ok := a.probePushAccessViaGitHubCLI(originURL); ok {
@@ -760,7 +799,7 @@ func (a *App) probeAndUpdateRepoPushAccess(repoPath string, originURL string, me
 		if force {
 			meta.PushAccessManualOverride = false
 		}
-		return meta, meta != original, nil
+		return meta, !repoMetadataEqual(meta, original), nil
 	}
 
 	pushAccess, probedRemote, probeErr := a.Git.ProbePushAccess(repoPath, meta.PreferredRemote)
@@ -783,7 +822,7 @@ func (a *App) probeAndUpdateRepoPushAccess(repoPath string, originURL string, me
 		meta.PushAccessManualOverride = false
 	}
 
-	return meta, meta != original, nil
+	return meta, !repoMetadataEqual(meta, original), nil
 }
 
 func (a *App) probePushAccessViaGitHubCLI(originURL string) (domain.PushAccess, bool) {
@@ -1081,9 +1120,22 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	if err != nil {
 		return domain.MachineRepoRecord{}, err
 	}
-	if origin != "" && strings.TrimSpace(repo.RepoKey) != "" {
+	repoKey := strings.TrimSpace(repo.RepoKey)
+	lookupRepoKey := repoKey
+	movedToRepoKey := ""
+	if repoKey != "" {
+		var moved bool
+		movedToRepoKey, moved, err = a.resolveMovedRepoKey(repoKey)
+		if err != nil {
+			return domain.MachineRepoRecord{}, err
+		}
+		if moved {
+			lookupRepoKey = movedToRepoKey
+		}
+	}
+	if origin != "" && repoKey != "" && movedToRepoKey == "" {
 		a.repoMetadataMu.Lock()
-		_, _, err := a.ensureRepoMetadata(cfg, repo.RepoKey, repo.Name, origin, domain.VisibilityUnknown, repo.Catalog.Name)
+		_, _, err := a.ensureRepoMetadata(cfg, repoKey, repo.Name, origin, domain.VisibilityUnknown, repo.Catalog.Name)
 		a.repoMetadataMu.Unlock()
 		if err != nil {
 			return domain.MachineRepoRecord{}, err
@@ -1101,9 +1153,9 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	autoPush := domain.AutoPushModeDisabled
 	preferredRemote := ""
 	pushAccess := domain.PushAccessUnknown
-	if strings.TrimSpace(repo.RepoKey) != "" {
+	if lookupRepoKey != "" {
 		shouldProbePushAccess := ahead > 0
-		if meta, hasMeta, err := a.loadRepoMetadataWithPushAccess(repo.Path, repo.RepoKey, origin, shouldProbePushAccess); err != nil {
+		if meta, hasMeta, err := a.loadRepoMetadataWithPushAccess(repo.Path, lookupRepoKey, origin, shouldProbePushAccess); err != nil {
 			return domain.MachineRepoRecord{}, err
 		} else if hasMeta {
 			autoPush = meta.AutoPush
@@ -1134,7 +1186,7 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	}, autoPushAllowed, allowPush)
 
 	rec := domain.MachineRepoRecord{
-		RepoKey:             repo.RepoKey,
+		RepoKey:             repoKey,
 		Name:                repo.Name,
 		Catalog:             repo.Catalog.Name,
 		Path:                repo.Path,
@@ -1152,9 +1204,34 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 		Syncable:            syncable,
 		UnsyncableReasons:   reasons,
 	}
+	if movedToRepoKey != "" {
+		rec.Syncable = false
+		rec.UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
+		rec.ExpectedRepoKey = movedToRepoKey
+		if expectedCatalog, _, _, parseErr := domain.ParseRepoKey(movedToRepoKey); parseErr == nil {
+			rec.ExpectedCatalog = expectedCatalog
+		}
+	}
 	rec.StateHash = domain.ComputeStateHash(rec)
 	a.logf("scan: repo=%s branch=%s syncable=%t ahead=%d behind=%d", repo.Path, rec.Branch, rec.Syncable, rec.Ahead, rec.Behind)
 	return rec, nil
+}
+
+func (a *App) resolveMovedRepoKey(repoKey string) (string, bool, error) {
+	repoKey = strings.TrimSpace(repoKey)
+	if repoKey == "" {
+		return "", false, nil
+	}
+	metas, err := state.LoadAllRepoMetadata(a.Paths)
+	if err != nil {
+		return "", false, err
+	}
+	index, err := buildRepoMoveIndex(metas)
+	if err != nil {
+		return "", false, err
+	}
+	current, ok := index[repoKey]
+	return current, ok, nil
 }
 
 func effectiveAutoPushForObservedBranch(
@@ -1750,6 +1827,10 @@ func (a *App) RunLink(opts LinkOptions) (int, error) {
 
 func (a *App) RunInfo(opts InfoOptions) (int, error) {
 	return a.runInfo(opts)
+}
+
+func (a *App) RunRepoMove(opts RepoMoveOptions) (int, error) {
+	return a.runRepoMove(opts)
 }
 
 func (a *App) RunDiff(project string, args []string) (int, error) {

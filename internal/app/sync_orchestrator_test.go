@@ -21,7 +21,7 @@ func TestAnyUnsyncableInSelectedCatalogsIgnoresNonBlockingReasons(t *testing.T) 
 		{
 			Catalog:           "software",
 			Syncable:          false,
-			UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonCloneRequired},
+			UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonCloneRequired, domain.ReasonCatalogMismatch},
 		},
 	}
 

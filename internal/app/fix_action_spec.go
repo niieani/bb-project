@@ -28,6 +28,9 @@ type fixActionPlanContext struct {
 	RemoteProtocol                     string
 	ForkRemoteExists                   bool
 	RepoName                           string
+	ExpectedRepoKey                    string
+	ExpectedCatalog                    string
+	ExpectedPath                       string
 	CommitMessage                      string
 	StashMessage                       string
 	StashIncludeUnstaged               bool
@@ -135,6 +138,12 @@ var fixActionSpecs = map[string]fixActionSpec{
 		Description: "Allow future bb sync runs to auto-push this repo by enabling its auto-push policy.",
 		Risky:       false,
 		BuildPlan:   planFixActionEnableAutoPush,
+	},
+	FixActionMoveToCatalog: {
+		Label:       "Move to expected catalog",
+		Description: "Move this local repository to the expected catalog/path and update repository metadata history.",
+		Risky:       false,
+		BuildPlan:   planFixActionMoveToCatalog,
 	},
 }
 
@@ -641,6 +650,24 @@ func planFixActionEnableAutoPush(_ fixActionPlanContext) []fixActionPlanEntry {
 			ID:      "enable-auto-push",
 			Command: false,
 			Summary: "Write repo metadata: set auto_push to the enabled mode for this branch.",
+		},
+	}
+}
+
+func planFixActionMoveToCatalog(ctx fixActionPlanContext) []fixActionPlanEntry {
+	expectedPath := strings.TrimSpace(ctx.ExpectedPath)
+	if expectedPath == "" {
+		expectedPath = "<unknown path>"
+	}
+	summary := fmt.Sprintf("Move repository to expected location %s and rewrite repo metadata.", expectedPath)
+	if strings.TrimSpace(ctx.ExpectedRepoKey) != "" {
+		summary = fmt.Sprintf("Move repository to expected location %s (%s) and rewrite repo metadata.", expectedPath, ctx.ExpectedRepoKey)
+	}
+	return []fixActionPlanEntry{
+		{
+			ID:      "move-run",
+			Command: false,
+			Summary: summary,
 		},
 	}
 }

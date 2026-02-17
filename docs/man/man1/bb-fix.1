@@ -51,27 +51,5 @@ Inspect repositories and apply context-aware fixes.
 	Suppress verbose bb logs.
 
 
-.SH INTERACTIVE MODE NOTES
-\fBbb fix\fP list mode renders a compact bordered title (\fBbb fix · Interactive remediation for unsyncable repositories\fP) and a compact selected-repo details line to reduce vertical space usage.
-
-.PP
-Busy list-mode states recolor the full primary border consistently, including the titled top edge.
-
-.PP
-Selected-repo metadata wraps on segment separators (\fB · \fP) so labels stay attached to values.
-
-.PP
-In list mode, \fBenter\fP runs selected fixes; when none are selected, it runs the currently browsed fix for the selected repo.
-
-.PP
-In list mode, \fBi\fP toggles session ignore for the selected repo (ignore/unignore).
-
-.PP
-List ordering is by catalog (default first), then state tier: \fBfixable\fP, \fBunsyncable\fP, \fBnot cloned\fP, \fBsyncable\fP, \fBignored\fP.
-
-.PP
-Repositories marked with \fBclone_required\fP are shown as \fBnot cloned\fP.
-
-
 .SH SEE ALSO
 \fBbb(1)\fP
