@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0](https://github.com/niieani/bb-project/compare/v0.4.0...v0.5.0) (2026-02-17)
+
+
+### Features
+
+* **fix:** add stash workflow, pre-push commit toggle, and commit visibility in fix summaries ([cfcd328](https://github.com/niieani/bb-project/commit/cfcd328167c3eeef9a0b02d3ef66ef551e3c1c33))
+* **github:** detect and guide `gh` install/auth prerequisites across onboarding, doctor, and GitHub operations ([65fa32c](https://github.com/niieani/bb-project/commit/65fa32c3860107a4f8877636f04a72fbf56352e3))
+* **repo-move:** add cross-machine catalog move flow with `bb repo move`, `catalog_mismatch`, and `bb fix move-to-catalog` ([b2c8389](https://github.com/niieani/bb-project/commit/b2c8389a9a032670d7d19fe083861315817d042e))
+
+
+### Bug Fixes
+
+* **fix-tui:** make `i` toggle ignore/unignore in `bb fix` list mode ([529d52e](https://github.com/niieani/bb-project/commit/529d52e74f3c63bb69fb1243448d0dc6898452da))
+* **fix:** checkout publish branch before commit flows ([fac42e8](https://github.com/niieani/bb-project/commit/fac42e81f42cc34fb2a6741cc0da720b8732fe89))
+* **fix:** scope targeted remediation, surface concrete clone failures, and add GitHub remote format templating ([c718c77](https://github.com/niieani/bb-project/commit/c718c773536ac9ba63e6927b4452e5ced5d0f481))
+
 ## [0.4.0](https://github.com/niieani/bb-project/compare/v0.3.0...v0.4.0) (2026-02-16)
 
 
