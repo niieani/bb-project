@@ -288,7 +288,16 @@ func resolveGitHubCloneURL(cfg domain.ConfigFile, owner string, repo string, for
 			return "file://" + filepath.Join(fakeRoot, owner, repo+".git")
 		}
 	}
-	if forceHTTPS || strings.EqualFold(strings.TrimSpace(cfg.GitHub.RemoteProtocol), "https") {
+	protocol := strings.TrimSpace(cfg.GitHub.RemoteProtocol)
+	template := strings.TrimSpace(cfg.GitHub.PreferredRemoteURLTemplate)
+	if forceHTTPS && template == "" {
+		protocol = "https"
+	}
+	url, err := githubRemoteURL(owner, repo, protocol, template)
+	if err == nil {
+		return url
+	}
+	if forceHTTPS || strings.EqualFold(protocol, "https") {
 		return fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
 	}
 	return fmt.Sprintf("git@github.com:%s/%s.git", owner, repo)

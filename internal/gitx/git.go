@@ -17,7 +17,23 @@ import (
 )
 
 type Runner struct {
-	Now func() time.Time
+	Now    func() time.Time
+	IOMode GitIOMode
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+type GitIOMode string
+
+const (
+	GitIOModeNonInteractive GitIOMode = "non_interactive"
+	GitIOModeAttached       GitIOMode = "attached"
+)
+
+func (r Runner) WithIOMode(mode GitIOMode) Runner {
+	r.IOMode = mode
+	return r
 }
 
 type Result struct {
@@ -44,13 +60,16 @@ const (
 	SyncProbeOutcomeUnknown  SyncProbeOutcome = "unknown"
 )
 
-var gitProcessEnv = []string{
+var gitProcessBaseEnv = []string{
 	"GIT_CONFIG_GLOBAL=" + os.DevNull,
 	"GIT_CONFIG_NOSYSTEM=1",
 	"GIT_AUTHOR_NAME=bb",
 	"GIT_AUTHOR_EMAIL=bb@example.com",
 	"GIT_COMMITTER_NAME=bb",
 	"GIT_COMMITTER_EMAIL=bb@example.com",
+}
+
+var gitProcessNonInteractiveEnv = []string{
 	"GIT_TERMINAL_PROMPT=0",
 	"GIT_ASKPASS=",
 	"SSH_ASKPASS=",
@@ -58,11 +77,22 @@ var gitProcessEnv = []string{
 	"GCM_INTERACTIVE=never",
 }
 
-func gitCommandEnv(base []string) []string {
-	out := make([]string, 0, len(base)+len(gitProcessEnv))
+func gitCommandEnv(base []string, mode GitIOMode) []string {
+	out := make([]string, 0, len(base)+len(gitProcessBaseEnv)+len(gitProcessNonInteractiveEnv))
 	out = append(out, base...)
-	out = append(out, gitProcessEnv...)
+	out = append(out, gitProcessBaseEnv...)
+	if mode == GitIOModeAttached {
+		return out
+	}
+	out = append(out, gitProcessNonInteractiveEnv...)
 	return out
+}
+
+func (r Runner) effectiveIOMode() GitIOMode {
+	if strings.TrimSpace(string(r.IOMode)) == "" {
+		return GitIOModeNonInteractive
+	}
+	return r.IOMode
 }
 
 func (r Runner) run(dir string, name string, args ...string) (Result, error) {
@@ -76,19 +106,39 @@ func (r Runner) runWithEnv(dir string, extraEnv []string, name string, args ...s
 func (r Runner) runWithEnvStreaming(dir string, extraEnv []string, stdoutWriter io.Writer, stderrWriter io.Writer, name string, args ...string) (Result, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
+	mode := r.effectiveIOMode()
 	base := os.Environ()
 	if len(extraEnv) > 0 {
 		base = append(base, extraEnv...)
 	}
-	cmd.Env = gitCommandEnv(base)
+	cmd.Env = gitCommandEnv(base, mode)
+	if mode == GitIOModeAttached {
+		if r.Stdin != nil {
+			cmd.Stdin = r.Stdin
+		} else {
+			cmd.Stdin = os.Stdin
+		}
+	}
 	var stdout, stderr bytes.Buffer
 	if stdoutWriter != nil {
 		cmd.Stdout = io.MultiWriter(stdoutWriter, &stdout)
+	} else if mode == GitIOModeAttached {
+		passthrough := r.Stdout
+		if passthrough == nil {
+			passthrough = os.Stdout
+		}
+		cmd.Stdout = io.MultiWriter(passthrough, &stdout)
 	} else {
 		cmd.Stdout = &stdout
 	}
 	if stderrWriter != nil {
 		cmd.Stderr = io.MultiWriter(stderrWriter, &stderr)
+	} else if mode == GitIOModeAttached {
+		passthrough := r.Stderr
+		if passthrough == nil {
+			passthrough = os.Stderr
+		}
+		cmd.Stderr = io.MultiWriter(passthrough, &stderr)
 	} else {
 		cmd.Stderr = &stderr
 	}

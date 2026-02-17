@@ -84,6 +84,7 @@ This wizard configures:
 
 - `github.owner` (required)
 - default visibility and remote protocol
+- optional `github.preferred_remote_url_template` for custom GitHub remote URL formatting
 - sync/notify options
 - Lumen integration defaults (install tips and optional AI commit generation when commit message is empty)
 - catalogs, per-catalog repository layout depth (`1` or `2`), and default catalog
@@ -336,6 +337,9 @@ Interactive apply behavior:
 - In list mode, `i` toggles session ignore for the selected repo (ignore/unignore).
 - Interactive list ordering is by catalog (default catalog first), then `fixable`, `unsyncable`, `not cloned`, `syncable`, and `ignored`; repos with `clone_required` are surfaced as `not cloned`.
 - Before computing fix eligibility, `bb fix` re-probes repositories whose cached `push_access` is `unknown`.
+- Targeted non-interactive `bb fix <project> [action]` computes risk checks and unknown push-access probes only for the selected repository.
+- Non-TUI `bb fix` execution passes through git stdio for synchronous git commands (for example interactive authentication prompts).
+- When immediate apply fails in interactive mode, the error banner surfaces concrete command failure details (first failure + summary), not just a generic failure message.
 - For GitHub origins (including `*.github.com` aliases), the probe treats `gh` viewer permission as authoritative when available; it falls back to `git push --dry-run` only when `gh` cannot determine access.
 - Repositories that still have `push_access=unknown` after probing do not get push-related fix actions; run `bb repo access-refresh <repo>` after resolving probe blockers.
 - The startup loading screen shows phase-based progress and collapses noisy multiline probe/auth errors into concise status text while checks continue.
@@ -366,6 +370,8 @@ Actions:
 - `pull-ff-only`
 - `set-upstream-push`
 - `enable-auto-push`
+- `move-to-catalog`
+- `align-remote-format`
 - `abort-operation`
 - `ignore` (interactive mode only, session-only)
 
@@ -465,6 +471,7 @@ github:
   owner: your-github-username
   default_visibility: private
   remote_protocol: ssh
+  preferred_remote_url_template: ""
 clone:
   default_catalog: ""
   shallow: false
@@ -505,6 +512,8 @@ Important notes:
 
 - v1 supports only `state_transport.mode: external`.
 - `github.owner` is required (`bb init` fails if blank).
+- `github.preferred_remote_url_template` is optional; when set it overrides `github.remote_protocol` for GitHub URLs.
+- Template placeholders: `${org}` (alias `${owner}`) and `${repo}`.
 - `scheduler.interval_minutes` controls cadence used by `bb scheduler install`.
 - `move.post_hooks` run after a successful repository move (`bb repo move` and `bb fix ... move-to-catalog`) on each machine where the move executes.
 - set `integrations.lumen.show_install_tip: false` to hide Lumen install/config tips.
@@ -567,6 +576,7 @@ Unsyncable reasons include:
 - `clone_required` (non-blocking)
 - `catalog_mismatch` (non-blocking)
 - `catalog_not_mapped` (non-blocking)
+- `remote_format_mismatch` (non-blocking)
 
 ## Notification Behavior
 

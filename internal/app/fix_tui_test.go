@@ -1026,6 +1026,46 @@ func TestFixTUIImmediateApplyAllEntersBusyState(t *testing.T) {
 	}
 }
 
+func TestFixTUIImmediateApplyCompletedSurfacesFirstFailureDetail(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "markdown-llm",
+				Path:      "/repos/markdown-llm",
+				OriginURL: "https://github.com/niieani/markdown-llm.git",
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/niieani/markdown-llm.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.immediateApplying = true
+
+	_, _ = m.Update(fixTUIImmediateApplyCompletedMsg{
+		Results: []fixSummaryResult{
+			{
+				RepoName: "markdown-llm",
+				RepoPath: "/repos/markdown-llm",
+				Action:   fixActionLabel(FixActionClone),
+				Status:   "failed",
+				Detail:   "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+			},
+		},
+		Failed: 1,
+	})
+
+	if m.errText == "" {
+		t.Fatal("expected concrete failure detail in errText")
+	}
+	if strings.Contains(m.errText, "one or more fixes failed") {
+		t.Fatalf("errText should not be generic, got %q", m.errText)
+	}
+	if !strings.Contains(m.errText, "terminal prompts disabled") {
+		t.Fatalf("errText = %q, want concrete command failure detail", m.errText)
+	}
+}
+
 func TestFixTUISettingToggleKeyUpdatesAutoPush(t *testing.T) {
 	t.Parallel()
 

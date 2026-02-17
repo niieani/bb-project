@@ -242,6 +242,17 @@ func TestEligibleFixActions(t *testing.T) {
 			actions: []string{FixActionMoveToCatalog},
 		},
 		{
+			name: "remote format mismatch offers align remote format action",
+			rec: func() domain.MachineRepoRecord {
+				r := base
+				r.Syncable = false
+				r.UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonRemoteFormatMismatch}
+				return r
+			}(),
+			ctx:     fixEligibilityContext{},
+			actions: []string{FixActionAlignRemoteFormat},
+		},
+		{
 			name: "secret-like uncommitted files block stage commit push",
 			rec: func() domain.MachineRepoRecord {
 				r := base

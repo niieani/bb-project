@@ -2,7 +2,7 @@ package domain
 
 func IsBlockingUnsyncableReason(reason UnsyncableReason) bool {
 	switch reason {
-	case ReasonCloneRequired, ReasonCatalogNotMapped, ReasonCatalogMismatch:
+	case ReasonCloneRequired, ReasonCatalogNotMapped, ReasonCatalogMismatch, ReasonRemoteFormatMismatch:
 		return false
 	default:
 		return true

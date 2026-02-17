@@ -30,6 +30,7 @@ const (
 	FixActionSetUpstreamPush    = "set-upstream-push"
 	FixActionEnableAutoPush     = "enable-auto-push"
 	FixActionMoveToCatalog      = "move-to-catalog"
+	FixActionAlignRemoteFormat  = "align-remote-format"
 
 	DefaultFixCommitMessage              = "bb: checkpoint local changes before sync"
 	DefaultFixCreateProjectCommitMessage = "chore: bootstrap repository files"
@@ -111,16 +112,17 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 		return 2, errors.New("--message and --ai-message are mutually exclusive")
 	}
 
+	originalGitRunner := a.Git
+	a.Git = a.Git.WithIOMode(gitx.GitIOModeAttached)
+	defer func() {
+		a.Git = originalGitRunner
+	}()
+
 	refreshMode := scanRefreshIfStale
 	if opts.NoRefresh {
 		refreshMode = scanRefreshNever
 	}
-	repos, err := a.loadFixRepos(opts.IncludeCatalogs, refreshMode)
-	if err != nil {
-		return 2, err
-	}
-
-	target, err := resolveFixTarget(opts.Project, repos)
+	target, err := a.loadFixTargetRepo(opts.IncludeCatalogs, refreshMode, opts.Project)
 	if err != nil {
 		return 2, err
 	}
@@ -299,6 +301,10 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 		strings.TrimSpace(rec.ExpectedPath) != "" {
 		actions = append(actions, FixActionMoveToCatalog)
 	}
+	if containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonRemoteFormatMismatch) &&
+		strings.TrimSpace(rec.OriginURL) != "" {
+		actions = append(actions, FixActionAlignRemoteFormat)
+	}
 	if rec.OriginURL != "" &&
 		rec.Upstream != "" &&
 		rec.Diverged &&
@@ -472,6 +478,15 @@ func ineligibleFixReason(action string, rec domain.MachineRepoRecord, ctx fixEli
 		}
 		return ""
 	}
+	if action == FixActionAlignRemoteFormat {
+		if !containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonRemoteFormatMismatch) {
+			return "align-remote-format is blocked: remote_format_mismatch was not detected"
+		}
+		if strings.TrimSpace(rec.OriginURL) == "" {
+			return "align-remote-format is blocked: origin remote is required"
+		}
+		return ""
+	}
 	return ""
 }
 
@@ -612,6 +627,89 @@ func (a *App) loadFixRepos(includeCatalogs []string, refreshMode scanRefreshMode
 
 func (a *App) loadFixReposForInteractive(includeCatalogs []string, refreshMode scanRefreshMode) ([]fixRepoState, error) {
 	return a.loadFixRepos(includeCatalogs, refreshMode)
+}
+
+func (a *App) loadFixTargetRepo(includeCatalogs []string, refreshMode scanRefreshMode, selector string) (fixRepoState, error) {
+	a.logf("fix: acquiring global lock")
+	lock, err := state.AcquireLock(a.Paths)
+	if err != nil {
+		return fixRepoState{}, err
+	}
+	defer func() {
+		_ = lock.Release()
+		a.logf("fix: released global lock")
+	}()
+	return a.loadFixTargetRepoLocked(includeCatalogs, refreshMode, selector)
+}
+
+func (a *App) loadFixTargetRepoLocked(includeCatalogs []string, refreshMode scanRefreshMode, selector string) (fixRepoState, error) {
+	cfg, machine, err := a.loadContext()
+	if err != nil {
+		return fixRepoState{}, err
+	}
+	if err := a.refreshMachineSnapshotLocked(cfg, &machine, includeCatalogs, refreshMode); err != nil {
+		return fixRepoState{}, err
+	}
+	if refreshMode == scanRefreshNever {
+		a.logf("fix: using existing machine snapshot without refresh")
+	}
+
+	metas, err := state.LoadAllRepoMetadata(a.Paths)
+	if err != nil {
+		return fixRepoState{}, err
+	}
+	metaByRepoKey := repoMetadataByKey(metas)
+	if err := a.augmentFixMachineWithKnownRepos(&machine, includeCatalogs, metaByRepoKey); err != nil {
+		return fixRepoState{}, err
+	}
+
+	selectedCatalogs, err := domain.SelectCatalogs(machine, includeCatalogs)
+	if err != nil {
+		return fixRepoState{}, err
+	}
+	allowed := make(map[string]struct{}, len(selectedCatalogs))
+	for _, catalog := range selectedCatalogs {
+		allowed[catalog.Name] = struct{}{}
+	}
+
+	candidates := make([]fixRepoState, 0, len(machine.Repos))
+	for _, rec := range machine.Repos {
+		if _, ok := allowed[rec.Catalog]; !ok {
+			continue
+		}
+		candidates = append(candidates, fixRepoState{
+			Record:           rec,
+			Meta:             metaByRepoKey[rec.RepoKey],
+			IsDefaultCatalog: rec.Catalog == machine.DefaultCatalog,
+		})
+	}
+
+	target, err := resolveFixTarget(selector, candidates)
+	if err != nil {
+		return fixRepoState{}, err
+	}
+
+	target.Record, target.SyncFeasibility = a.enrichFixSyncFeasibility(target.Record)
+	risk, riskErr := collectFixRiskSnapshot(target.Record.Path, a.Git)
+	if riskErr != nil && !errors.Is(riskErr, os.ErrNotExist) {
+		a.logf("fix: risk scan failed for %s: %v", target.Record.Path, riskErr)
+	}
+	target.Risk = risk
+
+	pushAccessUpdated, err := a.refreshUnknownPushAccessForFixReposLocked([]fixRepoState{target})
+	if err != nil {
+		return fixRepoState{}, err
+	}
+	if pushAccessUpdated {
+		meta, metaErr := state.LoadRepoMetadata(a.Paths, target.Record.RepoKey)
+		if metaErr == nil {
+			target.Meta = &meta
+		} else if !errors.Is(metaErr, os.ErrNotExist) {
+			return fixRepoState{}, metaErr
+		}
+	}
+
+	return target, nil
 }
 
 func (a *App) refreshUnknownPushAccessForFixRepos(repos []fixRepoState) (bool, error) {
@@ -1770,6 +1868,61 @@ func (a *App) executeFixAction(
 			})
 			return err
 		})
+	case FixActionAlignRemoteFormat:
+		expectedOriginURL, isGitHubOrigin, err := preferredGitHubRemoteURLForOrigin(cfg.GitHub, target.Record.OriginURL)
+		if err != nil {
+			return err
+		}
+		if !isGitHubOrigin || strings.TrimSpace(expectedOriginURL) == "" {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "align-remote-format is blocked: origin must point to a GitHub repository",
+			}
+		}
+		if strings.TrimSpace(expectedOriginURL) == strings.TrimSpace(target.Record.OriginURL) {
+			return &fixIneligibleError{
+				Action: action,
+				Reason: "align-remote-format is blocked: origin already matches preferred format",
+			}
+		}
+
+		remoteName := plannedRemote(preferredRemote, target.Record.Upstream)
+		if resolvedRemote, remoteErr := a.Git.EffectiveRemote(path, remoteName); remoteErr == nil && strings.TrimSpace(resolvedRemote) != "" {
+			remoteName = strings.TrimSpace(resolvedRemote)
+		}
+		if strings.TrimSpace(remoteName) == "" {
+			remoteName = "origin"
+		}
+
+		if err := runStep("remote-format-set-url", fixActionPlanEntry{
+			ID:      "remote-format-set-url",
+			Command: true,
+			Summary: fmt.Sprintf("git remote set-url %s %s", remoteName, expectedOriginURL),
+		}, func() error {
+			return a.Git.SetRemoteURL(path, remoteName, expectedOriginURL)
+		}); err != nil {
+			return err
+		}
+
+		if strings.TrimSpace(target.Record.RepoKey) == "" {
+			return nil
+		}
+		return runStep("remote-format-write-metadata", fixActionPlanEntry{
+			ID:      "remote-format-write-metadata",
+			Command: false,
+			Summary: "Update repo metadata origin URL and reset push-access probe state.",
+		}, func() error {
+			meta, err := state.LoadRepoMetadata(a.Paths, target.Record.RepoKey)
+			if err != nil {
+				return err
+			}
+			meta.OriginURL = expectedOriginURL
+			meta.PushAccess = domain.PushAccessUnknown
+			meta.PushAccessCheckedAt = time.Time{}
+			meta.PushAccessCheckedRemote = ""
+			meta.PushAccessManualOverride = false
+			return state.SaveRepoMetadata(a.Paths, meta)
+		})
 	case FixActionClone:
 		if strings.TrimSpace(target.Record.RepoKey) == "" {
 			return errors.New("repo_key is required for clone")
@@ -1920,6 +2073,7 @@ func (a *App) buildFixActionPlanContext(cfg domain.ConfigFile, target fixRepoSta
 		PreferredRemote:                    preferredRemote,
 		GitHubOwner:                        owner,
 		RemoteProtocol:                     strings.TrimSpace(cfg.GitHub.RemoteProtocol),
+		GitHubRemoteURLTemplate:            strings.TrimSpace(cfg.GitHub.PreferredRemoteURLTemplate),
 		ForkRemoteExists:                   forkRemoteExists,
 		RepoName:                           strings.TrimSpace(target.Record.Name),
 		ExpectedRepoKey:                    strings.TrimSpace(target.Record.ExpectedRepoKey),
@@ -2030,7 +2184,13 @@ func (a *App) forkAndRetargetFromFix(
 		Summary: fmt.Sprintf("gh repo fork %s --remote=false --clone=false", forkSource),
 	}, func() error {
 		var err error
-		forkURL, err = a.ensureForkRemoteRepo(originURL, owner, cfg.GitHub.RemoteProtocol, repoPath)
+		forkURL, err = a.ensureForkRemoteRepo(
+			originURL,
+			owner,
+			cfg.GitHub.RemoteProtocol,
+			cfg.GitHub.PreferredRemoteURLTemplate,
+			repoPath,
+		)
 		return err
 	}); err != nil {
 		return err
@@ -2184,7 +2344,12 @@ func (a *App) createProjectFromFix(
 	}
 
 	visibility := resolveCreateProjectVisibility(cfg, opts.CreateProjectVisibility)
-	expectedOrigin, err := a.expectedOrigin(owner, projectName, cfg.GitHub.RemoteProtocol)
+	expectedOrigin, err := a.expectedOrigin(
+		owner,
+		projectName,
+		cfg.GitHub.RemoteProtocol,
+		cfg.GitHub.PreferredRemoteURLTemplate,
+	)
 	if err != nil {
 		return err
 	}
@@ -2223,7 +2388,14 @@ func (a *App) createProjectFromFix(
 			Summary: fmt.Sprintf("gh repo create %s/%s %s", owner, projectName, plannedVisibilityFlag(visibility)),
 		}, func() error {
 			var err error
-			createdOrigin, err = a.createRemoteRepo(owner, projectName, visibility, cfg.GitHub.RemoteProtocol, target.Record.Path)
+			createdOrigin, err = a.createRemoteRepo(
+				owner,
+				projectName,
+				visibility,
+				cfg.GitHub.RemoteProtocol,
+				cfg.GitHub.PreferredRemoteURLTemplate,
+				target.Record.Path,
+			)
 			return err
 		}); err != nil {
 			return err
@@ -2231,7 +2403,10 @@ func (a *App) createProjectFromFix(
 		if err := runStep("create-add-origin", fixActionPlanEntry{
 			ID:      "create-add-origin",
 			Command: true,
-			Summary: fmt.Sprintf("git remote add origin %s", plannedOriginURL(owner, projectName, cfg.GitHub.RemoteProtocol)),
+			Summary: fmt.Sprintf(
+				"git remote add origin %s",
+				plannedOriginURL(owner, projectName, cfg.GitHub.RemoteProtocol, cfg.GitHub.PreferredRemoteURLTemplate),
+			),
 		}, func() error {
 			if err := a.Git.AddOrigin(target.Record.Path, createdOrigin); err != nil {
 				return fmt.Errorf("set origin failed: %w", err)

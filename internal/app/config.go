@@ -242,6 +242,9 @@ func validateConfigForSave(cfg domain.ConfigFile) error {
 	if cfg.GitHub.RemoteProtocol != "ssh" && cfg.GitHub.RemoteProtocol != "https" {
 		return fmt.Errorf("github.remote_protocol must be ssh or https")
 	}
+	if err := validateGitHubRemoteURLTemplate(cfg.GitHub.PreferredRemoteURLTemplate); err != nil {
+		return err
+	}
 	if cfg.Notify.ThrottleMinutes < 0 {
 		return fmt.Errorf("notify.throttle_minutes must be >= 0")
 	}

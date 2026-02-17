@@ -26,6 +26,7 @@ type fixActionPlanContext struct {
 	PreferredRemote                    string
 	GitHubOwner                        string
 	RemoteProtocol                     string
+	GitHubRemoteURLTemplate            string
 	ForkRemoteExists                   bool
 	RepoName                           string
 	ExpectedRepoKey                    string
@@ -144,6 +145,12 @@ var fixActionSpecs = map[string]fixActionSpec{
 		Description: "Move this local repository to the expected catalog/path and update repository metadata history.",
 		Risky:       false,
 		BuildPlan:   planFixActionMoveToCatalog,
+	},
+	FixActionAlignRemoteFormat: {
+		Label:       "Align remote URL format",
+		Description: "Rewrite the remote URL to your configured GitHub format template and reset push-access probe state.",
+		Risky:       false,
+		BuildPlan:   planFixActionAlignRemoteFormat,
 	},
 }
 
@@ -507,7 +514,7 @@ func planFixActionCreateProject(ctx fixActionPlanContext) []fixActionPlanEntry {
 		Summary: fmt.Sprintf("gh repo create %s/%s %s", owner, projectName, plannedVisibilityFlag(ctx.CreateProjectVisibility)),
 	})
 	if strings.TrimSpace(ctx.OriginURL) == "" {
-		originURL := plannedOriginURL(ctx.GitHubOwner, projectName, ctx.RemoteProtocol)
+		originURL := plannedOriginURL(ctx.GitHubOwner, projectName, ctx.RemoteProtocol, ctx.GitHubRemoteURLTemplate)
 		if strings.TrimSpace(originURL) == "" {
 			return append(entries, fixActionPlanEntry{
 				ID:      "create-add-origin",
@@ -588,7 +595,7 @@ func planFixActionForkAndRetarget(ctx fixActionPlanContext) []fixActionPlanEntry
 			},
 		}
 	}
-	forkURL := plannedForkURL(ctx.OriginURL, ctx.GitHubOwner, ctx.RemoteProtocol)
+	forkURL := plannedForkURL(ctx.OriginURL, ctx.GitHubOwner, ctx.RemoteProtocol, ctx.GitHubRemoteURLTemplate)
 	if forkURL == "" {
 		return []fixActionPlanEntry{
 			{
@@ -672,6 +679,41 @@ func planFixActionMoveToCatalog(ctx fixActionPlanContext) []fixActionPlanEntry {
 	}
 }
 
+func planFixActionAlignRemoteFormat(ctx fixActionPlanContext) []fixActionPlanEntry {
+	expectedOrigin := plannedPreferredOriginForExisting(ctx.OriginURL, ctx.RemoteProtocol, ctx.GitHubRemoteURLTemplate)
+	if strings.TrimSpace(expectedOrigin) == "" {
+		return []fixActionPlanEntry{
+			{
+				ID:      "remote-format-unavailable",
+				Command: false,
+				Summary: "Cannot derive preferred remote format for the current origin URL.",
+			},
+		}
+	}
+	if strings.TrimSpace(expectedOrigin) == strings.TrimSpace(ctx.OriginURL) {
+		return []fixActionPlanEntry{
+			{
+				ID:      "remote-format-already-matching",
+				Command: false,
+				Summary: "Origin already matches the preferred remote URL format.",
+			},
+		}
+	}
+	remote := plannedRemote(ctx.PreferredRemote, ctx.Upstream)
+	return []fixActionPlanEntry{
+		{
+			ID:      "remote-format-set-url",
+			Command: true,
+			Summary: fmt.Sprintf("git remote set-url %s %s", remote, expectedOrigin),
+		},
+		{
+			ID:      "remote-format-write-metadata",
+			Command: false,
+			Summary: "Update repo metadata origin URL and reset push-access probe state.",
+		},
+	}
+}
+
 func plannedCommitMessage(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "auto" {
@@ -722,16 +764,17 @@ func plannedProjectName(name string, repoName string) string {
 	return "repo"
 }
 
-func plannedOriginURL(owner string, projectName string, protocol string) string {
+func plannedOriginURL(owner string, projectName string, protocol string, template string) string {
 	owner = strings.TrimSpace(owner)
 	projectName = strings.TrimSpace(projectName)
 	if owner == "" || projectName == "" {
 		return ""
 	}
-	if strings.EqualFold(strings.TrimSpace(protocol), "https") {
-		return fmt.Sprintf("https://github.com/%s/%s.git", owner, projectName)
+	url, err := githubRemoteURL(owner, projectName, protocol, template)
+	if err != nil {
+		return ""
 	}
-	return fmt.Sprintf("git@github.com:%s/%s.git", owner, projectName)
+	return url
 }
 
 func plannedCloneOrigin(originURL string) string {
@@ -756,7 +799,7 @@ func plannedForkSource(originURL string) string {
 	return fmt.Sprintf("%s/%s", sourceOwner, repoName)
 }
 
-func plannedForkURL(originURL string, forkOwner string, protocol string) string {
+func plannedForkURL(originURL string, forkOwner string, protocol string, template string) string {
 	forkOwner = strings.TrimSpace(forkOwner)
 	if forkOwner == "" {
 		return ""
@@ -765,8 +808,21 @@ func plannedForkURL(originURL string, forkOwner string, protocol string) string 
 	if err != nil {
 		return ""
 	}
-	if strings.EqualFold(strings.TrimSpace(protocol), "https") {
-		return fmt.Sprintf("https://github.com/%s/%s.git", forkOwner, repoName)
+	url, err := githubRemoteURL(forkOwner, repoName, protocol, template)
+	if err != nil {
+		return ""
 	}
-	return fmt.Sprintf("git@github.com:%s/%s.git", forkOwner, repoName)
+	return url
+}
+
+func plannedPreferredOriginForExisting(originURL string, protocol string, template string) string {
+	owner, repo, err := sourceRepoForFork(originURL)
+	if err != nil {
+		return ""
+	}
+	url, err := githubRemoteURL(owner, repo, protocol, template)
+	if err != nil {
+		return ""
+	}
+	return url
 }

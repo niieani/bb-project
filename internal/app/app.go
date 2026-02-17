@@ -304,7 +304,7 @@ func (a *App) RunInit(opts InitOptions) error {
 		return errors.New("github.owner is required; run 'bb config' and set github.owner")
 	}
 
-	expectedOrigin, err := a.expectedOrigin(owner, projectName, remoteProtocol)
+	expectedOrigin, err := a.expectedOrigin(owner, projectName, remoteProtocol, cfg.GitHub.PreferredRemoteURLTemplate)
 	if err != nil {
 		return err
 	}
@@ -324,7 +324,14 @@ func (a *App) RunInit(opts InitOptions) error {
 		}
 	} else {
 		a.logf("init: creating remote repository for %s/%s", owner, projectName)
-		createdOrigin, err := a.createRemoteRepo(owner, projectName, visibility, remoteProtocol, targetPath)
+		createdOrigin, err := a.createRemoteRepo(
+			owner,
+			projectName,
+			visibility,
+			remoteProtocol,
+			cfg.GitHub.PreferredRemoteURLTemplate,
+			targetPath,
+		)
 		if err != nil {
 			return err
 		}
@@ -464,17 +471,11 @@ func splitPath(p string) []string {
 	return out
 }
 
-func (a *App) expectedOrigin(owner, repo, protocol string) (string, error) {
+func (a *App) expectedOrigin(owner, repo, protocol string, template string) (string, error) {
 	if fakeRoot := strings.TrimSpace(os.Getenv("BB_TEST_REMOTE_ROOT")); fakeRoot != "" {
 		return filepath.Join(fakeRoot, owner, repo+".git"), nil
 	}
-	origin := ""
-	if protocol == "https" {
-		origin = fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
-	} else {
-		origin = fmt.Sprintf("git@github.com:%s/%s.git", owner, repo)
-	}
-	return origin, nil
+	return githubRemoteURL(owner, repo, protocol, template)
 }
 
 func originsMatchNormalized(observedOrigin string, expectedOrigin string) (bool, error) {
@@ -497,7 +498,7 @@ func (a *App) runCommandAttached(dir string, name string, args ...string) error 
 	return run(dir, name, args...)
 }
 
-func (a *App) createRemoteRepo(owner, repo string, visibility domain.Visibility, protocol string, repoPath string) (string, error) {
+func (a *App) createRemoteRepo(owner, repo string, visibility domain.Visibility, protocol string, template string, repoPath string) (string, error) {
 	if fakeRoot := strings.TrimSpace(os.Getenv("BB_TEST_REMOTE_ROOT")); fakeRoot != "" {
 		remotePath := filepath.Join(fakeRoot, owner, repo+".git")
 		a.logf("init: using test remote backend at %s", remotePath)
@@ -526,10 +527,7 @@ func (a *App) createRemoteRepo(owner, repo string, visibility domain.Visibility,
 		return "", fmt.Errorf("gh repo create failed: %w", err)
 	}
 
-	if protocol == "https" {
-		return fmt.Sprintf("https://github.com/%s/%s.git", owner, repo), nil
-	}
-	return fmt.Sprintf("git@github.com:%s/%s.git", owner, repo), nil
+	return githubRemoteURL(owner, repo, protocol, template)
 }
 
 func sourceRepoForFork(originURL string) (sourceOwner string, repoName string, err error) {
@@ -560,7 +558,7 @@ func sourceRepoForFork(originURL string) (sourceOwner string, repoName string, e
 	return strings.TrimSpace(segments[0]), strings.TrimSpace(segments[1]), nil
 }
 
-func (a *App) ensureForkRemoteRepo(originURL string, forkOwner string, protocol string, repoPath string) (string, error) {
+func (a *App) ensureForkRemoteRepo(originURL string, forkOwner string, protocol string, template string, repoPath string) (string, error) {
 	forkOwner = strings.TrimSpace(forkOwner)
 	if forkOwner == "" {
 		return "", errors.New("github.owner is required for fork")
@@ -608,10 +606,7 @@ func (a *App) ensureForkRemoteRepo(originURL string, forkOwner string, protocol 
 		}
 	}
 
-	if protocol == "https" {
-		return fmt.Sprintf("https://github.com/%s/%s.git", forkOwner, repoName), nil
-	}
-	return fmt.Sprintf("git@github.com:%s/%s.git", forkOwner, repoName), nil
+	return githubRemoteURL(forkOwner, repoName, protocol, template)
 }
 
 func (a *App) ensureRepoMetadata(cfg domain.ConfigFile, repoKey, name, origin string, visibility domain.Visibility, preferredCatalog string) (domain.RepoMetadataFile, bool, error) {
@@ -1203,6 +1198,12 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 		OperationInProgress: op,
 		Syncable:            syncable,
 		UnsyncableReasons:   reasons,
+	}
+	if expectedOriginURL, isGitHubOrigin, expectedErr := preferredGitHubRemoteURLForOrigin(cfg.GitHub, origin); expectedErr != nil {
+		return domain.MachineRepoRecord{}, expectedErr
+	} else if isGitHubOrigin && strings.TrimSpace(expectedOriginURL) != "" && strings.TrimSpace(origin) != strings.TrimSpace(expectedOriginURL) {
+		rec.Syncable = false
+		rec.UnsyncableReasons = appendUniqueUnsyncableReason(rec.UnsyncableReasons, domain.ReasonRemoteFormatMismatch)
 	}
 	if movedToRepoKey != "" {
 		rec.Syncable = false

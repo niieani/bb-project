@@ -2429,6 +2429,8 @@ func summaryUnsyncableReasonLabel(reason domain.UnsyncableReason) string {
 		return "Repository is in a different local catalog path than expected"
 	case domain.ReasonCatalogNotMapped:
 		return "Catalog exists on other machines but is not mapped locally"
+	case domain.ReasonRemoteFormatMismatch:
+		return "Remote URL format differs from configured GitHub preference"
 	default:
 		return string(reason)
 	}
@@ -2470,6 +2472,8 @@ func summaryManualGuidanceForReason(reason domain.UnsyncableReason) string {
 		return "Run move-to-catalog to relocate this local repository to the expected catalog path."
 	case domain.ReasonCatalogNotMapped:
 		return "Open `bb config` and map this catalog to a local root path."
+	case domain.ReasonRemoteFormatMismatch:
+		return "Run align-remote-format to rewrite the remote URL to your preferred format."
 	default:
 		return "Review this blocker manually, then rerun revalidation."
 	}

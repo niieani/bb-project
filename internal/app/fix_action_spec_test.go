@@ -25,6 +25,7 @@ func TestFixActionSpecsHaveCoreMetadata(t *testing.T) {
 		FixActionSetUpstreamPush,
 		FixActionEnableAutoPush,
 		FixActionMoveToCatalog,
+		FixActionAlignRemoteFormat,
 	}
 
 	for _, action := range actions {
@@ -65,6 +66,7 @@ func TestFixActionRiskUsesSharedSpec(t *testing.T) {
 		{action: FixActionPullFFOnly, risky: false},
 		{action: FixActionEnableAutoPush, risky: false},
 		{action: FixActionMoveToCatalog, risky: false},
+		{action: FixActionAlignRemoteFormat, risky: false},
 		{action: "unknown-action", risky: false},
 	}
 

@@ -44,6 +44,22 @@ func TestValidateConfigForSaveRequiresSchedulerInterval(t *testing.T) {
 	}
 }
 
+func TestValidateConfigForSaveRejectsInvalidGitHubRemoteURLTemplate(t *testing.T) {
+	t.Parallel()
+
+	cfg := state.DefaultConfig()
+	cfg.GitHub.Owner = "you"
+	cfg.GitHub.PreferredRemoteURLTemplate = "git@github.com:${org}/hardcoded.git"
+
+	err := validateConfigForSave(cfg)
+	if err == nil {
+		t.Fatal("expected preferred remote URL template validation error")
+	}
+	if !strings.Contains(err.Error(), "github.preferred_remote_url_template") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRunConfigAppliesChanges(t *testing.T) {
 	home := t.TempDir()
 	paths := state.NewPaths(home)

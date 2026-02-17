@@ -112,7 +112,7 @@ func TestCreateRemoteRepoUsesAttachedCommandForGitHubCLI(t *testing.T) {
 	}
 
 	repoPath := t.TempDir()
-	origin, err := app.createRemoteRepo("you", "demo", domain.VisibilityPublic, "https", repoPath)
+	origin, err := app.createRemoteRepo("you", "demo", domain.VisibilityPublic, "https", "", repoPath)
 	if err != nil {
 		t.Fatalf("createRemoteRepo error: %v", err)
 	}
@@ -146,12 +146,49 @@ func TestCreateRemoteRepoReturnsHelpfulErrorWhenGHMissing(t *testing.T) {
 		return "", errors.New("not found")
 	}
 
-	_, err := app.createRemoteRepo("you", "demo", domain.VisibilityPrivate, "ssh", t.TempDir())
+	_, err := app.createRemoteRepo("you", "demo", domain.VisibilityPrivate, "ssh", "", t.TempDir())
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "gh auth login") {
 		t.Fatalf("expected login instruction in error, got: %v", err)
+	}
+}
+
+func TestCreateRemoteRepoUsesGitHubRemoteTemplate(t *testing.T) {
+	app := New(state.NewPaths(t.TempDir()), os.Stdout, os.Stderr)
+	app.SetVerbose(false)
+	t.Setenv("BB_TEST_REMOTE_ROOT", "")
+
+	app.LookPath = func(file string) (string, error) {
+		if file == "gh" {
+			return "/usr/bin/gh", nil
+		}
+		return "", errors.New("not found")
+	}
+	app.RunCommand = func(name string, args ...string) (string, error) {
+		if name != "gh" {
+			return "", errors.New("unexpected command")
+		}
+		return "logged in", nil
+	}
+	app.RunCommandAttached = func(_ string, _ string, _ ...string) error {
+		return nil
+	}
+
+	origin, err := app.createRemoteRepo(
+		"niieani",
+		"bb-project",
+		domain.VisibilityPrivate,
+		"https",
+		"git@${org}.github.com:${org}/${repo}.git",
+		t.TempDir(),
+	)
+	if err != nil {
+		t.Fatalf("createRemoteRepo error: %v", err)
+	}
+	if origin != "git@niieani.github.com:niieani/bb-project.git" {
+		t.Fatalf("origin = %q, want %q", origin, "git@niieani.github.com:niieani/bb-project.git")
 	}
 }
 

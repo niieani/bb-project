@@ -59,6 +59,7 @@ const (
 	ReasonCloneRequired          UnsyncableReason = "clone_required"
 	ReasonCatalogNotMapped       UnsyncableReason = "catalog_not_mapped"
 	ReasonCatalogMismatch        UnsyncableReason = "catalog_mismatch"
+	ReasonRemoteFormatMismatch   UnsyncableReason = "remote_format_mismatch"
 )
 
 type Catalog struct {
@@ -88,9 +89,10 @@ type StateTransport struct {
 }
 
 type GitHubConfig struct {
-	Owner             string `yaml:"owner"`
-	DefaultVisibility string `yaml:"default_visibility"`
-	RemoteProtocol    string `yaml:"remote_protocol"`
+	Owner                      string `yaml:"owner"`
+	DefaultVisibility          string `yaml:"default_visibility"`
+	RemoteProtocol             string `yaml:"remote_protocol"`
+	PreferredRemoteURLTemplate string `yaml:"preferred_remote_url_template,omitempty"`
 }
 
 type CloneConfig struct {

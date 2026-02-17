@@ -2077,7 +2077,7 @@ func (m *fixTUIModel) handleImmediateApplyCompleted(msg fixTUIImmediateApplyComp
 	}
 
 	if msg.Failed > 0 {
-		m.errText = "one or more fixes failed"
+		m.errText = immediateApplyFailureMessage(msg.Results, msg.Failed)
 	} else {
 		m.errText = ""
 	}
@@ -2089,6 +2089,47 @@ func (m *fixTUIModel) handleImmediateApplyCompleted(msg fixTUIImmediateApplyComp
 
 	m.status = fmt.Sprintf("applied %d, skipped %d, failed %d", msg.Applied, msg.Skipped, msg.Failed)
 	return nil
+}
+
+func immediateApplyFailureMessage(results []fixSummaryResult, failedCount int) string {
+	const fallback = "one or more fixes failed"
+	failed := make([]fixSummaryResult, 0, max(1, failedCount))
+	for _, result := range results {
+		if strings.TrimSpace(result.Status) != "failed" {
+			continue
+		}
+		failed = append(failed, result)
+	}
+	if len(failed) == 0 {
+		return fallback
+	}
+
+	first := failed[0]
+	detail := strings.Join(strings.Fields(strings.TrimSpace(first.Detail)), " ")
+	if detail == "" {
+		detail = "unknown error"
+	}
+	repo := strings.TrimSpace(first.RepoName)
+	if repo == "" {
+		repo = filepathBaseFallback(first.RepoPath)
+	}
+	if repo == "" {
+		repo = "repo"
+	}
+	action := strings.TrimSpace(first.Action)
+	if action == "" {
+		action = "Fix"
+	}
+
+	message := fmt.Sprintf("%s failed for %s: %s", action, repo, detail)
+	if len(failed) > 1 {
+		message += fmt.Sprintf(" (+%d more)", len(failed)-1)
+	}
+	const maxLen = 320
+	if len(message) <= maxLen {
+		return message
+	}
+	return strings.TrimSpace(message[:maxLen-3]) + "..."
 }
 
 func (m *fixTUIModel) takePendingCmd() tea.Cmd {
@@ -3002,6 +3043,8 @@ func fixActionStyleFor(action string) lipgloss.Style {
 		return fixActionCloneStyle
 	case FixActionMoveToCatalog:
 		return fixActionCloneStyle
+	case FixActionAlignRemoteFormat:
+		return fixActionUpstreamStyle
 	case FixActionForkAndRetarget:
 		return fixActionForkStyle
 	case FixActionSyncWithUpstream:
@@ -3199,6 +3242,8 @@ func fixReasonCoveredByActions(reason domain.UnsyncableReason, has map[string]bo
 		return has[FixActionClone]
 	case domain.ReasonCatalogMismatch:
 		return has[FixActionMoveToCatalog]
+	case domain.ReasonRemoteFormatMismatch:
+		return has[FixActionAlignRemoteFormat]
 	case domain.ReasonCatalogNotMapped:
 		return false
 	default:

@@ -14,6 +14,9 @@ func TestHasBlockingUnsyncableReason(t *testing.T) {
 	if HasBlockingUnsyncableReason([]UnsyncableReason{ReasonCatalogNotMapped}) {
 		t.Fatal("expected catalog_not_mapped to be non-blocking")
 	}
+	if HasBlockingUnsyncableReason([]UnsyncableReason{ReasonRemoteFormatMismatch}) {
+		t.Fatal("expected remote_format_mismatch to be non-blocking")
+	}
 	if !HasBlockingUnsyncableReason([]UnsyncableReason{ReasonDirtyTracked}) {
 		t.Fatal("expected dirty_tracked to be blocking")
 	}
