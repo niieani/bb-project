@@ -2,6 +2,9 @@
 # This file configures default behavior for all bd commands in this repository
 # All settings can also be set via environment variables (BD_* prefix)
 # or overridden with command-line flags
+sync:
+  mode: dolt-native # Default: use Dolt remotes
+
 
 # Issue prefix for this repository (used by bd init)
 # If not set, bd init will auto-detect from directory name
