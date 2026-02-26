@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"image/color"
 	"io"
 	"os/exec"
 	"sort"
@@ -11,12 +12,12 @@ import (
 
 	"bb-project/internal/domain"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -61,7 +62,7 @@ func defaultFixTUIKeyMap() fixTUIKeyMap {
 			key.WithHelp("→/l", "next fix"),
 		),
 		Toggle: key.NewBinding(
-			key.WithKeys(" ", "space"),
+			key.WithKeys("space"),
 			key.WithHelp("space", "select fix"),
 		),
 		Apply: key.NewBinding(
@@ -404,7 +405,7 @@ func (m *fixTUIModel) footerHelpView(helpPanel lipgloss.Style) string {
 	helpModel := m.help
 	innerWidth := m.footerHelpInnerWidth(helpPanel)
 	if innerWidth > 0 {
-		helpModel.Width = innerWidth
+		helpModel.SetWidth(innerWidth)
 	}
 	if helpModel.ShowAll {
 		return helpModel.View(helpMap)
@@ -470,6 +471,7 @@ type fixTUIModel struct {
 
 	width  int
 	height int
+	isDark bool
 
 	status  string
 	errText string
@@ -667,149 +669,153 @@ const (
 )
 
 var (
-	fixNoActionStyle = lipgloss.NewStyle().
-				Foreground(mutedTextColor)
-
-	fixRepoNameStyle = lipgloss.NewStyle().
-				Foreground(textColor)
-
-	fixBranchStyle = lipgloss.NewStyle().
-			Foreground(mutedTextColor)
-
-	fixReasonsStyle = lipgloss.NewStyle().
-			Foreground(mutedTextColor)
-
-	fixStateSyncableStyle = lipgloss.NewStyle().
-				Foreground(successColor)
-
-	fixStateAutofixableStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("214"))
-
-	fixStateUnsyncableStyle = lipgloss.NewStyle().
-				Foreground(errorFgColor)
-
-	fixStateNotClonedStyle = lipgloss.NewStyle().
-				Foreground(warningColor)
-
-	fixStateIgnoredStyle = lipgloss.NewStyle().
-				Foreground(mutedTextColor).
-				Faint(true)
-
-	fixIndicatorStyle = lipgloss.NewStyle().
-				Foreground(borderColor)
-
-	fixIndicatorSelectedStyle = lipgloss.NewStyle().
-					Foreground(accentColor).
-					Bold(true)
-
-	fixSelectedRowStyle = lipgloss.NewStyle().
-				Background(accentBgColor)
-
-	fixCatalogHeaderStyle = lipgloss.NewStyle().
-				Foreground(accentColor).
-				Bold(true)
-
-	fixCatalogBreakStyle = lipgloss.NewStyle().
-				Foreground(borderColor)
-
-	fixHeaderCellStyle = lipgloss.NewStyle().
-				Foreground(textColor).
-				Bold(true).
-				Align(lipgloss.Left)
-
-	fixDetailsLabelStyle = lipgloss.NewStyle().
-				Foreground(accentColor).
-				Bold(true)
-
-	fixDetailsValueStyle = lipgloss.NewStyle().
-				Foreground(textColor).
-				Bold(true)
-
-	fixDetailsPathStyle = lipgloss.NewStyle().
-				Foreground(mutedTextColor)
-
-	fixDetailsStateKeyStyle = lipgloss.NewStyle().
-				Foreground(accentColor).
-				Bold(true)
-
-	fixDetailsAutoPushKeyStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("81")).
-					Bold(true)
-
-	fixDetailsBranchKeyStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("111")).
-					Bold(true)
-
-	fixDetailsReasonsKeyStyle = lipgloss.NewStyle().
-					Foreground(warningColor).
-					Bold(true)
-
-	fixDetailsSelectedKeyStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("177")).
-					Bold(true)
-
-	fixActionPushStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("45"))
-
-	fixActionStageStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("214"))
-
-	fixActionStashStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("178"))
-
-	fixActionPullStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("81"))
-
-	fixActionUpstreamStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("177"))
-
-	fixActionCreateProjectStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("113"))
-
-	fixActionCloneStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("120"))
-
-	fixActionForkStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("99"))
-
-	fixActionSyncStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("111"))
-
-	fixActionAutoPushStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("70"))
-
-	fixActionAbortStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("203"))
-
-	fixChoiceArrowAvailableStyle = lipgloss.NewStyle().
-					Foreground(textColor).
-					Bold(true)
-
-	fixChoiceArrowDimStyle = lipgloss.NewStyle().
-				Foreground(mutedTextColor).
-				Faint(true)
-
-	fixChoiceChipStyle = lipgloss.NewStyle().
-				Background(lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#30363D"}).
-				Padding(0, 1)
-
-	fixAutoPushOnStyle = lipgloss.NewStyle().
-				Foreground(successColor)
-
-	fixAutoPushOffStyle = lipgloss.NewStyle().
-				Foreground(mutedTextColor)
-
-	fixAutoPushIncludeDefaultStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("81"))
-
-	fixPageStyle = lipgloss.NewStyle().Padding(0, 2)
+	fixNoActionStyle               lipgloss.Style
+	fixRepoNameStyle               lipgloss.Style
+	fixBranchStyle                 lipgloss.Style
+	fixReasonsStyle                lipgloss.Style
+	fixStateSyncableStyle          lipgloss.Style
+	fixStateAutofixableStyle       lipgloss.Style
+	fixStateUnsyncableStyle        lipgloss.Style
+	fixStateNotClonedStyle         lipgloss.Style
+	fixStateIgnoredStyle           lipgloss.Style
+	fixIndicatorStyle              lipgloss.Style
+	fixIndicatorSelectedStyle      lipgloss.Style
+	fixSelectedRowStyle            lipgloss.Style
+	fixCatalogHeaderStyle          lipgloss.Style
+	fixCatalogBreakStyle           lipgloss.Style
+	fixHeaderCellStyle             lipgloss.Style
+	fixDetailsLabelStyle           lipgloss.Style
+	fixDetailsValueStyle           lipgloss.Style
+	fixDetailsPathStyle            lipgloss.Style
+	fixDetailsStateKeyStyle        lipgloss.Style
+	fixDetailsAutoPushKeyStyle     lipgloss.Style
+	fixDetailsBranchKeyStyle       lipgloss.Style
+	fixDetailsReasonsKeyStyle      lipgloss.Style
+	fixDetailsSelectedKeyStyle     lipgloss.Style
+	fixActionPushStyle             lipgloss.Style
+	fixActionStageStyle            lipgloss.Style
+	fixActionStashStyle            lipgloss.Style
+	fixActionPullStyle             lipgloss.Style
+	fixActionUpstreamStyle         lipgloss.Style
+	fixActionCreateProjectStyle    lipgloss.Style
+	fixActionCloneStyle            lipgloss.Style
+	fixActionForkStyle             lipgloss.Style
+	fixActionSyncStyle             lipgloss.Style
+	fixActionAutoPushStyle         lipgloss.Style
+	fixActionAbortStyle            lipgloss.Style
+	fixChoiceArrowAvailableStyle   lipgloss.Style
+	fixChoiceArrowDimStyle         lipgloss.Style
+	fixChoiceChipStyle             lipgloss.Style
+	fixAutoPushOnStyle             lipgloss.Style
+	fixAutoPushOffStyle            lipgloss.Style
+	fixAutoPushIncludeDefaultStyle lipgloss.Style
+	fixPageStyle                   lipgloss.Style
 )
+
+func applyFixTUITheme() {
+	fixNoActionStyle = lipgloss.NewStyle().
+		Foreground(mutedTextColor)
+	fixRepoNameStyle = lipgloss.NewStyle().
+		Foreground(textColor)
+	fixBranchStyle = lipgloss.NewStyle().
+		Foreground(mutedTextColor)
+	fixReasonsStyle = lipgloss.NewStyle().
+		Foreground(mutedTextColor)
+	fixStateSyncableStyle = lipgloss.NewStyle().
+		Foreground(successColor)
+	fixStateAutofixableStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214"))
+	fixStateUnsyncableStyle = lipgloss.NewStyle().
+		Foreground(errorFgColor)
+	fixStateNotClonedStyle = lipgloss.NewStyle().
+		Foreground(warningColor)
+	fixStateIgnoredStyle = lipgloss.NewStyle().
+		Foreground(mutedTextColor).
+		Faint(true)
+	fixIndicatorStyle = lipgloss.NewStyle().
+		Foreground(borderColor)
+	fixIndicatorSelectedStyle = lipgloss.NewStyle().
+		Foreground(accentColor).
+		Bold(true)
+	fixSelectedRowStyle = lipgloss.NewStyle().
+		Background(accentBgColor)
+	fixCatalogHeaderStyle = lipgloss.NewStyle().
+		Foreground(accentColor).
+		Bold(true)
+	fixCatalogBreakStyle = lipgloss.NewStyle().
+		Foreground(borderColor)
+	fixHeaderCellStyle = lipgloss.NewStyle().
+		Foreground(textColor).
+		Bold(true).
+		Align(lipgloss.Left)
+	fixDetailsLabelStyle = lipgloss.NewStyle().
+		Foreground(accentColor).
+		Bold(true)
+	fixDetailsValueStyle = lipgloss.NewStyle().
+		Foreground(textColor).
+		Bold(true)
+	fixDetailsPathStyle = lipgloss.NewStyle().
+		Foreground(mutedTextColor)
+	fixDetailsStateKeyStyle = lipgloss.NewStyle().
+		Foreground(accentColor).
+		Bold(true)
+	fixDetailsAutoPushKeyStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("81")).
+		Bold(true)
+	fixDetailsBranchKeyStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("111")).
+		Bold(true)
+	fixDetailsReasonsKeyStyle = lipgloss.NewStyle().
+		Foreground(warningColor).
+		Bold(true)
+	fixDetailsSelectedKeyStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("177")).
+		Bold(true)
+	fixActionPushStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("45"))
+	fixActionStageStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214"))
+	fixActionStashStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("178"))
+	fixActionPullStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("81"))
+	fixActionUpstreamStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("177"))
+	fixActionCreateProjectStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("113"))
+	fixActionCloneStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("120"))
+	fixActionForkStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("99"))
+	fixActionSyncStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("111"))
+	fixActionAutoPushStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("70"))
+	fixActionAbortStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("203"))
+	fixChoiceArrowAvailableStyle = lipgloss.NewStyle().
+		Foreground(textColor).
+		Bold(true)
+	fixChoiceArrowDimStyle = lipgloss.NewStyle().
+		Foreground(mutedTextColor).
+		Faint(true)
+	fixChoiceChipStyle = lipgloss.NewStyle().
+		Background(themeColor(uiThemeIsDark, "#F6F8FA", "#30363D")).
+		Padding(0, 1)
+	fixAutoPushOnStyle = lipgloss.NewStyle().
+		Foreground(successColor)
+	fixAutoPushOffStyle = lipgloss.NewStyle().
+		Foreground(mutedTextColor)
+	fixAutoPushIncludeDefaultStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("81"))
+	fixPageStyle = lipgloss.NewStyle().Padding(0, 2)
+}
 
 const fixListColumnGap = "  "
 
 func (a *App) runFixInteractive(includeCatalogs []string, noRefresh bool) (int, error) {
 	model := newFixTUIBootModel(a, includeCatalogs, noRefresh)
-	program := tea.NewProgram(model, tea.WithAltScreen())
+	program := tea.NewProgram(model)
 	finalModel, err := program.Run()
 	if err != nil {
 		return 2, err
@@ -827,6 +833,7 @@ type fixTUIBootModel struct {
 
 	width  int
 	height int
+	isDark bool
 
 	spin    spinner.Model
 	loadFn  func() (*fixTUIModel, error)
@@ -882,23 +889,36 @@ func newFixProgressSpinner() spinner.Model {
 }
 
 func newFixTUIBootModel(app *App, includeCatalogs []string, noRefresh bool) *fixTUIBootModel {
+	applyGlobalTheme(true)
 	spin := newFixProgressSpinner()
 
-	return &fixTUIBootModel{
+	m := &fixTUIBootModel{
 		app:             app,
 		includeCatalogs: append([]string(nil), includeCatalogs...),
 		noRefresh:       noRefresh,
+		isDark:          true,
 		spin:            spin,
 		progressLine:    "Preparing interactive fix startup",
 	}
+	m.applyTheme()
+	return m
+}
+
+func (m *fixTUIBootModel) applyTheme() {
+	applyGlobalTheme(m.isDark)
+	m.spin.Style = lipgloss.NewStyle().Foreground(accentColor)
 }
 
 func (m *fixTUIBootModel) Init() tea.Cmd {
-	return tea.Batch(m.spin.Tick, m.loadReposCmd())
+	return tea.Batch(m.spin.Tick, m.loadReposCmd(), tea.RequestBackgroundColor)
 }
 
 func (m *fixTUIBootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		m.isDark = msg.IsDark()
+		m.applyTheme()
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -918,7 +938,7 @@ func (m *fixTUIBootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.transferWindowSize(msg.model)
 		return msg.model, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if key.Matches(msg, defaultFixTUIKeyMap().Quit) {
 			return m, tea.Quit
 		}
@@ -927,7 +947,7 @@ func (m *fixTUIBootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *fixTUIBootModel) View() string {
+func (m *fixTUIBootModel) View() tea.View {
 	title := lipgloss.JoinHorizontal(lipgloss.Center,
 		titleBadgeStyle.Render("bb"),
 		" "+headerStyle.Render("fix"),
@@ -950,7 +970,9 @@ func (m *fixTUIBootModel) View() string {
 	b.WriteString(detail)
 
 	body := title + "\n" + subtitle + "\n\n" + contentPanel.Render(b.String())
-	return fixPageStyle.Render(body)
+	v := tea.NewView(fixPageStyle.Render(body))
+	v.AltScreen = true
+	return v
 }
 
 func (m *fixTUIBootModel) loadReposCmd() tea.Cmd {
@@ -976,7 +998,9 @@ func (m *fixTUIBootModel) loadReposCmd() tea.Cmd {
 func (m *fixTUIBootModel) transferWindowSize(target *fixTUIModel) {
 	target.width = m.width
 	target.height = m.height
-	target.help.Width = m.width
+	target.isDark = m.isDark
+	target.applyTheme()
+	target.help.SetWidth(m.width)
 	target.resizeRepoList()
 }
 
@@ -1056,7 +1080,7 @@ func normalizeFixBootProgressLine(line string) (string, bool) {
 }
 
 func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUIModel, error) {
-	repoList := newFixRepoListModel()
+	repoList := newFixRepoListModel(true)
 
 	m := &fixTUIModel{
 		app:                      app,
@@ -1070,12 +1094,14 @@ func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUI
 		scheduled:                map[string][]string{},
 		summaryCursor:            0,
 		summarySelectedFollowUps: map[string]bool{},
+		isDark:                   true,
 		keys:                     defaultFixTUIKeyMap(),
 		help:                     help.New(),
 		repoList:                 repoList,
 		revalidateSpinner:        newFixProgressSpinner(),
 		immediateApplySpinner:    newFixProgressSpinner(),
 	}
+	m.applyTheme()
 	m.help.ShowAll = false
 	initialRefreshMode := scanRefreshIfStale
 	if noRefresh {
@@ -1087,7 +1113,7 @@ func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUI
 	return m, nil
 }
 
-func newFixRepoListModel() list.Model {
+func newFixRepoListModel(isDark bool) list.Model {
 	delegate := fixRepoDelegate{}
 	m := list.New([]list.Item{}, delegate, fixListDefaultWidth, 12)
 	m.SetFilteringEnabled(false)
@@ -1106,22 +1132,38 @@ func newFixRepoListModel() list.Model {
 	m.KeyMap.GoToStart.SetEnabled(false)
 	m.KeyMap.GoToEnd.SetEnabled(false)
 
-	styles := list.DefaultStyles()
+	styles := list.DefaultStyles(isDark)
 	styles.NoItems = hintStyle
 	m.Styles = styles
 	return m
 }
 
 func (m *fixTUIModel) Init() tea.Cmd {
-	return nil
+	return tea.RequestBackgroundColor
+}
+
+func (m *fixTUIModel) applyTheme() {
+	applyGlobalTheme(m.isDark)
+	m.help.Styles = help.DefaultStyles(m.isDark)
+	styles := list.DefaultStyles(m.isDark)
+	styles.NoItems = hintStyle
+	m.repoList.Styles = styles
+	m.revalidateSpinner.Style = lipgloss.NewStyle().Foreground(accentColor)
+	m.immediateApplySpinner.Style = lipgloss.NewStyle().Foreground(accentColor)
+	m.wizard.ApplySpinner.Style = lipgloss.NewStyle().Foreground(accentColor)
+	m.wizard.CommitGenerateSpinner.Style = lipgloss.NewStyle().Foreground(accentColor)
 }
 
 func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		m.isDark = msg.IsDark()
+		m.applyTheme()
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.help.Width = msg.Width
+		m.help.SetWidth(msg.Width)
 		m.resizeRepoList()
 		if m.viewMode == fixViewWizard {
 			m.syncWizardViewport()
@@ -1203,7 +1245,7 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.viewMode == fixViewWizard {
 			return m.updateWizard(msg)
 		}
@@ -1269,7 +1311,7 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *fixTUIModel) View() string {
+func (m *fixTUIModel) View() tea.View {
 	m.resizeRepoList()
 
 	helpPanel := helpPanelStyle
@@ -1280,7 +1322,9 @@ func (m *fixTUIModel) View() string {
 	helpBlock := helpPanel.Render(helpView)
 
 	body := m.viewBodyForMode(m.viewMode)
-	return fixPageStyle.Render(body + "\n" + helpBlock)
+	v := tea.NewView(fixPageStyle.Render(body + "\n" + helpBlock))
+	v.AltScreen = true
+	return v
 }
 
 func (m *fixTUIModel) viewBodyForMode(mode fixViewMode) string {
@@ -1748,7 +1792,7 @@ func (m *fixTUIModel) viewFixSummary() string {
 
 type fixSummarySegment struct {
 	Value string
-	Fg    lipgloss.TerminalColor
+	Fg    color.Color
 }
 
 func (m *fixTUIModel) viewContentWidth() int {
@@ -3001,7 +3045,7 @@ func fixScheduledPlainText(actions []string) string {
 	return strings.Join(labels, " ")
 }
 
-func renderFixSummaryChip(value string, fg lipgloss.TerminalColor, bordered bool) string {
+func renderFixSummaryChip(value string, fg color.Color, bordered bool) string {
 	style := lipgloss.NewStyle().
 		Foreground(fg).
 		Background(accentBgColor).
@@ -3015,7 +3059,7 @@ func renderFixSummaryChip(value string, fg lipgloss.TerminalColor, bordered bool
 	return style.Render(strings.ToUpper(value))
 }
 
-func renderFixSummaryPill(value string, fg lipgloss.TerminalColor) string {
+func renderFixSummaryPill(value string, fg color.Color) string {
 	return renderFixSummaryChip(value, fg, true)
 }
 

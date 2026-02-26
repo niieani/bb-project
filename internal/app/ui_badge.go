@@ -3,7 +3,7 @@ package app
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 type badgeTone int
@@ -25,28 +25,28 @@ func renderBadge(label string, tone badgeTone) string {
 	switch tone {
 	case badgeToneInfo:
 		return base.
-			Foreground(lipgloss.AdaptiveColor{Light: "#0550AE", Dark: "#C9D1D9"}).
-			Background(lipgloss.AdaptiveColor{Light: "#DDF4FF", Dark: "#13233A"}).
+			Foreground(themeColor(uiThemeIsDark, "#0550AE", "#C9D1D9")).
+			Background(themeColor(uiThemeIsDark, "#DDF4FF", "#13233A")).
 			Render(label)
 	case badgeToneSuccess:
 		return base.
-			Foreground(lipgloss.AdaptiveColor{Light: "#0F5132", Dark: "#0D1117"}).
-			Background(lipgloss.AdaptiveColor{Light: "#D1FADF", Dark: "#3FB950"}).
+			Foreground(themeColor(uiThemeIsDark, "#0F5132", "#0D1117")).
+			Background(themeColor(uiThemeIsDark, "#D1FADF", "#3FB950")).
 			Render(label)
 	case badgeToneWarning:
 		return base.
-			Foreground(lipgloss.AdaptiveColor{Light: "#663C00", Dark: "#161B22"}).
-			Background(lipgloss.AdaptiveColor{Light: "#F8D66D", Dark: "#D29922"}).
+			Foreground(themeColor(uiThemeIsDark, "#663C00", "#161B22")).
+			Background(themeColor(uiThemeIsDark, "#F8D66D", "#D29922")).
 			Render(label)
 	case badgeToneDanger:
 		return base.
-			Foreground(lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#FFFFFF"}).
-			Background(lipgloss.AdaptiveColor{Light: "#CF222E", Dark: "#F85149"}).
+			Foreground(themeColor(uiThemeIsDark, "#FFFFFF", "#FFFFFF")).
+			Background(themeColor(uiThemeIsDark, "#CF222E", "#F85149")).
 			Render(label)
 	default:
 		return base.
 			Foreground(mutedTextColor).
-			Background(lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#161B22"}).
+			Background(themeColor(uiThemeIsDark, "#F6F8FA", "#161B22")).
 			Render(label)
 	}
 }

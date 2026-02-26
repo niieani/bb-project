@@ -2,18 +2,19 @@ package app
 
 import (
 	"fmt"
+	"image/color"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"bb-project/internal/domain"
 )
@@ -103,7 +104,7 @@ func defaultConfigWizardKeyMap() configWizardKeyMap {
 			key.WithHelp("up", "prev field / focus tabs"),
 		),
 		Toggle: key.NewBinding(
-			key.WithKeys(" "),
+			key.WithKeys("space"),
 			key.WithHelp("space", "toggle/set default"),
 		),
 		Advance: key.NewBinding(
@@ -217,84 +218,49 @@ type configWizardModel struct {
 	catalogBtn   int
 
 	createMissingRoots bool
+	isDark             bool
 }
 
 var (
-	textColor      = lipgloss.AdaptiveColor{Light: "#1F2328", Dark: "#E6EDF3"}
-	mutedTextColor = lipgloss.AdaptiveColor{Light: "#57606A", Dark: "#8B949E"}
-	borderColor    = lipgloss.AdaptiveColor{Light: "#D0D7DE", Dark: "#30363D"}
-	panelBgColor   = lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#0D1117"}
-	accentColor    = lipgloss.AdaptiveColor{Light: "#0969DA", Dark: "#58A6FF"}
-	accentBgColor  = lipgloss.AdaptiveColor{Light: "#DDF4FF", Dark: "#1F2937"}
-	successColor   = lipgloss.AdaptiveColor{Light: "#1A7F37", Dark: "#3FB950"}
-	errorFgColor   = lipgloss.AdaptiveColor{Light: "#CF222E", Dark: "#F85149"}
-	warningColor   = lipgloss.AdaptiveColor{Light: "#9A6700", Dark: "#D29922"}
+	textColor      color.Color
+	mutedTextColor color.Color
+	borderColor    color.Color
+	panelBgColor   color.Color
+	accentColor    color.Color
+	accentBgColor  color.Color
+	successColor   color.Color
+	errorFgColor   color.Color
+	warningColor   color.Color
 
-	pageStyle = lipgloss.NewStyle().Padding(1, 2)
-
-	titleBadgeStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("230")).
-			Background(lipgloss.Color("31")).
-			Padding(0, 1)
-
-	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(textColor)
-	labelStyle  = lipgloss.NewStyle().Bold(true).Foreground(textColor)
-	errorStyle  = lipgloss.NewStyle().Foreground(errorFgColor)
-	hintStyle   = lipgloss.NewStyle().Foreground(mutedTextColor)
-	warnStyle   = lipgloss.NewStyle().Foreground(warningColor).Bold(true)
-
-	panelStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(borderColor).
-			Background(panelBgColor).
-			Padding(0, 2)
-
-	alertStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder(), false, false, false, true).
-			BorderForeground(errorFgColor).
-			PaddingLeft(1)
-
-	helpPanelStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(borderColor).
-			Padding(0, 1)
-
-	fieldStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder(), false, false, false, true).
-			BorderForeground(borderColor).
-			PaddingLeft(1)
-
-	fieldFocusStyle = fieldStyle.BorderForeground(accentColor)
-
-	inputStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(borderColor).
-			Padding(0, 1)
-
-	inputFocusStyle = inputStyle.BorderForeground(accentColor)
-
-	switchOnStyle = lipgloss.NewStyle().
-			Foreground(successColor).
-			Background(lipgloss.AdaptiveColor{Light: "#EAFBEF", Dark: "#0F2418"}).
-			Bold(true).
-			Padding(0, 2)
-
-	switchOffStyle = lipgloss.NewStyle().
-			Foreground(mutedTextColor).
-			Background(lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#161B22"}).
-			Padding(0, 2)
-
-	enumOptionStyle = lipgloss.NewStyle().
-			Foreground(mutedTextColor).
-			Background(lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#161B22"}).
-			Padding(0, 2).
-			MarginRight(2)
-
-	enumOptionActiveStyle = enumOptionStyle.
-				Background(lipgloss.AdaptiveColor{Light: "#DDF4FF", Dark: "#13233A"}).
-				Foreground(textColor).
-				Bold(true)
+	pageStyle               lipgloss.Style
+	titleBadgeStyle         lipgloss.Style
+	headerStyle             lipgloss.Style
+	labelStyle              lipgloss.Style
+	errorStyle              lipgloss.Style
+	hintStyle               lipgloss.Style
+	warnStyle               lipgloss.Style
+	panelStyle              lipgloss.Style
+	alertStyle              lipgloss.Style
+	helpPanelStyle          lipgloss.Style
+	fieldStyle              lipgloss.Style
+	fieldFocusStyle         lipgloss.Style
+	inputStyle              lipgloss.Style
+	inputFocusStyle         lipgloss.Style
+	switchOnStyle           lipgloss.Style
+	switchOffStyle          lipgloss.Style
+	enumOptionStyle         lipgloss.Style
+	enumOptionActiveStyle   lipgloss.Style
+	tabBaseStyle            lipgloss.Style
+	tabCurrentStyle         lipgloss.Style
+	tabFocusedStyle         lipgloss.Style
+	tabGapStyle             lipgloss.Style
+	buttonStyle             lipgloss.Style
+	buttonPrimaryStyle      lipgloss.Style
+	buttonFocusStyle        lipgloss.Style
+	buttonPrimaryFocusStyle lipgloss.Style
+	buttonDangerStyle       lipgloss.Style
+	buttonDangerFocusStyle  lipgloss.Style
+	buttonDisabledStyle     lipgloss.Style
 
 	tabActiveBorder = lipgloss.Border{
 		Top:         "─",
@@ -317,67 +283,145 @@ var (
 		BottomLeft:  "┴",
 		BottomRight: "┴",
 	}
+)
+
+func applyConfigWizardTheme(isDark bool) {
+	textColor = themeColor(isDark, "#1F2328", "#E6EDF3")
+	mutedTextColor = themeColor(isDark, "#57606A", "#8B949E")
+	borderColor = themeColor(isDark, "#D0D7DE", "#30363D")
+	panelBgColor = themeColor(isDark, "#F6F8FA", "#0D1117")
+	accentColor = themeColor(isDark, "#0969DA", "#58A6FF")
+	accentBgColor = themeColor(isDark, "#DDF4FF", "#1F2937")
+	successColor = themeColor(isDark, "#1A7F37", "#3FB950")
+	errorFgColor = themeColor(isDark, "#CF222E", "#F85149")
+	warningColor = themeColor(isDark, "#9A6700", "#D29922")
+
+	pageStyle = lipgloss.NewStyle().Padding(1, 2)
+
+	titleBadgeStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("230")).
+		Background(lipgloss.Color("31")).
+		Padding(0, 1)
+
+	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(textColor)
+	labelStyle = lipgloss.NewStyle().Bold(true).Foreground(textColor)
+	errorStyle = lipgloss.NewStyle().Foreground(errorFgColor)
+	hintStyle = lipgloss.NewStyle().Foreground(mutedTextColor)
+	warnStyle = lipgloss.NewStyle().Foreground(warningColor).Bold(true)
+
+	panelStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Background(panelBgColor).
+		Padding(0, 2)
+
+	alertStyle = lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), false, false, false, true).
+		BorderForeground(errorFgColor).
+		PaddingLeft(1)
+
+	helpPanelStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(0, 1)
+
+	fieldStyle = lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), false, false, false, true).
+		BorderForeground(borderColor).
+		PaddingLeft(1)
+
+	fieldFocusStyle = fieldStyle.BorderForeground(accentColor)
+
+	inputStyle = lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(borderColor).
+		Padding(0, 1)
+
+	inputFocusStyle = inputStyle.BorderForeground(accentColor)
+
+	switchOnStyle = lipgloss.NewStyle().
+		Foreground(successColor).
+		Background(themeColor(isDark, "#EAFBEF", "#0F2418")).
+		Bold(true).
+		Padding(0, 2)
+
+	switchOffStyle = lipgloss.NewStyle().
+		Foreground(mutedTextColor).
+		Background(themeColor(isDark, "#F6F8FA", "#161B22")).
+		Padding(0, 2)
+
+	enumOptionStyle = lipgloss.NewStyle().
+		Foreground(mutedTextColor).
+		Background(themeColor(isDark, "#F6F8FA", "#161B22")).
+		Padding(0, 2).
+		MarginRight(2)
+
+	enumOptionActiveStyle = enumOptionStyle.
+		Background(themeColor(isDark, "#DDF4FF", "#13233A")).
+		Foreground(textColor).
+		Bold(true)
 
 	tabBaseStyle = lipgloss.NewStyle().
-			Border(tabBorder, true).
-			BorderForeground(borderColor).
-			Foreground(mutedTextColor).
-			Padding(0, 1)
+		Border(tabBorder, true).
+		BorderForeground(borderColor).
+		Foreground(mutedTextColor).
+		Padding(0, 1)
 
 	tabCurrentStyle = tabBaseStyle.
-			BorderForeground(accentColor).
-			Foreground(textColor).
-			Bold(true)
+		BorderForeground(accentColor).
+		Foreground(textColor).
+		Bold(true)
 
 	tabFocusedStyle = tabCurrentStyle.
-			Border(tabActiveBorder, true).
-			Background(accentBgColor)
+		Border(tabActiveBorder, true).
+		Background(accentBgColor)
 
 	tabGapStyle = tabBaseStyle.
-			BorderTop(false).
-			BorderLeft(false).
-			BorderRight(false)
+		BorderTop(false).
+		BorderLeft(false).
+		BorderRight(false)
 
 	buttonStyle = lipgloss.NewStyle().
-			Foreground(textColor).
-			Background(lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#161B22"}).
-			Padding(0, 2).
-			MarginRight(1)
+		Foreground(textColor).
+		Background(themeColor(isDark, "#F6F8FA", "#161B22")).
+		Padding(0, 2).
+		MarginRight(1)
 
 	buttonPrimaryStyle = buttonStyle.
-				Foreground(lipgloss.Color("230")).
-				Background(lipgloss.Color("31")).
-				Bold(true)
+		Foreground(lipgloss.Color("230")).
+		Background(lipgloss.Color("31")).
+		Bold(true)
 
 	buttonFocusStyle = buttonStyle.
-				Foreground(lipgloss.Color("230")).
-				Background(lipgloss.Color("33")).
-				Bold(true).
-				Underline(true)
+		Foreground(lipgloss.Color("230")).
+		Background(lipgloss.Color("33")).
+		Bold(true).
+		Underline(true)
 
 	buttonPrimaryFocusStyle = buttonPrimaryStyle.
-				Background(lipgloss.Color("33")).
-				Bold(true).
-				Underline(true)
+		Background(lipgloss.Color("33")).
+		Bold(true).
+		Underline(true)
 
 	buttonDangerStyle = buttonStyle.
-				Foreground(lipgloss.Color("230")).
-				Background(lipgloss.Color("160")).
-				Bold(true)
+		Foreground(lipgloss.Color("230")).
+		Background(lipgloss.Color("160")).
+		Bold(true)
 
 	buttonDangerFocusStyle = buttonDangerStyle.
-				Background(lipgloss.Color("196")).
-				Bold(true).
-				Underline(true)
+		Background(lipgloss.Color("196")).
+		Bold(true).
+		Underline(true)
 
 	buttonDisabledStyle = buttonStyle.
-				Foreground(mutedTextColor).
-				Background(lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#161B22"})
-)
+		Foreground(mutedTextColor).
+		Background(themeColor(isDark, "#F6F8FA", "#161B22"))
+}
 
 func runConfigWizardInteractive(input ConfigWizardInput) (ConfigWizardResult, error) {
 	model := newConfigWizardModel(input)
-	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithFilter(configWizardFilter))
+	program := tea.NewProgram(model, tea.WithFilter(configWizardFilter))
 	finalModel, err := program.Run()
 	if err != nil {
 		return ConfigWizardResult{}, err
@@ -419,6 +463,7 @@ func newConfigWizardModel(input ConfigWizardInput) *configWizardModel {
 		config:             input.Config,
 		machine:            input.Machine,
 		step:               stepIntro,
+		isDark:             true,
 		help:               help.New(),
 		keys:               defaultConfigWizardKeyMap(),
 		catalogFocus:       catalogFocusButtons,
@@ -426,6 +471,7 @@ func newConfigWizardModel(input ConfigWizardInput) *configWizardModel {
 		createMissingRoots: true,
 		lumenAvailable:     input.LumenAvailable,
 	}
+	m.applyTheme()
 	if m.input.KnownCatalogRoots == nil {
 		m.input.KnownCatalogRoots = map[string][]string{}
 	}
@@ -457,19 +503,29 @@ func newConfigWizardModel(input ConfigWizardInput) *configWizardModel {
 	return m
 }
 
+func (m *configWizardModel) applyTheme() {
+	applyGlobalTheme(m.isDark)
+	m.help.Styles = help.DefaultStyles(m.isDark)
+}
+
 func (m *configWizardModel) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, tea.RequestBackgroundColor)
 }
 
 func (m *configWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		m.isDark = msg.IsDark()
+		m.applyTheme()
+		m.applyCatalogTableStyles(!m.focusTabs && len(m.catalogRows) > 0)
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.help.Width = msg.Width
+		m.help.SetWidth(msg.Width)
 		m.resizeCatalogTable()
 		return m, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, m.keys.Help):
 			m.help.ShowAll = !m.help.ShowAll
@@ -555,7 +611,7 @@ func (m *configWizardModel) prevStepKeepTabs() {
 	m.onStepChanged()
 }
 
-func (m *configWizardModel) View() string {
+func (m *configWizardModel) View() tea.View {
 	var b strings.Builder
 
 	title := lipgloss.JoinHorizontal(lipgloss.Center,
@@ -624,11 +680,13 @@ func (m *configWizardModel) View() string {
 	}
 
 	doc := body + "\n\n" + spacer + helpBlock
-	return pageStyle.Render(doc) + "\n"
+	v := tea.NewView(pageStyle.Render(doc) + "\n")
+	v.AltScreen = true
+	return v
 }
 
 func (m *configWizardModel) updateIntro(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		if key.Matches(keyMsg, m.keys.Advance) {
 			m.advanceStep()
 		}
@@ -648,7 +706,7 @@ func (m *configWizardModel) viewContentWidth() int {
 }
 
 func (m *configWizardModel) updateGitHub(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		switch keyMsg.String() {
 		case "up":
 			if m.focusTabs {
@@ -679,7 +737,7 @@ func (m *configWizardModel) updateGitHub(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.advanceStep()
 				return m, nil
 			}
-		case " ":
+		case "space":
 			if m.focusTabs {
 				return m, nil
 			}
@@ -730,7 +788,7 @@ func (m *configWizardModel) updateGitHub(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *configWizardModel) updateSync(msg tea.Msg) (tea.Model, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
+	keyMsg, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
@@ -753,7 +811,7 @@ func (m *configWizardModel) updateSync(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.syncCursor < 5 {
 			m.syncCursor++
 		}
-	case " ":
+	case "space":
 		if !m.focusTabs {
 			m.toggleSyncOption(m.syncCursor)
 			m.recomputeDirty()
@@ -775,7 +833,7 @@ func (m *configWizardModel) updateSync(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *configWizardModel) updateAutomation(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		switch keyMsg.String() {
 		case "up":
 			if m.focusTabs {
@@ -801,7 +859,7 @@ func (m *configWizardModel) updateAutomation(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.updateAutomationFocus()
 			return m, nil
-		case " ":
+		case "space":
 			if m.focusTabs {
 				return m, nil
 			}
@@ -853,7 +911,7 @@ func (m *configWizardModel) updateAutomation(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *configWizardModel) updateFixes(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		switch keyMsg.String() {
 		case "up":
 			if m.focusTabs {
@@ -873,7 +931,7 @@ func (m *configWizardModel) updateFixes(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, nil
-		case " ":
+		case "space":
 			if m.focusTabs || !m.lumenAvailable {
 				return m, nil
 			}
@@ -897,7 +955,7 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCatalogEditor(msg)
 	}
 
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		switch keyMsg.String() {
 		case "up":
 			if m.focusTabs {
@@ -943,7 +1001,7 @@ func (m *configWizardModel) updateCatalogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-		case " ":
+		case "space":
 			if !m.focusTabs && m.selectedLocalCatalogIndex() >= 0 {
 				if err := m.setDefaultFromSelection(); err != nil {
 					m.errorText = err.Error()
@@ -1047,7 +1105,7 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 		return m, nil
 	}
 	actionStart := m.catalogEditorActionStart()
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		switch keyMsg.String() {
 		case "esc":
 			m.catalogEdit = nil
@@ -1114,7 +1172,7 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 				m.updateCatalogEditorFocus()
 				return m, nil
 			}
-		case " ":
+		case "space":
 			if editor.mode == catalogEditorAdd && editor.focus == 1 {
 				m.shiftCatalogAddRootSuggestion(+1)
 				return m, nil
@@ -1216,7 +1274,7 @@ func (m *configWizardModel) updateCatalogEditor(msg tea.Msg) (tea.Model, tea.Cmd
 }
 
 func (m *configWizardModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		switch {
 		case key.Matches(keyMsg, m.keys.Toggle):
 			if len(missingCatalogRoots(m.machine.Catalogs)) > 0 {
@@ -2111,7 +2169,7 @@ func renderToggleFieldWithAvailability(focused bool, available bool, title, desc
 		b.WriteString(renderCheckbox(value))
 	default:
 		if value {
-			b.WriteString(switchOnStyle.Copy().Foreground(mutedTextColor).Background(lipgloss.AdaptiveColor{Light: "#F6F8FA", Dark: "#161B22"}).Render("● ON"))
+			b.WriteString(switchOnStyle.Copy().Foreground(mutedTextColor).Background(themeColor(uiThemeIsDark, "#F6F8FA", "#161B22")).Render("● ON"))
 		} else {
 			b.WriteString(switchOffStyle.Copy().Foreground(mutedTextColor).Render("○ OFF"))
 		}

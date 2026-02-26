@@ -9,12 +9,12 @@ import (
 
 	"bb-project/internal/domain"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -922,18 +922,18 @@ func (m *fixTUIModel) shiftWizardVisibility(delta int) {
 }
 
 func (m *fixTUIModel) scrollWizardDown(lines int) bool {
-	before := m.wizard.BodyViewport.YOffset
+	before := m.wizard.BodyViewport.YOffset()
 	m.wizard.BodyViewport.ScrollDown(lines)
-	return m.wizard.BodyViewport.YOffset > before
+	return m.wizard.BodyViewport.YOffset() > before
 }
 
 func (m *fixTUIModel) scrollWizardUp(lines int) bool {
-	before := m.wizard.BodyViewport.YOffset
+	before := m.wizard.BodyViewport.YOffset()
 	m.wizard.BodyViewport.ScrollUp(lines)
-	return m.wizard.BodyViewport.YOffset < before
+	return m.wizard.BodyViewport.YOffset() < before
 }
 
-func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *fixTUIModel) updateWizard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
@@ -1067,7 +1067,7 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
-		case " ":
+		case "space":
 			m.wizard.StashIncludeUnstaged = !m.wizard.StashIncludeUnstaged
 			return m, nil
 		case "left", "right":
@@ -1097,7 +1097,7 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
-		case " ":
+		case "space":
 			m.wizard.GenerateGitignore = !m.wizard.GenerateGitignore
 			return m, nil
 		case "enter":
@@ -1161,10 +1161,10 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scrollWizardDown(1)
 		return m, nil
 	case "pgdown":
-		m.scrollWizardDown(max(1, m.wizard.BodyViewport.Height-1))
+		m.scrollWizardDown(max(1, m.wizard.BodyViewport.Height()-1))
 		return m, nil
 	case "pgup":
-		m.scrollWizardUp(max(1, m.wizard.BodyViewport.Height-1))
+		m.scrollWizardUp(max(1, m.wizard.BodyViewport.Height()-1))
 		return m, nil
 	}
 	if msg.String() == "left" {
@@ -1207,7 +1207,7 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if msg.String() == " " {
+	if msg.String() == "space" {
 		if m.wizard.FocusArea == fixWizardFocusGitignore {
 			m.wizard.GenerateGitignore = !m.wizard.GenerateGitignore
 			return m, nil
@@ -1220,7 +1220,7 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *fixTUIModel) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *fixTUIModel) updateSummary(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	candidates := m.summaryFollowUpCandidates()
 	m.syncSummaryFollowUpState(candidates)
 
@@ -1248,7 +1248,7 @@ func (m *fixTUIModel) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if msg.String() == " " && len(candidates) > 0 {
+	if msg.String() == "space" && len(candidates) > 0 {
 		m.toggleSummaryFollowUpSelection(candidates)
 		return m, nil
 	}
@@ -1779,13 +1779,13 @@ func (m *fixTUIModel) renderWizardVisualDiffHint() string {
 	shortcutLabel := m.visualDiffShortcutDisplayLabel()
 	shortcut := lipgloss.NewStyle().
 		Foreground(textColor).
-		Background(lipgloss.AdaptiveColor{Light: "#ECF3FF", Dark: "#1C2738"}).
+		Background(themeColor(m.isDark, "#ECF3FF", "#1C2738")).
 		Padding(0, 1).
 		Render(shortcutLabel)
 	return hintStyle.Render("Press ") + shortcut + hintStyle.Render(" to open visual diff viewer (lumen).")
 }
 
-func isWizardVisualDiffShortcut(msg tea.KeyMsg) bool {
+func isWizardVisualDiffShortcut(msg tea.KeyPressMsg) bool {
 	switch msg.String() {
 	case "alt+v":
 		return true
@@ -1812,7 +1812,7 @@ func (m *fixTUIModel) visualDiffShortcutDisplayLabel() string {
 func renderWizardCommandLine(command string) string {
 	return lipgloss.NewStyle().
 		Foreground(textColor).
-		Background(lipgloss.AdaptiveColor{Light: "#ECF3FF", Dark: "#1C2738"}).
+		Background(themeColor(uiThemeIsDark, "#ECF3FF", "#1C2738")).
 		Padding(0, 1).
 		Render(command)
 }
@@ -1839,12 +1839,12 @@ func (m *fixTUIModel) syncWizardViewport() {
 	if height < 1 {
 		height = 1
 	}
-	if m.wizard.BodyViewport.Width <= 0 || m.wizard.BodyViewport.Height <= 0 {
-		m.wizard.BodyViewport = viewport.New(width, height)
+	if m.wizard.BodyViewport.Width() <= 0 || m.wizard.BodyViewport.Height() <= 0 {
+		m.wizard.BodyViewport = viewport.New(viewport.WithWidth(width), viewport.WithHeight(height))
 	}
-	offset := m.wizard.BodyViewport.YOffset
-	m.wizard.BodyViewport.Width = width
-	m.wizard.BodyViewport.Height = height
+	offset := m.wizard.BodyViewport.YOffset()
+	m.wizard.BodyViewport.SetWidth(width)
+	m.wizard.BodyViewport.SetHeight(height)
 	m.wizard.BodyViewport.SetContent(content)
 	m.wizard.BodyViewport.SetYOffset(offset)
 }

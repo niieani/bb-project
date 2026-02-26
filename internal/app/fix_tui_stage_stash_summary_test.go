@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"bb-project/internal/domain"
@@ -85,7 +85,7 @@ func TestFixTUIWizardCreateProjectToggleCanDisableStageCommitSteps(t *testing.T)
 	m.wizard.GitHubOwner = "you"
 	m.wizard.FocusArea = fixWizardFocusVisibility
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	_, _ = m.Update(testKeyPressCode(tea.KeySpace))
 	if m.wizard.CreateProjectStageCommit {
 		t.Fatal("expected create-project stage/commit toggle to switch off on space")
 	}
@@ -115,9 +115,9 @@ func TestFixTUIWizardStashSupportsStagedOnlyAndStagedPlusUnstagedModes(t *testin
 				HasUntracked:    true,
 			},
 			Meta: &domain.RepoMetadataFile{
-				RepoKey:  "software/demo",
+				RepoKey:   "software/demo",
 				OriginURL: "https://github.com/you/demo.git",
-				AutoPush: domain.AutoPushModeEnabled,
+				AutoPush:  domain.AutoPushModeEnabled,
 			},
 		},
 	}
@@ -148,7 +148,7 @@ func TestFixTUIWizardStashSupportsStagedOnlyAndStagedPlusUnstagedModes(t *testin
 	}
 
 	m.wizard.FocusArea = fixWizardFocusStashMode
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 	if m.wizard.StashIncludeUnstaged {
 		t.Fatal("expected stash mode to switch to staged-only on right key")
 	}
@@ -173,7 +173,7 @@ func TestFixTUISummaryShowsCreatedCommitsWithMessages(t *testing.T) {
 				Syncable: true,
 			},
 			Meta: &domain.RepoMetadataFile{
-				RepoKey:  "software/demo",
+				RepoKey:   "software/demo",
 				OriginURL: "https://github.com/you/demo.git",
 			},
 		},

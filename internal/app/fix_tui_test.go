@@ -9,12 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"bb-project/internal/domain"
 	"bb-project/internal/state"
@@ -273,7 +272,7 @@ func newFixTUIModelForTest(repos []fixRepoState) *fixTUIModel {
 		actionCursor:          map[string]int{},
 		scheduled:             map[string][]string{},
 		execProcessFn:         tea.ExecProcess,
-		repoList:              newFixRepoListModel(),
+		repoList:              newFixRepoListModel(true),
 		keys:                  defaultFixTUIKeyMap(),
 		help:                  help.New(),
 		revalidateSpinner:     newFixProgressSpinner(),
@@ -308,7 +307,7 @@ func TestFixTUIViewUsesCanonicalChromeWithoutInlineKeyLegend(t *testing.T) {
 		},
 	})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
-	view := m.View()
+	view := viewContent(m.View())
 
 	if !strings.Contains(view, "bb") || !strings.Contains(view, "fix") {
 		t.Fatalf("expected canonical header in view, got %q", view)
@@ -335,7 +334,7 @@ func TestFixTUIViewUsesCompactMainPanelChrome(t *testing.T) {
 	})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 24})
 
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(viewContent(m.View()))
 	if strings.Contains(view, "Repository Fixes") {
 		t.Fatalf("expected compact border title instead of repository-fixes heading, got %q", view)
 	}
@@ -367,7 +366,7 @@ func TestFixTUIBootViewShowsLoadingStatus(t *testing.T) {
 	m := newFixTUIBootModel(nil, nil, false)
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
 
-	view := m.View()
+	view := viewContent(m.View())
 	if !strings.Contains(view, "Preparing interactive fix startup") {
 		t.Fatalf("expected boot heading in view, got %q", view)
 	}
@@ -382,7 +381,7 @@ func TestFixTUIBootViewUsesLatestProgressLine(t *testing.T) {
 	m := newFixTUIBootModel(nil, nil, false)
 	m.setProgress("scan: snapshot is stale, refreshing")
 
-	view := m.View()
+	view := viewContent(m.View())
 	if !strings.Contains(view, "Refreshing repository snapshot...") {
 		t.Fatalf("expected current progress line in boot view, got %q", view)
 	}
@@ -466,8 +465,8 @@ func TestFixTUIBootTransfersWindowSizeToLoadedModel(t *testing.T) {
 	if got.width != 128 || got.height != 28 {
 		t.Fatalf("loaded model size = %dx%d, want 128x28", got.width, got.height)
 	}
-	if got.help.Width != 128 {
-		t.Fatalf("loaded model help width = %d, want 128", got.help.Width)
+	if got.help.Width() != 128 {
+		t.Fatalf("loaded model help width = %d, want 128", got.help.Width())
 	}
 }
 
@@ -709,7 +708,7 @@ func TestFixTUIIgnoreKeyTogglesIgnoredState(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	_, _ = m.Update(testKeyPressRunes("i"))
 	if !m.ignored["/repos/api"] {
 		t.Fatal("expected i to ignore selected repository")
 	}
@@ -717,7 +716,7 @@ func TestFixTUIIgnoreKeyTogglesIgnoredState(t *testing.T) {
 		t.Fatalf("status after first i = %q, want ignored message", got)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	_, _ = m.Update(testKeyPressRunes("i"))
 	if m.ignored["/repos/api"] {
 		t.Fatal("expected second i to unignore selected repository")
 	}
@@ -818,17 +817,17 @@ func TestFixTUIRevalidateShortcutEntersBusyState(t *testing.T) {
 	m.loadReposFn = func(_ []string, _ scanRefreshMode) ([]fixRepoState, error) {
 		return repos, nil
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	_, _ = m.Update(testKeyPressRunes("r"))
 
 	if !m.revalidating {
 		t.Fatal("expected revalidate key to set in-progress state")
 	}
-	rawTitleLine := firstNonEmptyLine(strings.Split(m.View(), "\n"))
-	titleLine := firstNonEmptyLine(strings.Split(ansi.Strip(m.View()), "\n"))
+	rawTitleLine := firstNonEmptyLine(strings.Split(viewContent(m.View()), "\n"))
+	titleLine := firstNonEmptyLine(strings.Split(ansi.Strip(viewContent(m.View())), "\n"))
 	if !strings.Contains(titleLine, "bb") || !strings.Contains(titleLine, "fix") {
 		t.Fatalf("expected compact titled border line, got %q", titleLine)
 	}
-	if !strings.Contains(titleLine, m.revalidateSpinner.View()) {
+	if !strings.Contains(titleLine, ansi.Strip(m.revalidateSpinner.View())) {
 		t.Fatalf("expected spinner in bordered title while revalidating, got %q", titleLine)
 	}
 	accentTopCorner := lipgloss.NewStyle().Foreground(accentColor).Render("╭")
@@ -841,12 +840,6 @@ func TestFixTUIRevalidateShortcutEntersBusyState(t *testing.T) {
 }
 
 func TestRenderPanelWithTopTitleUsesPanelTopBorderColor(t *testing.T) {
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() {
-		lipgloss.SetColorProfile(prev)
-	})
-
 	panel := panelStyle.Copy().Width(56).BorderForeground(accentColor)
 	view := renderPanelWithTopTitle(panel, "bb fix", "content")
 	topLine := firstNonEmptyLine(strings.Split(view, "\n"))
@@ -930,20 +923,20 @@ func TestFixTUIImmediateApplyEntersBusyStateWithSpinnerAndLockedStatus(t *testin
 	}
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")}) // schedule pull-ff-only
+	_, _ = m.Update(testKeyPressRunes(" ")) // schedule pull-ff-only
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(testKeyPressCode(tea.KeyEnter))
 	if cmd == nil {
 		t.Fatal("expected immediate apply command to be scheduled")
 	}
 	if !m.immediateApplying {
 		t.Fatal("expected immediate apply to set in-progress state")
 	}
-	titleLine := firstNonEmptyLine(strings.Split(ansi.Strip(m.View()), "\n"))
+	titleLine := firstNonEmptyLine(strings.Split(ansi.Strip(viewContent(m.View())), "\n"))
 	if !strings.Contains(titleLine, "bb") || !strings.Contains(titleLine, "fix") {
 		t.Fatalf("expected compact titled border line, got %q", titleLine)
 	}
-	if !strings.Contains(titleLine, m.immediateApplySpinner.View()) {
+	if !strings.Contains(titleLine, ansi.Strip(m.immediateApplySpinner.View())) {
 		t.Fatalf("expected spinner in bordered title while immediate apply is running, got %q", titleLine)
 	}
 	if !strings.Contains(ansi.Strip(m.viewMainContent()), "controls are locked until execution completes") {
@@ -981,9 +974,9 @@ func TestFixTUIImmediateApplyLocksNavigationKeys(t *testing.T) {
 	}
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")}) // schedule pull-ff-only
+	_, _ = m.Update(testKeyPressRunes(" ")) // schedule pull-ff-only
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(testKeyPressCode(tea.KeyEnter))
 	if cmd == nil {
 		t.Fatal("expected immediate apply command to be scheduled")
 	}
@@ -992,7 +985,7 @@ func TestFixTUIImmediateApplyLocksNavigationKeys(t *testing.T) {
 	}
 
 	before := m.repoList.Index()
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown))
 	if got := m.repoList.Index(); got != before {
 		t.Fatalf("cursor moved while immediate apply was running: before=%d after=%d", before, got)
 	}
@@ -1015,9 +1008,9 @@ func TestFixTUIImmediateApplyAllEntersBusyState(t *testing.T) {
 	}
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")}) // schedule pull-ff-only
+	_, _ = m.Update(testKeyPressRunes(" ")) // schedule pull-ff-only
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	_, cmd := m.Update(testKeyPressCtrl('a'))
 	if cmd == nil {
 		t.Fatal("expected immediate apply-all command to be scheduled")
 	}
@@ -1089,7 +1082,7 @@ func TestFixTUISettingToggleKeyUpdatesAutoPush(t *testing.T) {
 
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	_, _ = m.Update(testKeyPressRunes("s"))
 
 	if repoMetaAutoPushMode(m.visible[0].Meta) != domain.AutoPushModeEnabled {
 		t.Fatal("expected auto-push to be enabled after pressing s")
@@ -1138,7 +1131,7 @@ func TestFixTUISettingToggleKeyCyclesAutoPushModes(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	_, _ = m.Update(testKeyPressRunes("s"))
 	if got := repoMetaAutoPushMode(m.visible[0].Meta); got != domain.AutoPushModeEnabled {
 		t.Fatalf("mode after first toggle = %q, want %q", got, domain.AutoPushModeEnabled)
 	}
@@ -1146,7 +1139,7 @@ func TestFixTUISettingToggleKeyCyclesAutoPushModes(t *testing.T) {
 		t.Fatalf("status after first toggle = %q, want true mode status", m.status)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	_, _ = m.Update(testKeyPressRunes("s"))
 	if got := repoMetaAutoPushMode(m.visible[0].Meta); got != domain.AutoPushModeIncludeDefaultBranch {
 		t.Fatalf("mode after second toggle = %q, want %q", got, domain.AutoPushModeIncludeDefaultBranch)
 	}
@@ -1154,7 +1147,7 @@ func TestFixTUISettingToggleKeyCyclesAutoPushModes(t *testing.T) {
 		t.Fatalf("status after second toggle = %q, want include-default-branch mode status", m.status)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	_, _ = m.Update(testKeyPressRunes("s"))
 	if got := repoMetaAutoPushMode(m.visible[0].Meta); got != domain.AutoPushModeDisabled {
 		t.Fatalf("mode after third toggle = %q, want %q", got, domain.AutoPushModeDisabled)
 	}
@@ -1207,8 +1200,8 @@ func TestFixTUISettingToggleKeyPersistsAutoPushModeViaRepoPolicy(t *testing.T) {
 	m.app = a
 	m.setCursor(0)
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	_, _ = m.Update(testKeyPressRunes("s"))
+	_, _ = m.Update(testKeyPressRunes("s"))
 
 	updated, err := state.LoadRepoMetadata(paths, "software/api")
 	if err != nil {
@@ -1247,7 +1240,7 @@ func TestFixTUISettingToggleKeyBlockedForReadOnlyRemote(t *testing.T) {
 
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	_, _ = m.Update(testKeyPressRunes("s"))
 
 	if repoMetaAutoPushMode(m.visible[0].Meta) != domain.AutoPushModeDisabled {
 		t.Fatal("expected auto-push to remain disabled for read-only remote")
@@ -1340,7 +1333,7 @@ func TestFixTUIEnterRunsCurrentFixWhenNothingSelected(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(testKeyPressCode(tea.KeyEnter))
 	if cmd == nil {
 		t.Fatal("expected enter to run current fix even with no explicit selection")
 	}
@@ -1368,7 +1361,7 @@ func TestFixTUIEnterRunsCurrentRiskyFixWhenNothingSelected(t *testing.T) {
 	m.setCursor(0)
 	m.cycleCurrentAction(1) // push
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.viewMode != fixViewWizard {
 		t.Fatalf("view mode = %v, want wizard mode", m.viewMode)
 	}
@@ -1395,7 +1388,7 @@ func TestFixTUIRiskySelectionOpensConfirmationWizard(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
 	m.cycleCurrentAction(1) // push
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	_, _ = m.Update(testKeyPressRunes(" "))
 	m.applyCurrentSelection()
 
 	if m.viewMode != fixViewWizard {
@@ -1429,7 +1422,7 @@ func TestFixTUIAbortSelectionOpensConfirmationWizard(t *testing.T) {
 		t.Fatalf("selected action = %q, want %q", got, FixActionAbortOperation)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	_, _ = m.Update(testKeyPressRunes(" "))
 	m.applyCurrentSelection()
 	if m.viewMode != fixViewWizard {
 		t.Fatalf("view mode = %v, want wizard mode", m.viewMode)
@@ -1700,13 +1693,13 @@ func TestFixTUISummaryFollowUpSelectionCanQueueAndRunFixes(t *testing.T) {
 		t.Fatalf("expected selectable follow-up fixes, got %q", view)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	_, _ = m.Update(testKeyPressCode(tea.KeySpace))
 	view = ansi.Strip(m.viewSummaryContent())
 	if !strings.Contains(view, "[x] Stage, commit & push") {
 		t.Fatalf("expected selected follow-up fix checkbox, got %q", view)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.viewMode != fixViewWizard {
 		t.Fatalf("view mode after running selected follow-up fix = %v, want wizard", m.viewMode)
 	}
@@ -1812,12 +1805,12 @@ func TestFixTUIWizardCommitGenerateButtonRunsImmediatelyAndReplacesMessage(t *te
 		return "feat: generated message", nil
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 	if !m.wizard.CommitButtonFocused {
 		t.Fatal("expected commit button focus after right key")
 	}
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := m.Update(testKeyPressCode(tea.KeyEnter))
 	if !m.wizard.CommitGenerating {
 		t.Fatal("expected commit generation to start immediately on enter")
 	}
@@ -1855,7 +1848,7 @@ func TestFixTUIWizardViewShowsActionButtons(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
 
-	view := m.viewWizardContent()
+	view := ansi.Strip(m.viewWizardContent())
 	if !strings.Contains(view, "Apply") || !strings.Contains(view, "Skip") || !strings.Contains(view, "Cancel") {
 		t.Fatalf("wizard view should render action buttons, got %q", view)
 	}
@@ -2350,7 +2343,7 @@ func TestFixTUIWizardEnterOnDefaultCancelReturnsToList(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.viewMode != fixViewList {
 		t.Fatalf("view mode after enter on default cancel = %v, want list", m.viewMode)
 	}
@@ -2378,7 +2371,7 @@ func TestFixTUIWizardViewUsesSingleTopLineWithoutExtraWizardHeaders(t *testing.T
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
 
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(viewContent(m.View()))
 	if strings.Contains(view, "Interactive remediation for unsyncable repositories") {
 		t.Fatalf("wizard should use compact single top line, got %q", view)
 	}
@@ -2439,7 +2432,7 @@ func TestFixTUIWizardUsesOnlyGlobalFooterHelpLegend(t *testing.T) {
 		t.Fatalf("wizard body should not render inline key legend, got %q", body)
 	}
 
-	full := ansi.Strip(m.View())
+	full := ansi.Strip(viewContent(m.View()))
 	if count := strings.Count(full, "tab/shift+tab"); count != 1 {
 		t.Fatalf("expected key legend to appear exactly once in global footer, count=%d view=%q", count, full)
 	}
@@ -2476,13 +2469,13 @@ func TestFixTUIWizardGlobalFooterHelpReflectsCurrentFocus(t *testing.T) {
 		t.Fatalf("project-name focus should not include unrelated shortcuts, got %v", projectHelp)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project name -> visibility
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // project name -> visibility
 	visibilityHelp := shortHelpEntries(m.contextualHelpMap().ShortHelp())
 	if !helpContains(visibilityHelp, "←/→ change visibility") {
 		t.Fatalf("expected visibility focus help to include left/right visibility shortcut, got %v", visibilityHelp)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // visibility -> actions
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // visibility -> actions
 	actionsHelp := shortHelpEntries(m.contextualHelpMap().ShortHelp())
 	if !helpContains(actionsHelp, "enter activate") || !helpContains(actionsHelp, "←/→ select button") {
 		t.Fatalf("expected actions focus help to include action shortcuts, got %v", actionsHelp)
@@ -2521,7 +2514,7 @@ func TestFixTUIListGlobalFooterHelpShowsOnlyAvailableActions(t *testing.T) {
 		t.Fatalf("expected apply-all hidden when nothing is selected, got %v", initial)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")}) // schedule push
+	_, _ = m.Update(testKeyPressRunes(" ")) // schedule push
 	selected := shortHelpEntries(m.contextualHelpMap().ShortHelp())
 	if len(selected) == 0 || selected[0] != "enter run selected/current" {
 		t.Fatalf("expected most important shortcut first (enter run selected/current), got %v", selected)
@@ -2541,7 +2534,7 @@ func TestFixTUIListGlobalFooterHelpShowsOnlyAvailableActions(t *testing.T) {
 	}
 
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 24})
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(viewContent(m.View()))
 	if !strings.Contains(view, " • ") {
 		t.Fatalf("expected global footer to use bullet separators, got %q", view)
 	}
@@ -2570,7 +2563,7 @@ func TestFixTUIWizardShortFooterHelpIsSingleLineWithEllipsis(t *testing.T) {
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 86, Height: 24})
 
-	lines := footerHelpContentLines(m.View())
+	lines := footerHelpContentLines(viewContent(m.View()))
 	if len(lines) != 1 {
 		t.Fatalf("expected collapsed footer help to stay single-line, got %d lines: %v", len(lines), lines)
 	}
@@ -2602,17 +2595,17 @@ func TestFixTUIWizardQuestionMarkTogglesExpandedFooterHelp(t *testing.T) {
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
 
-	collapsed := footerHelpContentLines(m.View())
+	collapsed := footerHelpContentLines(viewContent(m.View()))
 	if len(collapsed) != 1 {
 		t.Fatalf("expected collapsed footer help to start as single-line, got %d lines: %v", len(collapsed), collapsed)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	_, _ = m.Update(testKeyPressRunes("?"))
 	if !m.help.ShowAll {
 		t.Fatal("expected ? to enable expanded help in wizard")
 	}
 
-	expanded := footerHelpContentLines(m.View())
+	expanded := footerHelpContentLines(viewContent(m.View()))
 	if len(expanded) <= 1 {
 		t.Fatalf("expected expanded footer help to include multiple lines, got %d lines: %v", len(expanded), expanded)
 	}
@@ -2621,7 +2614,7 @@ func TestFixTUIWizardQuestionMarkTogglesExpandedFooterHelp(t *testing.T) {
 		t.Fatalf("expected expanded footer help to include comprehensive keys, got %q", expandedText)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	_, _ = m.Update(testKeyPressRunes("?"))
 	if m.help.ShowAll {
 		t.Fatal("expected ? to collapse help in wizard")
 	}
@@ -2644,8 +2637,8 @@ func TestFixTUIWizardInputAcceptsMappedLetters(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	_, _ = m.Update(testKeyPressRunes("h"))
+	_, _ = m.Update(testKeyPressRunes("q"))
 
 	if got := m.wizard.CommitMessage.Value(); got != "hq" {
 		t.Fatalf("commit input value = %q, want %q", got, "hq")
@@ -2734,7 +2727,7 @@ func TestFixTUIWizardVisualDiffButtonLaunchesAndReturnsToSameWizardState(t *test
 	focusBefore := m.wizard.FocusArea
 	indexBefore := m.wizard.Index
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v"), Alt: true})
+	_, cmd := m.Update(testKeyPressRunesAlt("v"))
 	if !execCalled {
 		t.Fatal("expected visual diff exec process to be launched")
 	}
@@ -2782,7 +2775,7 @@ func TestFixTUIWizardVisualDiffShortcutUsesAltV(t *testing.T) {
 		return func() tea.Msg { return fn(nil) }
 	}
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v"), Alt: true})
+	_, cmd := m.Update(testKeyPressRunesAlt("v"))
 	if !execCalled {
 		t.Fatal("expected alt+v shortcut to launch visual diff")
 	}
@@ -2842,7 +2835,7 @@ func TestFixTUIWizardChangedFilesShortcutNotInFocusFlow(t *testing.T) {
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 20})
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project -> visibility
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // project -> visibility
 	if m.wizard.FocusArea != fixWizardFocusVisibility {
 		t.Fatalf("focus area = %v, want visibility before bottom-edge check", m.wizard.FocusArea)
 	}
@@ -2852,7 +2845,7 @@ func TestFixTUIWizardChangedFilesShortcutNotInFocusFlow(t *testing.T) {
 		t.Fatal("expected wizard viewport to be at bottom")
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // visibility -> actions (no intermediate visual-diff focus)
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // visibility -> actions (no intermediate visual-diff focus)
 	if m.wizard.FocusArea != fixWizardFocusActions {
 		t.Fatalf("focus area after down at bottom = %v, want actions", m.wizard.FocusArea)
 	}
@@ -2882,7 +2875,7 @@ func TestFixTUIWizardApplyActionRequiresReviewBeforeBottom(t *testing.T) {
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
 
 	for m.wizard.FocusArea != fixWizardFocusActions {
-		_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		_, _ = m.Update(testKeyPressCode(tea.KeyDown))
 	}
 	m.wizard.ActionFocus = fixWizardActionApply
 	m.wizard.BodyViewport.GotoTop()
@@ -2898,7 +2891,7 @@ func TestFixTUIWizardApplyActionRequiresReviewBeforeBottom(t *testing.T) {
 		t.Fatalf("did not expect Apply action before reaching bottom, got %q", viewBefore)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // Review
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter)) // Review
 	if !m.wizard.BodyViewport.AtBottom() {
 		t.Fatal("expected Review action to scroll viewport to bottom")
 	}
@@ -3122,17 +3115,17 @@ func TestFixTUIWizardCreateProjectNameSanitizesTypingAndPaste(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/repo-from-folder", Action: FixActionCreateProject}})
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("repo name")})
+	_, _ = m.Update(testKeyPressRunes("repo name"))
 	if got := m.wizard.ProjectName.Value(); got != "repo-name" {
 		t.Fatalf("project name after typing = %q, want %q", got, "repo-name")
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/with*chars")})
+	_, _ = m.Update(testKeyPressRunes("/with*chars"))
 	if got := m.wizard.ProjectName.Value(); got != "repo-name-with-chars" {
 		t.Fatalf("project name after paste-like input = %q, want %q", got, "repo-name-with-chars")
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("-._ABC")})
+	_, _ = m.Update(testKeyPressRunes("-._ABC"))
 	if got := m.wizard.ProjectName.Value(); got != "repo-name-with-chars-._abc" {
 		t.Fatalf("project name after allowed punctuation and uppercase = %q, want %q", got, "repo-name-with-chars-._abc")
 	}
@@ -3158,8 +3151,8 @@ func TestFixTUIWizardCreateProjectVisibilityUsesLeftRightWhenFocused(t *testing.
 		t.Fatalf("initial visibility = %q, want private default", m.wizard.Visibility)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // project name -> visibility
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight}) // visibility private -> public
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown))  // project name -> visibility
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight)) // visibility private -> public
 
 	if m.wizard.Visibility != domain.VisibilityPublic {
 		t.Fatalf("visibility = %q, want public after right arrow on focused visibility", m.wizard.Visibility)
@@ -3370,18 +3363,18 @@ func TestFixTUIWizardDownMovesFocusBeforeScrollingNonInputControls(t *testing.T)
 		t.Fatalf("initial focus area = %v, want project-name", m.wizard.FocusArea)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project name -> visibility
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // project name -> visibility
 	if m.wizard.FocusArea != fixWizardFocusVisibility {
 		t.Fatalf("focus area after first down = %v, want visibility", m.wizard.FocusArea)
 	}
-	startOffset := m.wizard.BodyViewport.YOffset
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // should move focus to actions first
+	startOffset := m.wizard.BodyViewport.YOffset()
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // should move focus to actions first
 
 	if m.wizard.FocusArea != fixWizardFocusActions {
 		t.Fatalf("focus area after second down = %v, want actions", m.wizard.FocusArea)
 	}
-	if m.wizard.BodyViewport.YOffset != startOffset {
-		t.Fatalf("viewport should not scroll before focus reaches edge, yoffset %d -> %d", startOffset, m.wizard.BodyViewport.YOffset)
+	if m.wizard.BodyViewport.YOffset() != startOffset {
+		t.Fatalf("viewport should not scroll before focus reaches edge, yoffset %d -> %d", startOffset, m.wizard.BodyViewport.YOffset())
 	}
 }
 
@@ -3409,7 +3402,7 @@ func TestFixTUIWizardFocusMoveRevealsVisibilityFieldContent(t *testing.T) {
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project name -> visibility
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // project name -> visibility
 	if m.wizard.FocusArea != fixWizardFocusVisibility {
 		t.Fatalf("focus area after down = %v, want visibility", m.wizard.FocusArea)
 	}
@@ -3447,20 +3440,20 @@ func TestFixTUIWizardActionsDownScrollsContextAtFocusEdge(t *testing.T) {
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project -> visibility
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // visibility -> actions
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // project -> visibility
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // visibility -> actions
 	if m.wizard.FocusArea != fixWizardFocusActions {
 		t.Fatalf("focus area before edge scroll = %v, want actions", m.wizard.FocusArea)
 	}
 
-	startOffset := m.wizard.BodyViewport.YOffset
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // at focus edge => scroll context
+	startOffset := m.wizard.BodyViewport.YOffset()
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // at focus edge => scroll context
 
 	if m.wizard.FocusArea != fixWizardFocusActions {
 		t.Fatalf("focus area should stay on actions while scrolling context, got %v", m.wizard.FocusArea)
 	}
-	if m.wizard.BodyViewport.YOffset <= startOffset {
-		t.Fatalf("expected context viewport to scroll down, yoffset %d -> %d", startOffset, m.wizard.BodyViewport.YOffset)
+	if m.wizard.BodyViewport.YOffset() <= startOffset {
+		t.Fatalf("expected context viewport to scroll down, yoffset %d -> %d", startOffset, m.wizard.BodyViewport.YOffset())
 	}
 }
 
@@ -3521,9 +3514,9 @@ func TestFixTUIWizardScrollIndicatorShowsAboveAfterScroll(t *testing.T) {
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project -> visibility
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // visibility -> actions
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // actions edge -> scroll context down
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // project -> visibility
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // visibility -> actions
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // actions edge -> scroll context down
 
 	view := ansi.Strip(m.viewWizardContent())
 	if !strings.Contains(view, "More context above") {
@@ -3552,10 +3545,10 @@ func TestFixTUIWizardUpDownCanReachProjectNameWithoutTab(t *testing.T) {
 		t.Fatalf("initial focus area = %v, want project-name", m.wizard.FocusArea)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project -> visibility
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // visibility -> actions
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})   // actions -> visibility
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})   // visibility -> project
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // project -> visibility
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // visibility -> actions
+	_, _ = m.Update(testKeyPressCode(tea.KeyUp))   // actions -> visibility
+	_, _ = m.Update(testKeyPressCode(tea.KeyUp))   // visibility -> project
 
 	if m.wizard.FocusArea != fixWizardFocusProjectName {
 		t.Fatalf("expected up/down path to return to project-name focus, got %v", m.wizard.FocusArea)
@@ -3584,7 +3577,7 @@ func TestFixTUIWizardDownMovesFocusAtViewportBottom(t *testing.T) {
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionCreateProject}})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 20})
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // project name -> visibility
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // project name -> visibility
 	if m.wizard.FocusArea != fixWizardFocusVisibility {
 		t.Fatalf("focus area = %v, want visibility before bottom-edge check", m.wizard.FocusArea)
 	}
@@ -3594,7 +3587,7 @@ func TestFixTUIWizardDownMovesFocusAtViewportBottom(t *testing.T) {
 		t.Fatal("expected wizard viewport to be at bottom")
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // should move to actions at bottom edge
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // should move to actions at bottom edge
 	if m.wizard.FocusArea != fixWizardFocusActions {
 		t.Fatalf("focus area after down at bottom = %v, want actions", m.wizard.FocusArea)
 	}
@@ -3625,17 +3618,17 @@ func TestFixTUIWizardUpFromFirstInputScrollsWhenNoPreviousField(t *testing.T) {
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
 
 	m.wizard.BodyViewport.GotoBottom()
-	if m.wizard.BodyViewport.YOffset == 0 {
+	if m.wizard.BodyViewport.YOffset() == 0 {
 		t.Fatal("expected wizard viewport to have scrollable overflow")
 	}
-	startOffset := m.wizard.BodyViewport.YOffset
+	startOffset := m.wizard.BodyViewport.YOffset()
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // no previous field from first input, should scroll
+	_, _ = m.Update(testKeyPressCode(tea.KeyUp)) // no previous field from first input, should scroll
 	if m.wizard.FocusArea != fixWizardFocusProjectName {
 		t.Fatalf("focus area after up from first input = %v, want project-name", m.wizard.FocusArea)
 	}
-	if m.wizard.BodyViewport.YOffset >= startOffset {
-		t.Fatalf("expected viewport to scroll up, yoffset %d -> %d", startOffset, m.wizard.BodyViewport.YOffset)
+	if m.wizard.BodyViewport.YOffset() >= startOffset {
+		t.Fatalf("expected viewport to scroll up, yoffset %d -> %d", startOffset, m.wizard.BodyViewport.YOffset())
 	}
 }
 
@@ -3732,17 +3725,17 @@ func TestFixTUIWizardGitignoreToggleIsFocusableAndSelectable(t *testing.T) {
 		t.Fatal("expected gitignore generation toggle to default on")
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // commit -> gitignore toggle
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown)) // commit -> gitignore toggle
 	if m.wizard.FocusArea != fixWizardFocusGitignore {
 		t.Fatalf("focus area after down = %v, want gitignore toggle", m.wizard.FocusArea)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	_, _ = m.Update(testKeyPressCode(tea.KeySpace))
 	if m.wizard.GenerateGitignore {
 		t.Fatal("expected space to toggle gitignore generation off when focused")
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // toggle -> actions
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter)) // toggle -> actions
 	if m.wizard.FocusArea != fixWizardFocusActions {
 		t.Fatalf("focus area after enter on toggle = %v, want actions", m.wizard.FocusArea)
 	}
@@ -3941,7 +3934,7 @@ func TestFixTUIViewDoesNotRenderNestedNormalBorderAroundList(t *testing.T) {
 	}
 	m := newFixTUIModelForTest(repos)
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
-	view := m.View()
+	view := viewContent(m.View())
 
 	if strings.Contains(view, "┘") {
 		t.Fatalf("unexpected nested normal-border corner glyph in view: %q", view)
@@ -3951,7 +3944,7 @@ func TestFixTUIViewDoesNotRenderNestedNormalBorderAroundList(t *testing.T) {
 func TestFixRepoDelegateLeavesWrapGuardColumn(t *testing.T) {
 	t.Parallel()
 
-	repoList := newFixRepoListModel()
+	repoList := newFixRepoListModel(true)
 	repoList.SetSize(120, 10)
 	repoList.Select(0)
 
@@ -4113,8 +4106,8 @@ func TestFixTUISelectFixesColumnPrependsSelectedSquares(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 190, Height: 24})
 	m.setCursor(0)
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")}) // select stage-commit-push
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")}) // move to push
+	_, _ = m.Update(testKeyPressRunes(" ")) // select stage-commit-push
+	_, _ = m.Update(testKeyPressRunes("l")) // move to push
 
 	line := lineContaining(ansi.Strip(m.repoList.View()), "api")
 	ixSquare := strings.Index(line, "■")
@@ -4237,7 +4230,7 @@ func TestFixTUIFooterDoesNotLeaveExtraTrailingBlankRows(t *testing.T) {
 		},
 	})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 24})
-	view := m.View()
+	view := viewContent(m.View())
 
 	trailing := trailingEmptyLineCount(view)
 	if trailing != 0 {
@@ -4266,7 +4259,7 @@ func TestFixTUIListViewFillsWindowHeightWithoutRowsAfterFooter(t *testing.T) {
 	)
 	_, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
 
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(viewContent(m.View()))
 	if got := lipgloss.Height(view); got != height {
 		t.Fatalf("view should fill terminal height so footer remains sticky: got=%d want=%d view=%q", got, height, view)
 	}
@@ -4289,7 +4282,7 @@ func TestFixTUIListViewHasNoBlankRowsBetweenMainPanelAndFooter(t *testing.T) {
 	})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
 
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(viewContent(m.View()))
 	lines := strings.Split(view, "\n")
 	firstNonEmpty := -1
 	for i, line := range lines {
@@ -4338,7 +4331,7 @@ func TestFixTUIWizardStatusToFooterGapIsCompact(t *testing.T) {
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
 
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(viewContent(m.View()))
 	lines := strings.Split(view, "\n")
 
 	statusIdx := -1
@@ -4393,7 +4386,7 @@ func TestFixTUIWizardFooterDoesNotLeaveExtraTrailingBlankRows(t *testing.T) {
 	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPush}})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
 
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(viewContent(m.View()))
 	trailing := trailingEmptyLineCount(view)
 	if trailing != 0 {
 		t.Fatalf("expected zero trailing empty lines after wizard footer, got %d", trailing)
@@ -4427,7 +4420,7 @@ func TestFixTUIViewShowsMainPanelTopBorderBeforeContent(t *testing.T) {
 		},
 	})
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 26})
-	view := m.View()
+	view := viewContent(m.View())
 
 	lines := strings.Split(ansi.Strip(view), "\n")
 	first := firstNonEmptyLine(lines)
@@ -4536,7 +4529,7 @@ func TestFixTUIViewStaysWithinWindowHeightWhenSelectedDetailsWrap(t *testing.T) 
 	const height = 26
 	_, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
 
-	view := m.View()
+	view := viewContent(m.View())
 	if got := lipgloss.Height(view); got > height {
 		t.Fatalf("view height overflowed terminal height: got=%d want<=%d", got, height)
 	}
@@ -4576,7 +4569,7 @@ func TestFixTUIViewportTopDoesNotJumpUpWhenMovingDownOneRow(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 118, Height: 22})
 	m.setCursor(3)
-	_ = m.View()
+	_ = viewContent(m.View())
 	beforeItems := m.repoList.Items()
 	beforeStart, beforeEnd := m.repoList.Paginator.GetSliceBounds(len(beforeItems))
 	beforeSelected := m.repoList.Index()
@@ -4590,7 +4583,7 @@ func TestFixTUIViewportTopDoesNotJumpUpWhenMovingDownOneRow(t *testing.T) {
 	}
 
 	m.moveRepoCursor(1)
-	_ = m.View()
+	_ = viewContent(m.View())
 	afterItems := m.repoList.Items()
 	afterStart, afterEnd := m.repoList.Paginator.GetSliceBounds(len(afterItems))
 	afterHeight := m.repoList.Height()
@@ -4638,11 +4631,11 @@ func TestFixTUIListViewStaysFooterAttachedAcrossWrapChangingSelectionMove(t *tes
 	_, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
 	m.setCursor(3)
 
-	before := ansi.Strip(m.View())
+	before := ansi.Strip(viewContent(m.View()))
 	assertListViewFillsHeightAndFooterHasNoGap(t, before, height)
 
 	m.moveRepoCursor(1)
-	after := ansi.Strip(m.View())
+	after := ansi.Strip(viewContent(m.View()))
 	assertListViewFillsHeightAndFooterHasNoGap(t, after, height)
 }
 
@@ -5118,11 +5111,11 @@ func TestFixTUISpaceTogglesScheduledFixForCurrentRepo(t *testing.T) {
 	if m.hasAnySelectedFixes() {
 		t.Fatal("expected browsing with left/right alone not to schedule fixes")
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	_, _ = m.Update(testKeyPressRunes(" "))
 	if !m.hasAnySelectedFixes() {
 		t.Fatal("expected space to schedule the currently browsed fix")
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	_, _ = m.Update(testKeyPressRunes(" "))
 	if m.hasAnySelectedFixes() {
 		t.Fatal("expected pressing space again to unschedule the currently browsed fix")
 	}
@@ -5151,14 +5144,14 @@ func TestFixTUIScheduledQueueUsesExecutionOrderAndDeduplicatesRiskyActions(t *te
 	if got := actionForVisibleRepo(m, 0); got != FixActionStageCommitPush {
 		t.Fatalf("current action = %q, want %q before scheduling", got, FixActionStageCommitPush)
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	_, _ = m.Update(testKeyPressRunes(" "))
 	for i := 0; i < 8 && actionForVisibleRepo(m, 0) != FixActionPush; i++ {
 		m.cycleCurrentAction(1)
 	}
 	if got := actionForVisibleRepo(m, 0); got != FixActionPush {
 		t.Fatalf("current action = %q, want %q before scheduling", got, FixActionPush)
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	_, _ = m.Update(testKeyPressRunes(" "))
 	m.applyCurrentSelection()
 	if m.viewMode != fixViewWizard {
 		t.Fatalf("view mode = %v, want %v", m.viewMode, fixViewWizard)
@@ -5194,14 +5187,14 @@ func TestFixTUIApplyAllSelectionsUsesScheduledExecutionOrderPerRepo(t *testing.T
 	if got := actionForVisibleRepo(m, 0); got != FixActionStageCommitPush {
 		t.Fatalf("current action = %q, want %q before scheduling", got, FixActionStageCommitPush)
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	_, _ = m.Update(testKeyPressRunes(" "))
 	for i := 0; i < 8 && actionForVisibleRepo(m, 0) != FixActionPush; i++ {
 		m.cycleCurrentAction(1)
 	}
 	if got := actionForVisibleRepo(m, 0); got != FixActionPush {
 		t.Fatalf("current action = %q, want %q before scheduling", got, FixActionPush)
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	_, _ = m.Update(testKeyPressRunes(" "))
 	m.applyAllSelections()
 	if m.viewMode != fixViewWizard {
 		t.Fatalf("view mode = %v, want %v", m.viewMode, fixViewWizard)

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"bb-project/internal/domain"
@@ -37,7 +37,7 @@ func TestWizardAllowsTypingNInGitHubOwner(t *testing.T) {
 	m.updateGitHubFocus()
 	m.githubOwnerInput.SetValue("ali")
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	_, _ = m.Update(testKeyPressRunes("n"))
 
 	if got := m.githubOwnerInput.Value(); got != "alin" {
 		t.Fatalf("owner input = %q, want %q", got, "alin")
@@ -54,7 +54,7 @@ func TestWizardLeftArrowDoesNotChangeStepWhenEditingField(t *testing.T) {
 	m.githubFocus = 0
 	m.updateGitHubFocus()
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	_, _ = m.Update(testKeyPressCode(tea.KeyLeft))
 
 	if m.step != stepGitHub {
 		t.Fatalf("step changed unexpectedly: %v", m.step)
@@ -67,7 +67,7 @@ func TestWizardRightArrowChangesStepWhenTabsFocused(t *testing.T) {
 	m.focusTabs = true
 	m.updateGitHubFocus()
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 
 	if m.step != stepSync {
 		t.Fatalf("step = %v, want %v", m.step, stepSync)
@@ -83,7 +83,7 @@ func TestWizardSyncSpaceTogglesAndEnterAdvances(t *testing.T) {
 	m.focusTabs = false
 	beforeToggle := m.config.Sync.AutoDiscover
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	_, _ = m.Update(testKeyPressCode(tea.KeySpace))
 	if m.config.Sync.AutoDiscover == beforeToggle {
 		t.Fatal("expected space to toggle sync option")
 	}
@@ -92,7 +92,7 @@ func TestWizardSyncSpaceTogglesAndEnterAdvances(t *testing.T) {
 	}
 
 	current := m.config.Sync.AutoDiscover
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.step != stepAutomation {
 		t.Fatalf("step = %v, want %v", m.step, stepAutomation)
 	}
@@ -109,7 +109,7 @@ func TestWizardAutomationInputEnterAdvancesToFixes(t *testing.T) {
 	m.updateAutomationFocus()
 	m.schedulerInterval.SetValue("45")
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.step != stepFixes {
 		t.Fatalf("step = %v, want %v", m.step, stepFixes)
 	}
@@ -131,7 +131,7 @@ func TestWizardFixesCanToggleLumenAutoCommitDefault(t *testing.T) {
 		t.Fatal("expected lumen auto-commit default to start disabled")
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	_, _ = m.Update(testKeyPressCode(tea.KeySpace))
 	if !m.config.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty {
 		t.Fatal("expected space to toggle lumen auto-commit default on")
 	}
@@ -157,7 +157,7 @@ func TestWizardFixesViewDisablesLumenToggleWhenUnavailable(t *testing.T) {
 	m.focusTabs = false
 	m.fixesFocus = fixesFocusLumenAutoCommit
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	_, _ = m.Update(testKeyPressCode(tea.KeySpace))
 	if m.config.Integrations.Lumen.AutoGenerateCommitMessageWhenEmpty {
 		t.Fatal("expected lumen auto-commit to remain disabled when lumen is unavailable")
 	}
@@ -175,12 +175,12 @@ func TestWizardUpFromFirstFieldFocusesTabsThenRightAdvances(t *testing.T) {
 	m.githubFocus = 0
 	m.updateGitHubFocus()
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	_, _ = m.Update(testKeyPressCode(tea.KeyUp))
 	if !m.focusTabs {
 		t.Fatal("expected tabs to become focused")
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 	if m.step != stepSync {
 		t.Fatalf("step = %v, want %v", m.step, stepSync)
 	}
@@ -194,7 +194,7 @@ func TestWizardGitHubEnumsAreSelectionFields(t *testing.T) {
 	m.updateGitHubFocus()
 
 	m.config.GitHub.DefaultVisibility = "private"
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	_, _ = m.Update(testKeyPressCode(tea.KeySpace))
 	if m.config.GitHub.DefaultVisibility != "public" {
 		t.Fatalf("default visibility = %q, want public", m.config.GitHub.DefaultVisibility)
 	}
@@ -205,7 +205,7 @@ func TestWizardGitHubEnumsAreSelectionFields(t *testing.T) {
 	m.githubFocus = 2
 	m.updateGitHubFocus()
 	m.config.GitHub.RemoteProtocol = "ssh"
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	_, _ = m.Update(testKeyPressCode(tea.KeySpace))
 	if m.config.GitHub.RemoteProtocol != "https" {
 		t.Fatalf("remote protocol = %q, want https", m.config.GitHub.RemoteProtocol)
 	}
@@ -219,22 +219,22 @@ func TestWizardGitHubEnumsCycleWithLeftRight(t *testing.T) {
 	m.updateGitHubFocus()
 	m.config.GitHub.DefaultVisibility = "private"
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 	if m.config.GitHub.DefaultVisibility != "public" {
 		t.Fatalf("default visibility = %q, want public", m.config.GitHub.DefaultVisibility)
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	_, _ = m.Update(testKeyPressCode(tea.KeyLeft))
 	if m.config.GitHub.DefaultVisibility != "private" {
 		t.Fatalf("default visibility = %q, want private", m.config.GitHub.DefaultVisibility)
 	}
 
 	m.githubFocus = 2
 	m.config.GitHub.RemoteProtocol = "ssh"
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 	if m.config.GitHub.RemoteProtocol != "https" {
 		t.Fatalf("remote protocol = %q, want https", m.config.GitHub.RemoteProtocol)
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	_, _ = m.Update(testKeyPressCode(tea.KeyLeft))
 	if m.config.GitHub.RemoteProtocol != "ssh" {
 		t.Fatalf("remote protocol = %q, want ssh", m.config.GitHub.RemoteProtocol)
 	}
@@ -246,17 +246,17 @@ func TestWizardTabsFocusedCanSwitchAcrossMultipleSteps(t *testing.T) {
 	m.focusTabs = true
 	m.updateGitHubFocus()
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 	if m.step != stepSync || !m.focusTabs {
 		t.Fatalf("after first right: step=%v focusTabs=%v", m.step, m.focusTabs)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 	if m.step != stepAutomation || !m.focusTabs {
 		t.Fatalf("after second right: step=%v focusTabs=%v", m.step, m.focusTabs)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 	if m.step != stepFixes || !m.focusTabs {
 		t.Fatalf("after third right: step=%v focusTabs=%v", m.step, m.focusTabs)
 	}
@@ -291,17 +291,17 @@ func TestWizardCatalogEditorUsesUpDownAndCanReturnToTabs(t *testing.T) {
 		t.Fatalf("initial focus = %d, want 0", m.catalogEdit.focus)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown))
 	if m.catalogEdit == nil || m.catalogEdit.focus != 1 {
 		t.Fatalf("focus after down = %v, want 1", m.catalogEdit.focus)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	_, _ = m.Update(testKeyPressCode(tea.KeyUp))
 	if m.catalogEdit == nil || m.catalogEdit.focus != 0 {
 		t.Fatalf("focus after up = %v, want 0", m.catalogEdit.focus)
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	_, _ = m.Update(testKeyPressCode(tea.KeyUp))
 	if m.catalogEdit != nil {
 		t.Fatal("expected editor to close when pressing up on first field")
 	}
@@ -317,7 +317,7 @@ func TestWizardReviewSpaceTogglesCreateMissingRoots(t *testing.T) {
 	m.createMissingRoots = true
 	m.machine.Catalogs = append(m.machine.Catalogs, domain.Catalog{Name: "missing", Root: filepath.Join(t.TempDir(), "does-not-exist")})
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	_, _ = m.Update(testKeyPressCode(tea.KeySpace))
 	if m.createMissingRoots {
 		t.Fatal("expected space to toggle createMissingRoots off")
 	}
@@ -329,7 +329,7 @@ func TestWizardCatalogUpOnFirstRowFocusesTabs(t *testing.T) {
 	m.focusTabs = false
 	m.onStepChanged()
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	_, _ = m.Update(testKeyPressCode(tea.KeyUp))
 	if !m.focusTabs {
 		t.Fatal("expected up on first catalog row to focus tabs")
 	}
@@ -348,7 +348,7 @@ func TestWizardCatalogEmptyStateDownFromTabsFocusesButtons(t *testing.T) {
 		t.Fatal("expected no editor while tabs are focused")
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.Update(testKeyPressCode(tea.KeyDown))
 	if m.catalogEdit != nil {
 		t.Fatal("expected no editor to open when moving down into empty catalog content")
 	}
@@ -381,7 +381,7 @@ func TestWizardCatalogButtonsCanOpenAddEditorAndContinue(t *testing.T) {
 	m.catalogBtn = 1 // add
 	m.onStepChanged()
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.catalogEdit == nil || m.catalogEdit.mode != catalogEditorAdd {
 		t.Fatal("expected Add button enter to open add editor")
 	}
@@ -389,7 +389,7 @@ func TestWizardCatalogButtonsCanOpenAddEditorAndContinue(t *testing.T) {
 	m.catalogEdit = nil
 	m.catalogFocus = catalogFocusButtons
 	m.catalogBtn = 6 // continue
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.step != stepReview {
 		t.Fatalf("step = %v, want %v", m.step, stepReview)
 	}
@@ -401,6 +401,7 @@ func TestWizardCatalogButtonsSetDefault(t *testing.T) {
 	m.machine.DefaultCatalog = "software"
 	m.rebuildCatalogRows()
 	m.step = stepCatalogs
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
 	m.focusTabs = false
 	m.catalogFocus = catalogFocusButtons
 	m.onStepChanged()
@@ -408,7 +409,7 @@ func TestWizardCatalogButtonsSetDefault(t *testing.T) {
 	m.catalogFocus = catalogFocusButtons
 	m.catalogBtn = 2 // set default
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.machine.DefaultCatalog != "alt" {
 		t.Fatalf("default catalog = %q, want %q", m.machine.DefaultCatalog, "alt")
 	}
@@ -426,7 +427,7 @@ func TestWizardCatalogButtonsToggleDefaultBranchAutoPushPolicies(t *testing.T) {
 	if !m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPrivate) {
 		t.Fatal("expected private default policy to start as on")
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPrivate) {
 		t.Fatal("expected private default policy to toggle off")
 	}
@@ -435,7 +436,7 @@ func TestWizardCatalogButtonsToggleDefaultBranchAutoPushPolicies(t *testing.T) {
 	if m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPublic) {
 		t.Fatal("expected public default policy to start as off")
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if !m.machine.Catalogs[0].AllowsDefaultBranchAutoPush(domain.VisibilityPublic) {
 		t.Fatal("expected public default policy to toggle on")
 	}
@@ -453,11 +454,11 @@ func TestWizardCatalogButtonsToggleLayoutDepth(t *testing.T) {
 	if got := domain.EffectiveRepoPathDepth(m.machine.Catalogs[0]); got != 1 {
 		t.Fatalf("initial depth = %d, want 1", got)
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if got := domain.EffectiveRepoPathDepth(m.machine.Catalogs[0]); got != 2 {
 		t.Fatalf("depth after toggle = %d, want 2", got)
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if got := domain.EffectiveRepoPathDepth(m.machine.Catalogs[0]); got != 1 {
 		t.Fatalf("depth after second toggle = %d, want 1", got)
 	}
@@ -471,11 +472,11 @@ func TestWizardCatalogButtonsLeftRightWorkImmediately(t *testing.T) {
 	m.catalogBtn = 0
 	m.onStepChanged()
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 	if m.catalogBtn != 1 {
 		t.Fatalf("catalog button = %d, want 1 after right", m.catalogBtn)
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	_, _ = m.Update(testKeyPressCode(tea.KeyLeft))
 	if m.catalogBtn != 0 {
 		t.Fatalf("catalog button = %d, want 0 after left", m.catalogBtn)
 	}
@@ -505,11 +506,11 @@ func TestWizardCatalogButtonsAllowChangingSelectedRowWithUpDown(t *testing.T) {
 	m.catalogBtn = 2 // set default
 	m.catalogTable.SetCursor(1)
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	_, _ = m.Update(testKeyPressCode(tea.KeyUp))
 	if m.catalogTable.Cursor() != 0 {
 		t.Fatalf("cursor = %d, want 0 after up", m.catalogTable.Cursor())
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.machine.DefaultCatalog != "software" {
 		t.Fatalf("default catalog = %q, want %q", m.machine.DefaultCatalog, "software")
 	}
@@ -567,7 +568,7 @@ func TestWizardCatalogEnterOnTableRowOpensEditor(t *testing.T) {
 	m.catalogBtn = 0 // edit
 	m.onStepChanged()
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.catalogEdit == nil || m.catalogEdit.mode != catalogEditorEditRoot {
 		t.Fatal("expected Enter on selected catalog to open edit editor")
 	}
@@ -623,20 +624,20 @@ func TestWizardCatalogEditScreenCanSaveLayoutAndPushPolicy(t *testing.T) {
 	}
 
 	m.catalogEdit.focus = 1 // preset enum (none -> references)
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	m.catalogEdit.focus = 2 // layout toggle
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	m.catalogEdit.focus = 3 // private toggle
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	m.catalogEdit.focus = 4 // public toggle
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	m.catalogEdit.focus = 5 // auto-clone toggle
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.catalogEdit == nil {
 		t.Fatal("expected editor to stay open while toggling auto-clone")
 	}
 	m.catalogEdit.focus = 6 // save action
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 
 	if got := domain.EffectiveRepoPathDepth(m.machine.Catalogs[0]); got != 2 {
 		t.Fatalf("layout depth after save = %d, want 2", got)
@@ -723,7 +724,7 @@ func TestWizardCatalogEditorDeleteRequiresConfirmation(t *testing.T) {
 	// Focus Delete action directly.
 	m.catalogEdit.focus = 7
 	m.updateCatalogEditorFocus()
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.catalogEdit == nil {
 		t.Fatal("expected editor to stay open on first delete confirmation")
 	}
@@ -734,7 +735,7 @@ func TestWizardCatalogEditorDeleteRequiresConfirmation(t *testing.T) {
 		t.Fatal("catalog should not be deleted on first confirmation enter")
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if len(m.machine.Catalogs) != 0 {
 		t.Fatal("expected catalog to be deleted on second confirmation enter")
 	}
@@ -754,32 +755,32 @@ func TestWizardCatalogEditorActionButtonsNavigateWithLeftRight(t *testing.T) {
 
 	// Move from input to Save action.
 	for range 6 {
-		_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		_, _ = m.Update(testKeyPressCode(tea.KeyDown))
 	}
 	if m.catalogEdit.focus != 6 {
 		t.Fatalf("focus = %d, want 6 (Save)", m.catalogEdit.focus)
 	}
 	// Left from Save should stay.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	_, _ = m.Update(testKeyPressCode(tea.KeyLeft))
 	if m.catalogEdit.focus != 6 {
 		t.Fatalf("focus = %d, want 6 after left at first action", m.catalogEdit.focus)
 	}
 	// Right to Delete then Cancel.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 	if m.catalogEdit.focus != 7 {
 		t.Fatalf("focus = %d, want 7 (Delete)", m.catalogEdit.focus)
 	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 	if m.catalogEdit.focus != 8 {
 		t.Fatalf("focus = %d, want 8 (Cancel)", m.catalogEdit.focus)
 	}
 	// Right at end should stay.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 	if m.catalogEdit.focus != 8 {
 		t.Fatalf("focus = %d, want 8 after right at last action", m.catalogEdit.focus)
 	}
 	// Left back to Delete.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	_, _ = m.Update(testKeyPressCode(tea.KeyLeft))
 	if m.catalogEdit.focus != 7 {
 		t.Fatalf("focus = %d, want 7 after left from cancel", m.catalogEdit.focus)
 	}
@@ -844,7 +845,7 @@ func TestWizardCatalogListShowsAddedCatalogValues(t *testing.T) {
 		t.Fatal("expected no auto-open editor")
 	}
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.catalogEdit == nil {
 		t.Fatal("expected add editor to open from Add button")
 	}
@@ -852,7 +853,7 @@ func TestWizardCatalogListShowsAddedCatalogValues(t *testing.T) {
 	m.catalogEdit.inputs[1].SetValue("/tmp/software")
 	m.catalogEdit.focus = 2
 	m.updateCatalogEditorFocus()
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
 
 	view := m.viewCatalogs()
@@ -883,9 +884,12 @@ func TestWizardCatalogsShowRemoteKnownRows(t *testing.T) {
 	if !m.catalogRows[1].RemoteOnly || m.catalogRows[1].Name != "references" {
 		t.Fatalf("unexpected remote row %#v", m.catalogRows[1])
 	}
-	view := ansi.Strip(m.viewCatalogs())
-	if !strings.Contains(view, "remote:") {
-		t.Fatalf("expected remote-known row in catalog table view, got %q", view)
+	rows := m.catalogTable.Rows()
+	if len(rows) < 2 {
+		t.Fatalf("expected table rows to include local + remote catalogs, got %d", len(rows))
+	}
+	if got := rows[1][0]; !strings.Contains(got, "remote:") {
+		t.Fatalf("expected remote-known row label in table rows, got %q", got)
 	}
 }
 
@@ -907,7 +911,7 @@ func TestWizardCatalogAddPrefillsFromRemoteKnownRow(t *testing.T) {
 	m.normalizeCatalogButtonForSelection()
 	m.catalogBtn = 1 // Add
 
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
 	if m.catalogEdit == nil || m.catalogEdit.mode != catalogEditorAdd {
 		t.Fatal("expected add editor to open from remote-known row")
 	}
@@ -920,7 +924,7 @@ func TestWizardCatalogAddPrefillsFromRemoteKnownRow(t *testing.T) {
 
 	m.catalogEdit.focus = 1
 	m.updateCatalogEditorFocus()
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	_, _ = m.Update(testKeyPressCode(tea.KeyRight))
 	if got := m.catalogEdit.inputs[1].Value(); got != "/Volumes/Projects/References" {
 		t.Fatalf("catalog root after cycling suggestions = %q, want next suggestion", got)
 	}
