@@ -57,7 +57,7 @@ Prefer expressive terminal glyphs (box-drawing borders, bullets, dots, radio/tog
 
 ### Tokens (Colors)
 
-Use a shared palette (prefer `lipgloss.AdaptiveColor`) with these semantics:
+Use a shared palette with explicit light/dark selection (`lipgloss.LightDark(isDark)`) and semantic tokens:
 
 - `Text`: body copy.
 - `Muted`: descriptions, hints, secondary metadata.
@@ -74,6 +74,7 @@ Rules:
 - Never rely on color alone to convey meaning; pair it with text or icons.
 - Keep border style consistent (rounded panels by default).
 - Prefer bold over bright colors to emphasize within a panel.
+- For Bubble Tea apps, request and react to terminal background color in-model (`tea.RequestBackgroundColor` + `tea.BackgroundColorMsg`) and rebuild styles when it changes.
 
 ### Spacing Rhythm
 
