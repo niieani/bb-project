@@ -63,7 +63,8 @@ These concrete patterns should be followed:
 
 ### Program setup
 
-- Run with `tea.NewProgram(model, tea.WithAltScreen(), tea.WithFilter(...))`.
+- Run with `tea.NewProgram(model, tea.WithFilter(...))`.
+- Full-screen behavior is declarative in `View()`: return `tea.View` and set `v.AltScreen = true`.
 - Use `tea.WithInput` and `tea.WithOutput` in tests to simulate keyboard sequences and capture renders.
 - Return final model from `Program.Run()` and apply filesystem writes in app layer only after explicit confirmation.
 

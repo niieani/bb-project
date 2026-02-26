@@ -18,7 +18,7 @@ Default to parallelized tests for speed: add `t.Parallel()` to top-level tests a
 
 In non-interactive commands, whenever functionality demands running a subcommand (e.g. `git` or `gh` CLI), always passthrough stdio.
 
-For interactive commands, use the charmbracelet ecosystem: [bubbletea](https://pkg.go.dev/github.com/charmbracelet/bubbletea) with [bubbles](https://github.com/charmbracelet/bubbles) component library and lipgloss for forms. Refer to full source code, READMEs and examples in:
+For interactive commands, use the charmbracelet ecosystem: [bubbletea](https://pkg.go.dev/charm.land/bubbletea/v2) with [bubbles](https://charm.land/bubbles/v2) component library and lipgloss for forms. Refer to full source code, READMEs and examples in:
 
 - `references/vendor/bubbles`
 - `references/vendor/bubbletea`
