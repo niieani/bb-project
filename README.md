@@ -631,7 +631,7 @@ Release flow:
 1. Merge Conventional Commit messages into `main`.
 2. `release-please` opens/updates a release PR with version bump + changelog.
 3. Merge that PR to create a `vX.Y.Z` tag and GitHub release.
-4. The same `Release Please` workflow runs GoReleaser when a release is created, publishing binaries and updating Homebrew tap formula.
+4. The same `Release Please` workflow runs GoReleaser when a release is created, publishing binaries and updating the Homebrew tap cask.
 
 Required GitHub secrets:
 
@@ -641,7 +641,7 @@ Homebrew install:
 
 ```bash
 brew tap <org>/tap
-brew install bb
+brew install --cask bb
 ```
 
 ## Development

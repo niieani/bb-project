@@ -32,18 +32,16 @@ checksum:
 release:
   draft: false
 
-brews:
+homebrew_casks:
   - repository:
       owner: "{{ .Env.GITHUB_REPOSITORY_OWNER }}"
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    directory: Formula
+    directory: Casks
+    binaries:
+      - bb
     homepage: "https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
     description: "CLI to keep Git repositories consistent across machines."
-    test: |
-      system "#{bin}/bb", "version"
-    install: |
-      bin.install "bb"
     commit_author:
       name: bb release bot
       email: actions@users.noreply.github.com

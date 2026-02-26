@@ -1,17 +1,13 @@
 build:
 	go build -o bb ./cmd/bb
 
-build-dev:
-	mkdir -p .dist/dev
-	go build -o .dist/dev/bb ./cmd/bb
-
-install-dev link_dir=".bin":
+install-dev link_dir="$HOME/bin":
+  just build
 	mkdir -p {{ link_dir }}
-	just build-dev
-	ln -sfn "$(pwd)/.dist/dev/bb" "{{ link_dir }}/bb"
-	@echo "linked {{ link_dir }}/bb -> $(pwd)/.dist/dev/bb"
+	ln -sfn "$(pwd)/bb" "{{ link_dir }}/bb"
+	@echo "linked {{ link_dir }}/bb -> $(pwd)/bb"
 
-uninstall-dev link_dir=".bin":
+uninstall-dev link_dir="$HOME/bin":
 	rm -f "{{ link_dir }}/bb"
 
 test:
