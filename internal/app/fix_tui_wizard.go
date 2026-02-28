@@ -329,6 +329,7 @@ func (m *fixTUIModel) loadWizardCurrent() {
 	if m.wizard.EnableStashMode {
 		m.wizard.FocusArea = fixWizardFocusStashMode
 	}
+	m.syncWizardInputWidths()
 	m.syncWizardFieldFocus()
 	m.wizard.ActionFocus = fixWizardActionCancel
 	m.wizard.Applying = false
@@ -1818,6 +1819,7 @@ func renderWizardCommandLine(command string) string {
 }
 
 func (m *fixTUIModel) syncWizardViewport() {
+	m.syncWizardInputWidths()
 	content := m.viewWizardContextContent()
 	controls := m.viewWizardStaticControls()
 	actions := m.clampSingleLine(renderWizardActionButtons(m.wizard.ActionFocus, m.wizardPrimaryActionLabel()), m.wizardBodyLineWidth())
@@ -2564,6 +2566,45 @@ func (m *fixTUIModel) wizardInnerWidth() int {
 		return 0
 	}
 	return inner
+}
+
+func (m *fixTUIModel) wizardTextInputMaxContentWidth() int {
+	width := m.wizardInnerWidth()
+	if width <= 0 {
+		return 0
+	}
+	width -= fieldStyle.GetHorizontalFrameSize()
+	width -= inputStyle.GetHorizontalFrameSize()
+	if width < 1 {
+		return 1
+	}
+	return width
+}
+
+func (m *fixTUIModel) wizardCommitInputMaxContentWidth(base int) int {
+	if base <= 0 {
+		return 0
+	}
+	buttonWidth := lipgloss.Width(m.renderWizardCommitGenerateButton("✨", 1, false))
+	width := base - buttonWidth - 1 // input + gap + button must fit in one row
+	if width < 1 {
+		return 1
+	}
+	return width
+}
+
+func (m *fixTUIModel) syncWizardInputWidths() {
+	baseMax := m.wizardTextInputMaxContentWidth()
+	baseWidth := resolveInputContentWidth(baseMax, minInputContentWidth, fallbackInputContentWidth)
+	commitWidth := resolveInputContentWidth(
+		m.wizardCommitInputMaxContentWidth(baseMax),
+		minInputContentWidth,
+		fallbackInputContentWidth,
+	)
+
+	m.wizard.CommitMessage.SetWidth(commitWidth)
+	m.wizard.ProjectName.SetWidth(baseWidth)
+	m.wizard.ForkBranchName.SetWidth(baseWidth)
 }
 
 func (m *fixTUIModel) renderChangedFilesList() string {

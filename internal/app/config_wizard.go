@@ -499,6 +499,7 @@ func newConfigWizardModel(input ConfigWizardInput) *configWizardModel {
 	m.initCatalogTable()
 	m.focusTabs = true
 	m.onStepChanged()
+	m.syncInputWidths()
 	m.recomputeDirty()
 	return m
 }
@@ -524,6 +525,7 @@ func (m *configWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.help.SetWidth(msg.Width)
 		m.resizeCatalogTable()
+		m.syncInputWidths()
 		return m, nil
 	case tea.KeyPressMsg:
 		switch {
@@ -1434,6 +1436,39 @@ func (m *configWizardModel) resizeCatalogTable() {
 	}
 	m.catalogTable.SetWidth(w)
 	m.catalogTable.SetHeight(h)
+}
+
+func (m *configWizardModel) textInputMaxContentWidth() int {
+	width := m.viewContentWidth()
+	if width <= 0 {
+		return 0
+	}
+	width -= panelStyle.GetHorizontalFrameSize()
+	width -= fieldStyle.GetHorizontalFrameSize()
+	width -= inputStyle.GetHorizontalFrameSize()
+	if width < 1 {
+		return 1
+	}
+	return width
+}
+
+func (m *configWizardModel) syncInputWidths() {
+	width := resolveInputContentWidth(
+		m.textInputMaxContentWidth(),
+		minInputContentWidth,
+		fallbackInputContentWidth,
+	)
+
+	m.githubOwnerInput.SetWidth(width)
+	m.schedulerInterval.SetWidth(width)
+	m.notifyThrottle.SetWidth(width)
+
+	if m.catalogEdit == nil {
+		return
+	}
+	for i := range m.catalogEdit.inputs {
+		m.catalogEdit.inputs[i].SetWidth(width)
+	}
 }
 
 func (m *configWizardModel) updateGitHubFocus() {
@@ -2500,6 +2535,7 @@ func (m *configWizardModel) startCatalogAddEditorWithTemplate(nameValue string, 
 		row:             -1,
 	}
 	m.catalogTable.Blur()
+	m.syncInputWidths()
 	m.updateCatalogEditorFocus()
 }
 
@@ -2544,6 +2580,7 @@ func (m *configWizardModel) startCatalogEditRootEditor() {
 		autoCloneOnSync: catalog.AllowsAutoCloneOnSync(),
 	}
 	m.catalogTable.Blur()
+	m.syncInputWidths()
 }
 
 func (m *configWizardModel) commitCatalogEditor() error {

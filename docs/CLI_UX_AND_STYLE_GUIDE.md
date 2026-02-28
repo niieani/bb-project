@@ -154,6 +154,7 @@ Guidelines:
 - Always render inputs inside a bordered container.
 - Focused input uses `Accent` border (and optional `Accent BG`).
 - Placeholders are plain, human-readable examples (not internal keys).
+- Inputs must reserve a stable minimum content width (do not collapse to typed text length). Keep enough width for placeholder guidance to remain legible on first focus.
 
 ### Enums (Bounded Options)
 
