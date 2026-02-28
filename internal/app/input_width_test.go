@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"bb-project/internal/domain"
 )
@@ -103,5 +104,46 @@ func TestFixWizardInputsHaveMinimumWidth(t *testing.T) {
 	}
 	if got := m.wizard.ForkBranchName.Width(); got < minUsableInputWidth {
 		t.Fatalf("wizard publish-branch input width = %d, want >= %d", got, minUsableInputWidth)
+	}
+}
+
+func TestFixWizardRenderedInputsFitFieldWidth(t *testing.T) {
+	t.Parallel()
+
+	m := newFixTUIModelForTest([]fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Branch:    "main",
+				Upstream:  "origin/main",
+			},
+			Meta: &domain.RepoMetadataFile{
+				OriginURL:       "https://github.com/you/api.git",
+				PreferredRemote: "origin",
+				AutoPush:        domain.AutoPushModeEnabled,
+			},
+		},
+	})
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 122, Height: 40})
+
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionStageCommitPush}})
+	lineBudget := m.wizardInnerWidth() - fieldStyle.GetHorizontalFrameSize()
+	if lineBudget < 1 {
+		t.Fatalf("invalid line budget: %d", lineBudget)
+	}
+	commitRow := m.renderWizardCommitInputWithGenerateButton()
+	if got := lipgloss.Width(commitRow); got > lineBudget {
+		t.Fatalf("commit row width = %d, line budget = %d; expected no overflow", got, lineBudget)
+	}
+
+	m.startWizardQueue([]fixWizardDecision{{RepoPath: "/repos/api", Action: FixActionPublishNewBranch}})
+	if !m.wizard.EnableForkBranchRename {
+		t.Fatal("expected publish-branch input to be enabled")
+	}
+	publishBranchInput := renderInputContainer(m.wizard.ForkBranchName.View(), m.wizard.FocusArea == fixWizardFocusForkBranch)
+	if got := lipgloss.Width(publishBranchInput); got > lineBudget {
+		t.Fatalf("publish-branch input width = %d, line budget = %d; expected no overflow", got, lineBudget)
 	}
 }

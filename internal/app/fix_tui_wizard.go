@@ -2568,25 +2568,38 @@ func (m *fixTUIModel) wizardInnerWidth() int {
 	return inner
 }
 
-func (m *fixTUIModel) wizardTextInputMaxContentWidth() int {
+func (m *fixTUIModel) wizardTextInputMaxRenderWidth() int {
 	width := m.wizardInnerWidth()
 	if width <= 0 {
 		return 0
 	}
 	width -= fieldStyle.GetHorizontalFrameSize()
-	width -= inputStyle.GetHorizontalFrameSize()
 	if width < 1 {
 		return 1
 	}
 	return width
 }
 
-func (m *fixTUIModel) wizardCommitInputMaxContentWidth(base int) int {
-	if base <= 0 {
+func wizardTextInputContentBudget(renderWidth int, prompt string) int {
+	if renderWidth <= 0 {
+		return 0
+	}
+	width := renderWidth
+	width -= inputStyle.GetHorizontalFrameSize()
+	width -= ansi.StringWidth(prompt)
+	width-- // bubbles/textinput keeps one virtual-cursor column in View()
+	if width < 1 {
+		return 1
+	}
+	return width
+}
+
+func (m *fixTUIModel) wizardCommitInputMaxRenderWidth(controlWidth int) int {
+	if controlWidth <= 0 {
 		return 0
 	}
 	buttonWidth := lipgloss.Width(m.renderWizardCommitGenerateButton("✨", 1, false))
-	width := base - buttonWidth - 1 // input + gap + button must fit in one row
+	width := controlWidth - buttonWidth - 1 // input + gap + button must fit in one row
 	if width < 1 {
 		return 1
 	}
@@ -2594,17 +2607,29 @@ func (m *fixTUIModel) wizardCommitInputMaxContentWidth(base int) int {
 }
 
 func (m *fixTUIModel) syncWizardInputWidths() {
-	baseMax := m.wizardTextInputMaxContentWidth()
-	baseWidth := resolveInputContentWidth(baseMax, minInputContentWidth, fallbackInputContentWidth)
+	controlWidth := m.wizardTextInputMaxRenderWidth()
+	baseWidth := resolveInputContentWidth(
+		wizardTextInputContentBudget(controlWidth, m.wizard.ProjectName.Prompt),
+		minInputContentWidth,
+		fallbackInputContentWidth,
+	)
+	forkWidth := resolveInputContentWidth(
+		wizardTextInputContentBudget(controlWidth, m.wizard.ForkBranchName.Prompt),
+		minInputContentWidth,
+		fallbackInputContentWidth,
+	)
 	commitWidth := resolveInputContentWidth(
-		m.wizardCommitInputMaxContentWidth(baseMax),
+		wizardTextInputContentBudget(
+			m.wizardCommitInputMaxRenderWidth(controlWidth),
+			m.wizard.CommitMessage.Prompt,
+		),
 		minInputContentWidth,
 		fallbackInputContentWidth,
 	)
 
 	m.wizard.CommitMessage.SetWidth(commitWidth)
 	m.wizard.ProjectName.SetWidth(baseWidth)
-	m.wizard.ForkBranchName.SetWidth(baseWidth)
+	m.wizard.ForkBranchName.SetWidth(forkWidth)
 }
 
 func (m *fixTUIModel) renderChangedFilesList() string {

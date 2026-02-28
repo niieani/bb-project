@@ -1453,21 +1453,22 @@ func (m *configWizardModel) textInputMaxContentWidth() int {
 }
 
 func (m *configWizardModel) syncInputWidths() {
-	width := resolveInputContentWidth(
-		m.textInputMaxContentWidth(),
-		minInputContentWidth,
-		fallbackInputContentWidth,
-	)
+	inputWidthFor := func(prompt string) int {
+		max := m.textInputMaxContentWidth()
+		max -= lipgloss.Width(prompt)
+		max-- // bubbles/textinput keeps one virtual-cursor column in View()
+		return resolveInputContentWidth(max, minInputContentWidth, fallbackInputContentWidth)
+	}
 
-	m.githubOwnerInput.SetWidth(width)
-	m.schedulerInterval.SetWidth(width)
-	m.notifyThrottle.SetWidth(width)
+	m.githubOwnerInput.SetWidth(inputWidthFor(m.githubOwnerInput.Prompt))
+	m.schedulerInterval.SetWidth(inputWidthFor(m.schedulerInterval.Prompt))
+	m.notifyThrottle.SetWidth(inputWidthFor(m.notifyThrottle.Prompt))
 
 	if m.catalogEdit == nil {
 		return
 	}
 	for i := range m.catalogEdit.inputs {
-		m.catalogEdit.inputs[i].SetWidth(width)
+		m.catalogEdit.inputs[i].SetWidth(inputWidthFor(m.catalogEdit.inputs[i].Prompt))
 	}
 }
 
