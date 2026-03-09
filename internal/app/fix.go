@@ -547,7 +547,7 @@ func resolveFixTarget(selector string, repos []fixRepoState) (fixRepoState, erro
 
 func (a *App) loadFixRepos(includeCatalogs []string, refreshMode scanRefreshMode) ([]fixRepoState, error) {
 	a.logf("fix: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "fix")
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +631,7 @@ func (a *App) loadFixReposForInteractive(includeCatalogs []string, refreshMode s
 
 func (a *App) loadFixTargetRepo(includeCatalogs []string, refreshMode scanRefreshMode, selector string) (fixRepoState, error) {
 	a.logf("fix: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "fix")
 	if err != nil {
 		return fixRepoState{}, err
 	}
@@ -714,7 +714,7 @@ func (a *App) loadFixTargetRepoLocked(includeCatalogs []string, refreshMode scan
 
 func (a *App) refreshUnknownPushAccessForFixRepos(repos []fixRepoState) (bool, error) {
 	a.logf("fix: acquiring global lock for unknown push-access refresh")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "fix push-access refresh")
 	if err != nil {
 		return false, err
 	}
@@ -1012,7 +1012,7 @@ func (a *App) applyFixActionWithObserver(
 	observer fixApplyStepObserver,
 ) (fixRepoState, error) {
 	a.logf("fix: acquiring global lock for action %s", action)
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "fix action "+action)
 	if err != nil {
 		return fixRepoState{}, err
 	}

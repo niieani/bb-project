@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -424,6 +425,107 @@ func TestFixTUIBootLoadCmdCapturesAppLogProgress(t *testing.T) {
 	}
 	if got := boot.currentProgress(); got != "fix: collecting risk checks (1/2)" {
 		t.Fatalf("current progress = %q, want latest startup log line", got)
+	}
+}
+
+func TestFixTUIBootWaitsForActiveLockAndShowsOwnerMetadata(t *testing.T) {
+	t.Parallel()
+
+	createdAt := time.Date(2026, 3, 8, 19, 0, 0, 0, time.UTC)
+	boot := newFixTUIBootModel(nil, nil, false)
+	boot.now = func() time.Time { return createdAt.Add(72 * time.Second) }
+	boot.waitRetryCmd = func() tea.Cmd {
+		return func() tea.Msg { return nil }
+	}
+	boot.loadFn = func() (*fixTUIModel, error) {
+		return nil, &state.LockHeldError{
+			Info: state.LockInfo{
+				Hostname:  "mbp.local",
+				Command:   "sync",
+				CreatedAt: createdAt,
+			},
+		}
+	}
+
+	msg := boot.loadReposCmd()()
+	next, cmd := boot.Update(msg)
+	if next != boot {
+		t.Fatalf("expected boot model to remain active while waiting, got %T", next)
+	}
+	if cmd == nil {
+		t.Fatal("expected retry command while lock is held")
+	}
+
+	view := ansi.Strip(viewContent(boot.View()))
+	if !strings.Contains(view, "Waiting for bb sync to finish") {
+		t.Fatalf("expected wait headline in boot view, got %q", view)
+	}
+	if !strings.Contains(view, "Lock held on mbp.local for 1m12s") {
+		t.Fatalf("expected lock owner detail in boot view, got %q", view)
+	}
+}
+
+func TestFixTUIBootRetryTransitionsAfterLockRelease(t *testing.T) {
+	t.Parallel()
+
+	boot := newFixTUIBootModel(nil, nil, false)
+	loaded := newFixTUIModelForTest([]fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				Ahead:     1,
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
+		},
+	})
+
+	attempts := 0
+	boot.waitRetryCmd = func() tea.Cmd {
+		return func() tea.Msg { return fixTUIBootRetryMsg{} }
+	}
+	boot.loadFn = func() (*fixTUIModel, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, &state.LockHeldError{
+				Info: state.LockInfo{
+					Hostname:  "mbp.local",
+					Command:   "sync",
+					CreatedAt: time.Date(2026, 3, 8, 19, 0, 0, 0, time.UTC),
+				},
+			}
+		}
+		return loaded, nil
+	}
+
+	firstMsg := boot.loadReposCmd()()
+	next, retryCmd := boot.Update(firstMsg)
+	if next != boot {
+		t.Fatalf("expected boot model during first lock wait, got %T", next)
+	}
+	if retryCmd == nil {
+		t.Fatal("expected retry command after lock-held update")
+	}
+
+	retryMsg := retryCmd()
+	next, loadCmd := boot.Update(retryMsg)
+	if next != boot {
+		t.Fatalf("expected boot model while scheduling retry load, got %T", next)
+	}
+	if loadCmd == nil {
+		t.Fatal("expected load command on retry")
+	}
+
+	loadedMsg := loadCmd()
+	next, _ = boot.Update(loadedMsg)
+	got, ok := next.(*fixTUIModel)
+	if !ok {
+		t.Fatalf("expected transition to fixTUIModel after lock release, got %T", next)
+	}
+	if got != loaded {
+		t.Fatal("expected boot retry to hand off the loaded fix model")
 	}
 }
 

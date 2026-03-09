@@ -11,7 +11,7 @@ import (
 
 func (a *App) runSync(opts SyncOptions) (int, error) {
 	a.logf("sync: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "sync")
 	if err != nil {
 		return 2, err
 	}

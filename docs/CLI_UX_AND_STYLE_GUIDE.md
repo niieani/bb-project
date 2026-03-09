@@ -15,6 +15,7 @@ Applies to:
 - Vertical space is precious: prefer 1-line chrome and compact field headers.
 - Works at small sizes: test at ~`80x24` and degrade gracefully down to ~`60` columns.
 - Relevance over completeness: hide non-applicable/no-op sections instead of rendering placeholder copy.
+- Blocking startup prerequisites for an interactive command (for example a global lock held by background work) should stay inside the TUI loading state, explain the blocker in user terms, and retry automatically instead of dumping fallback shell output.
 
 ## Layout (Chrome)
 

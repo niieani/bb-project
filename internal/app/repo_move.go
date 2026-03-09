@@ -25,7 +25,7 @@ type repoMoveResult struct {
 
 func (a *App) runRepoMove(opts RepoMoveOptions) (int, error) {
 	a.logf("repo move: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "repo move")
 	if err != nil {
 		return 2, err
 	}

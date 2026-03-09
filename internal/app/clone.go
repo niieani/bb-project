@@ -27,7 +27,7 @@ type cloneRepoSpec struct {
 
 func (a *App) runClone(opts CloneOptions) (int, error) {
 	a.logf("clone: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "clone")
 	if err != nil {
 		return 2, err
 	}

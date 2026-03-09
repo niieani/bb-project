@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,18 +15,26 @@ import (
 func TestAcquireLock(t *testing.T) {
 	t.Run("active lock blocks", func(t *testing.T) {
 		paths := NewPaths(t.TempDir())
-		lock, err := AcquireLock(paths)
+		lock, err := AcquireLock(paths, "sync")
 		if err != nil {
 			t.Fatalf("first lock: %v", err)
 		}
 		defer func() { _ = lock.Release() }()
 
-		_, err = AcquireLock(paths)
+		_, err = AcquireLock(paths, "fix")
 		if err == nil {
 			t.Fatal("expected second lock acquire to fail")
 		}
 		if !strings.Contains(err.Error(), "another bb process holds the lock") {
 			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var heldErr *LockHeldError
+		if !errors.As(err, &heldErr) {
+			t.Fatalf("expected lock held error, got %T", err)
+		}
+		if got := heldErr.Info.Command; got != "sync" {
+			t.Fatalf("lock command = %q, want %q", got, "sync")
 		}
 	})
 
@@ -48,7 +57,7 @@ func TestAcquireLock(t *testing.T) {
 			t.Fatalf("write stale lock: %v", err)
 		}
 
-		lock, err := AcquireLock(paths)
+		lock, err := AcquireLock(paths, "scan")
 		if err != nil {
 			t.Fatalf("expected stale lock recovery, got: %v", err)
 		}
@@ -69,7 +78,7 @@ func TestAcquireLock(t *testing.T) {
 			t.Fatalf("chtimes lock: %v", err)
 		}
 
-		lock, err := AcquireLock(paths)
+		lock, err := AcquireLock(paths, "scan")
 		if err != nil {
 			t.Fatalf("expected stale corrupt lock recovery, got: %v", err)
 		}
@@ -90,7 +99,7 @@ func TestAcquireLock(t *testing.T) {
 			t.Fatalf("chtimes lock: %v", err)
 		}
 
-		_, err := AcquireLock(paths)
+		_, err := AcquireLock(paths, "sync")
 		if err == nil {
 			t.Fatal("expected recent corrupt lock to block")
 		}
@@ -104,7 +113,7 @@ func TestLockFilePayload(t *testing.T) {
 	t.Parallel()
 
 	paths := NewPaths(t.TempDir())
-	lock, err := AcquireLock(paths)
+	lock, err := AcquireLock(paths, "sync")
 	if err != nil {
 		t.Fatalf("acquire lock: %v", err)
 	}
@@ -123,6 +132,44 @@ func TestLockFilePayload(t *testing.T) {
 	}
 	if !strings.Contains(text, "created_at=") {
 		t.Fatalf("expected created_at in lock file, got: %q", text)
+	}
+	if !strings.Contains(text, "command=sync") {
+		t.Fatalf("expected command in lock file, got: %q", text)
+	}
+}
+
+func TestAcquireLockLegacyPayloadOmitsCommandMetadata(t *testing.T) {
+	t.Parallel()
+
+	paths := NewPaths(t.TempDir())
+	if err := EnsureDir(paths.LocalStateRoot()); err != nil {
+		t.Fatalf("ensure local state root: %v", err)
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatalf("hostname: %v", err)
+	}
+	lockBody := fmt.Sprintf(
+		"pid=%d\nhostname=%s\ncreated_at=%s\n",
+		os.Getpid(),
+		hostname,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	if err := os.WriteFile(paths.LockPath(), []byte(lockBody), 0o644); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+
+	_, err = AcquireLock(paths, "fix")
+	if err == nil {
+		t.Fatal("expected active legacy lock to block")
+	}
+
+	var heldErr *LockHeldError
+	if !errors.As(err, &heldErr) {
+		t.Fatalf("expected lock held error, got %T", err)
+	}
+	if heldErr.Info.Command != "" {
+		t.Fatalf("legacy lock command = %q, want empty", heldErr.Info.Command)
 	}
 }
 

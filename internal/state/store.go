@@ -362,12 +362,35 @@ type Lock struct {
 	file *os.File
 }
 
-func AcquireLock(paths Paths) (*Lock, error) {
+type LockInfo struct {
+	PID       int
+	Hostname  string
+	CreatedAt time.Time
+	Command   string
+}
+
+type LockHeldError struct {
+	Info LockInfo
+}
+
+func (e *LockHeldError) Error() string {
+	return "another bb process holds the lock"
+}
+
+func LockInfoFromError(err error) (LockInfo, bool) {
+	var heldErr *LockHeldError
+	if !errors.As(err, &heldErr) {
+		return LockInfo{}, false
+	}
+	return heldErr.Info, true
+}
+
+func AcquireLock(paths Paths, command string) (*Lock, error) {
 	if err := EnsureDir(paths.LocalStateRoot()); err != nil {
 		return nil, err
 	}
 	path := paths.LockPath()
-	lock, err := createLock(path)
+	lock, err := createLock(path, command)
 	if err == nil {
 		return lock, nil
 	}
@@ -380,28 +403,28 @@ func AcquireLock(paths Paths) (*Lock, error) {
 		return nil, err
 	}
 	if !stale {
-		return nil, fmt.Errorf("another bb process holds the lock")
+		return nil, newLockHeldError(path)
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
 
-	lock, err = createLock(path)
+	lock, err = createLock(path, command)
 	if err == nil {
 		return lock, nil
 	}
 	if errors.Is(err, os.ErrExist) {
-		return nil, fmt.Errorf("another bb process holds the lock")
+		return nil, newLockHeldError(path)
 	}
 	return nil, err
 }
 
-func createLock(path string) (*Lock, error) {
+func createLock(path string, command string) (*Lock, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
 	}
-	if err := writeLockPayload(f); err != nil {
+	if err := writeLockPayload(f, command); err != nil {
 		_ = f.Close()
 		_ = os.Remove(path)
 		return nil, err
@@ -419,17 +442,22 @@ func (l *Lock) Release() error {
 	return os.Remove(l.path)
 }
 
-func writeLockPayload(f *os.File) error {
+func writeLockPayload(f *os.File, command string) error {
 	hostname, err := os.Hostname()
 	if err != nil {
 		return err
 	}
-	_, err = f.WriteString(fmt.Sprintf(
+	command = strings.TrimSpace(command)
+	payload := fmt.Sprintf(
 		"pid=%d\nhostname=%s\ncreated_at=%s\n",
 		os.Getpid(),
 		hostname,
 		time.Now().UTC().Format(time.RFC3339),
-	))
+	)
+	if command != "" {
+		payload += fmt.Sprintf("command=%s\n", command)
+	}
+	_, err = f.WriteString(payload)
 	return err
 }
 
@@ -437,6 +465,7 @@ type lockMeta struct {
 	PID       int
 	Hostname  string
 	CreatedAt time.Time
+	Command   string
 }
 
 func parseLockMeta(content []byte) (lockMeta, error) {
@@ -480,7 +509,33 @@ func parseLockMeta(content []byte) (lockMeta, error) {
 		PID:       pid,
 		Hostname:  hostname,
 		CreatedAt: createdAt,
+		Command:   strings.TrimSpace(values["command"]),
 	}, nil
+}
+
+func loadLockInfo(path string) (LockInfo, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return LockInfo{}, err
+	}
+	meta, err := parseLockMeta(content)
+	if err != nil {
+		return LockInfo{}, err
+	}
+	return LockInfo{
+		PID:       meta.PID,
+		Hostname:  meta.Hostname,
+		CreatedAt: meta.CreatedAt,
+		Command:   meta.Command,
+	}, nil
+}
+
+func newLockHeldError(path string) error {
+	info, err := loadLockInfo(path)
+	if err != nil {
+		return &LockHeldError{}
+	}
+	return &LockHeldError{Info: info}
 }
 
 func lockIsStale(path string, now time.Time, maxAge time.Duration) (bool, error) {

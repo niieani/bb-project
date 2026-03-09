@@ -9,8 +9,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"bb-project/internal/domain"
+	"bb-project/internal/state"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -839,6 +841,11 @@ type fixTUIBootModel struct {
 	loadFn  func() (*fixTUIModel, error)
 	loadErr error
 
+	now          func() time.Time
+	waitRetryCmd func() tea.Cmd
+	waitingFor   state.LockInfo
+	waitingLock  bool
+
 	progressMu   sync.RWMutex
 	progressLine string
 }
@@ -847,6 +854,12 @@ type fixTUILoadedMsg struct {
 	model *fixTUIModel
 	err   error
 }
+
+type fixTUILockHeldMsg struct {
+	Info state.LockInfo
+}
+
+type fixTUIBootRetryMsg struct{}
 
 type fixTUIRevalidatedMsg struct {
 	repos         []fixRepoState
@@ -891,6 +904,10 @@ func newFixProgressSpinner() spinner.Model {
 func newFixTUIBootModel(app *App, includeCatalogs []string, noRefresh bool) *fixTUIBootModel {
 	applyGlobalTheme(true)
 	spin := newFixProgressSpinner()
+	now := func() time.Time { return time.Now().UTC() }
+	if app != nil && app.Now != nil {
+		now = app.Now
+	}
 
 	m := &fixTUIBootModel{
 		app:             app,
@@ -899,6 +916,7 @@ func newFixTUIBootModel(app *App, includeCatalogs []string, noRefresh bool) *fix
 		isDark:          true,
 		spin:            spin,
 		progressLine:    "Preparing interactive fix startup",
+		now:             now,
 	}
 	m.applyTheme()
 	return m
@@ -927,6 +945,15 @@ func (m *fixTUIBootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
+	case fixTUILockHeldMsg:
+		m.waitingFor = msg.Info
+		m.waitingLock = true
+		return m, m.nextLockRetryCmd()
+	case fixTUIBootRetryMsg:
+		if !m.waitingLock {
+			return m, nil
+		}
+		return m, m.loadReposCmd()
 	case fixTUILoadedMsg:
 		if msg.err != nil {
 			m.loadErr = msg.err
@@ -936,6 +963,8 @@ func (m *fixTUIBootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loadErr = errors.New("internal: fix tui model loader returned nil")
 			return m, tea.Quit
 		}
+		m.waitingLock = false
+		m.waitingFor = state.LockInfo{}
 		m.transferWindowSize(msg.model)
 		return msg.model, nil
 	case tea.KeyPressMsg:
@@ -954,8 +983,14 @@ func (m *fixTUIBootModel) View() tea.View {
 	)
 	subtitle := hintStyle.Render(fixTUISubtitle)
 
+	statusLine := m.currentProgress()
 	message := fmt.Sprintf("%s %s", m.spin.View(), "Loading repositories and risk checks for interactive fix...")
 	detail := hintStyle.Render("Interactive UI opens automatically when startup checks complete.")
+	if m.waitingLock {
+		statusLine = m.lockWaitHeadline()
+		message = fmt.Sprintf("%s %s", m.spin.View(), "Interactive fix is waiting for the global lock to be released...")
+		detail = hintStyle.Render(m.lockWaitDetail())
+	}
 
 	contentPanel := panelStyle
 	if w := m.viewContentWidth(); w > 0 {
@@ -963,7 +998,7 @@ func (m *fixTUIBootModel) View() tea.View {
 	}
 
 	var b strings.Builder
-	b.WriteString(labelStyle.Render(m.currentProgress()))
+	b.WriteString(labelStyle.Render(statusLine))
 	b.WriteString("\n")
 	b.WriteString(message)
 	b.WriteString("\n")
@@ -991,6 +1026,9 @@ func (m *fixTUIBootModel) loadReposCmd() tea.Cmd {
 		defer restoreLogObserver()
 
 		model, err := load()
+		if info, ok := state.LockInfoFromError(err); ok {
+			return fixTUILockHeldMsg{Info: info}
+		}
 		return fixTUILoadedMsg{model: model, err: err}
 	}
 }
@@ -1032,6 +1070,74 @@ func (m *fixTUIBootModel) currentProgress() string {
 		return "Preparing interactive fix startup"
 	}
 	return m.progressLine
+}
+
+func (m *fixTUIBootModel) nextLockRetryCmd() tea.Cmd {
+	if m.waitRetryCmd != nil {
+		return m.waitRetryCmd()
+	}
+	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return fixTUIBootRetryMsg{}
+	})
+}
+
+func (m *fixTUIBootModel) lockWaitHeadline() string {
+	command := strings.TrimSpace(m.waitingFor.Command)
+	if command == "" {
+		command = "another bb command"
+	} else {
+		command = "bb " + command
+	}
+	return fmt.Sprintf("Waiting for %s to finish...", command)
+}
+
+func (m *fixTUIBootModel) lockWaitDetail() string {
+	parts := make([]string, 0, 3)
+	if host := strings.TrimSpace(m.waitingFor.Hostname); host != "" {
+		parts = append(parts, "Lock held on "+host)
+	}
+	if !m.waitingFor.CreatedAt.IsZero() {
+		elapsed := m.now().UTC().Sub(m.waitingFor.CreatedAt.UTC())
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		parts = append(parts, "for "+formatFixBootLockDuration(elapsed))
+	}
+	switch len(parts) {
+	case 0:
+		return "Interactive UI opens automatically when startup checks complete."
+	case 1:
+		return parts[0] + ". Interactive UI opens automatically when startup checks complete."
+	default:
+		return parts[0] + " " + parts[1] + ". Interactive UI opens automatically when startup checks complete."
+	}
+}
+
+func formatFixBootLockDuration(d time.Duration) string {
+	d = d.Truncate(time.Second)
+	if d < time.Second {
+		return "<1s"
+	}
+	hours := d / time.Hour
+	d -= hours * time.Hour
+	minutes := d / time.Minute
+	d -= minutes * time.Minute
+	seconds := d / time.Second
+
+	switch {
+	case hours > 0:
+		if seconds == 0 {
+			return fmt.Sprintf("%dh%dm", hours, minutes)
+		}
+		return fmt.Sprintf("%dh%dm%ds", hours, minutes, seconds)
+	case minutes > 0:
+		if seconds == 0 {
+			return fmt.Sprintf("%dm", minutes)
+		}
+		return fmt.Sprintf("%dm%ds", minutes, seconds)
+	default:
+		return fmt.Sprintf("%ds", seconds)
+	}
 }
 
 func normalizeFixBootProgressLine(line string) (string, bool) {

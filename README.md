@@ -343,6 +343,7 @@ Interactive apply behavior:
 - For GitHub origins (including `*.github.com` aliases), the probe treats `gh` viewer permission as authoritative when available; it falls back to `git push --dry-run` only when `gh` cannot determine access.
 - Repositories that still have `push_access=unknown` after probing do not get push-related fix actions; run `bb repo access-refresh <repo>` after resolving probe blockers.
 - The startup loading screen shows phase-based progress and collapses noisy multiline probe/auth errors into concise status text while checks continue.
+- If another `bb` command currently holds the global lock, interactive `bb fix` stays in its loading screen, shows which command is running plus lock age/host, and opens automatically once the lock is released.
 
 Selector resolution for `<project>`:
 
@@ -537,7 +538,7 @@ Repo metadata file naming:
 Local runtime state (not required to sync):
 
 - `~/.local/state/bb-project/machine-id`
-- `~/.local/state/bb-project/lock`
+- `~/.local/state/bb-project/lock` (`pid`, `hostname`, `created_at`, `command`)
 - `~/.local/state/bb-project/notify-cache.yaml`
 
 Write ownership convention:
@@ -687,7 +688,6 @@ Used primarily by test harness:
 
 ## Current Limitations
 
-- Stale lock recovery is not yet implemented (planned v1.1).
 - Sync orchestration code is large and being refactored in v1.1.
 - Notification throttle enforcement is planned in v1.1.
 
@@ -695,8 +695,9 @@ Used primarily by test harness:
 
 ### `another bb process holds the lock`
 
-- Check for a currently running `bb` process and wait for completion.
-- Current v1 behavior does not recover stale lock files automatically.
+- Non-interactive commands fail fast; interactive `bb fix` waits in its loading screen until the lock is released.
+- Recent lock files include the owning command, host, and creation time, so contention messages can identify what is running.
+- Stale lock files are recovered automatically when the recorded process is gone or the lock ages out.
 - If you are certain no `bb` process is running, remove:
   - `~/.local/state/bb-project/lock`
 

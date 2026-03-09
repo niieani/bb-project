@@ -15,7 +15,7 @@ import (
 
 func (a *App) runLink(opts LinkOptions) (int, error) {
 	a.logf("link: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "link")
 	if err != nil {
 		return 2, err
 	}

@@ -100,7 +100,7 @@ func (a *App) RunConfig() error {
 		return fmt.Errorf("missing catalog root directories: %s", strings.Join(missingRoots, ", "))
 	}
 
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "config")
 	if err != nil {
 		return err
 	}

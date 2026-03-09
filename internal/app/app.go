@@ -253,7 +253,7 @@ func (a *App) loadContext() (domain.ConfigFile, domain.MachineFile, error) {
 
 func (a *App) RunInit(opts InitOptions) error {
 	a.logf("init: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "init")
 	if err != nil {
 		return err
 	}
@@ -1334,7 +1334,7 @@ func (a *App) refreshMachineSnapshotLocked(cfg domain.ConfigFile, machine *domai
 
 func (a *App) RunScan(opts ScanOptions) (int, error) {
 	a.logf("scan: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "scan")
 	if err != nil {
 		return 2, err
 	}
@@ -1409,7 +1409,7 @@ func (a *App) RunStatus(jsonOut bool, include []string) (int, error) {
 
 func (a *App) RunDoctor(include []string) (int, error) {
 	a.logf("doctor: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "doctor")
 	if err != nil {
 		return 2, err
 	}
@@ -1463,7 +1463,7 @@ func (a *App) RunDoctor(include []string) (int, error) {
 
 func (a *App) RunCatalogAdd(name, root string) (int, error) {
 	a.logf("catalog add: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "catalog add")
 	if err != nil {
 		return 2, err
 	}
@@ -1495,7 +1495,7 @@ func (a *App) RunCatalogAdd(name, root string) (int, error) {
 
 func (a *App) RunCatalogRM(name string) (int, error) {
 	a.logf("catalog rm: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "catalog rm")
 	if err != nil {
 		return 2, err
 	}
@@ -1532,7 +1532,7 @@ func (a *App) RunCatalogRM(name string) (int, error) {
 
 func (a *App) RunCatalogDefault(name string) (int, error) {
 	a.logf("catalog default: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "catalog default")
 	if err != nil {
 		return 2, err
 	}
@@ -1583,7 +1583,7 @@ func (a *App) RunCatalogList() (int, error) {
 
 func (a *App) RunRepoPolicy(repoSelector string, autoPushMode domain.AutoPushMode) (int, error) {
 	a.logf("repo policy: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "repo policy")
 	if err != nil {
 		return 2, err
 	}
@@ -1617,7 +1617,7 @@ func (a *App) RunRepoPolicy(repoSelector string, autoPushMode domain.AutoPushMod
 
 func (a *App) RunRepoPreferredRemote(repoSelector string, preferredRemote string) (int, error) {
 	a.logf("repo remote: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "repo remote")
 	if err != nil {
 		return 2, err
 	}
@@ -1655,7 +1655,7 @@ func (a *App) RunRepoPreferredRemote(repoSelector string, preferredRemote string
 
 func (a *App) RunRepoPushAccessSet(repoSelector string, pushAccessRaw string) (int, error) {
 	a.logf("repo access set: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "repo access set")
 	if err != nil {
 		return 2, err
 	}
@@ -1697,7 +1697,7 @@ func (a *App) RunRepoPushAccessSet(repoSelector string, pushAccessRaw string) (i
 
 func (a *App) RunRepoPushAccessRefresh(repoSelector string) (int, error) {
 	a.logf("repo access refresh: acquiring global lock")
-	lock, err := state.AcquireLock(a.Paths)
+	lock, err := state.AcquireLock(a.Paths, "repo access refresh")
 	if err != nil {
 		return 2, err
 	}
