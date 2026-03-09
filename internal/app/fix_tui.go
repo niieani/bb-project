@@ -18,6 +18,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -343,7 +344,11 @@ func (m *fixTUIModel) summaryHelpMap() fixTUIHelpMap {
 	skip := newHelpBinding([]string{"ctrl+x"}, "ctrl+x", "back to list")
 	quit := newHelpBinding([]string{"q", "ctrl+c"}, "q", "quit")
 	helpToggle := newHelpBinding([]string{"?"}, "?", "more keys")
-	move := newHelpBinding([]string{"up", "down"}, "↑/↓", "move follow-up")
+	moveDesc := "scroll summary"
+	if len(candidates) > 0 {
+		moveDesc = "move follow-up"
+	}
+	move := newHelpBinding([]string{"up", "down"}, "↑/↓", moveDesc)
 	toggle := newHelpBinding([]string{"space"}, "space", "toggle follow-up")
 
 	short := []key.Binding{back, cancel, quit}
@@ -351,6 +356,9 @@ func (m *fixTUIModel) summaryHelpMap() fixTUIHelpMap {
 	if len(candidates) > 0 {
 		short = []key.Binding{back, move, toggle, cancel, quit}
 		rows = append(rows, []key.Binding{back, move, toggle})
+	} else {
+		short = []key.Binding{back, move, cancel, quit}
+		rows = append(rows, []key.Binding{back, move})
 	}
 	rows = append(rows, []key.Binding{cancel, skip})
 	rows = append(rows, []key.Binding{quit, helpToggle})
@@ -496,6 +504,8 @@ type fixTUIModel struct {
 	summaryResults           []fixSummaryResult
 	summaryCursor            int
 	summarySelectedFollowUps map[string]bool
+	summaryBodyViewport      viewport.Model
+	summaryCandidateLines    map[string]int
 }
 
 type fixListItem struct {
@@ -1274,6 +1284,9 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.viewMode == fixViewWizard {
 			m.syncWizardViewport()
 		}
+		if m.viewMode == fixViewSummary {
+			m.syncSummaryViewport()
+		}
 		return m, nil
 	case spinner.TickMsg:
 		if m.viewMode == fixViewWizard && m.wizard.Applying {
@@ -1409,7 +1422,9 @@ func (m *fixTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	if m.viewMode == fixViewSummary {
-		return m, nil
+		var cmd tea.Cmd
+		m.summaryBodyViewport, cmd = m.summaryBodyViewport.Update(msg)
+		return m, cmd
 	}
 
 	var cmd tea.Cmd

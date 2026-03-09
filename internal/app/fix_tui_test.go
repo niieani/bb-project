@@ -1794,11 +1794,30 @@ func TestFixTUISummaryFollowUpSelectionCanQueueAndRunFixes(t *testing.T) {
 	if !strings.Contains(view, "[ ] Stage, commit & push") {
 		t.Fatalf("expected selectable follow-up fixes, got %q", view)
 	}
+	if strings.Contains(view, "Done") {
+		t.Fatalf("expected summary action row to avoid ambiguous Done label, got %q", view)
+	}
+	if !strings.Contains(view, "Skip") {
+		t.Fatalf("expected skip action when nothing is selected, got %q", view)
+	}
+	if strings.Contains(view, "Run selected fixes") {
+		t.Fatalf("expected run action to stay hidden until a follow-up is selected, got %q", view)
+	}
 
 	_, _ = m.Update(testKeyPressCode(tea.KeySpace))
-	view = ansi.Strip(m.viewSummaryContent())
+	rawView := m.viewSummaryContent()
+	view = ansi.Strip(rawView)
 	if !strings.Contains(view, "[x] Stage, commit & push") {
 		t.Fatalf("expected selected follow-up fix checkbox, got %q", view)
+	}
+	if !strings.Contains(view, "Run selected fixes") || !strings.Contains(view, "Skip") {
+		t.Fatalf("expected explicit skip + run actions after selecting follow-up, got %q", view)
+	}
+	if !strings.Contains(rawView, buttonStyle.Render(renderButtonLabel("Skip", false))) {
+		t.Fatalf("expected skip action to use secondary button styling, got %q", rawView)
+	}
+	if !strings.Contains(rawView, buttonPrimaryStyle.Render(renderButtonLabel("Run selected fixes", false))) {
+		t.Fatalf("expected run action to use primary button styling, got %q", rawView)
 	}
 
 	_, _ = m.Update(testKeyPressCode(tea.KeyEnter))
@@ -1807,6 +1826,108 @@ func TestFixTUISummaryFollowUpSelectionCanQueueAndRunFixes(t *testing.T) {
 	}
 	if m.wizard.Action != FixActionStageCommitPush {
 		t.Fatalf("wizard action after summary follow-up run = %q, want %q", m.wizard.Action, FixActionStageCommitPush)
+	}
+}
+
+func TestFixTUISummaryActiveFollowUpUsesFocusedStyling(t *testing.T) {
+	t.Parallel()
+
+	repos := []fixRepoState{
+		{
+			Record: domain.MachineRepoRecord{
+				Name:              "api",
+				Path:              "/repos/api",
+				OriginURL:         "git@github.com:you/api.git",
+				Upstream:          "origin/main",
+				HasDirtyTracked:   true,
+				Syncable:          false,
+				UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
+		},
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.summaryResults = []fixSummaryResult{{
+		RepoName: "api",
+		RepoPath: "/repos/api",
+		Action:   fixActionLabel(FixActionPush),
+		Status:   "applied",
+	}}
+	m.viewMode = fixViewSummary
+
+	candidates := m.summaryFollowUpCandidates()
+	m.syncSummaryFollowUpState(candidates)
+	if len(candidates) == 0 {
+		t.Fatal("expected at least one summary follow-up candidate")
+	}
+
+	rawLine := m.renderSummaryFollowUpLine(candidates[0])
+	if rawLine == ansi.Strip(rawLine) {
+		t.Fatalf("expected focused follow-up line to carry explicit styling, got %q", rawLine)
+	}
+	if got := ansi.Strip(rawLine); !strings.HasPrefix(got, "▸ [ ] ") {
+		t.Fatalf("focused follow-up line = %q, want prefix %q", got, "▸ [ ] ")
+	}
+}
+
+func TestFixTUISummaryUsesViewportOnShortWindowsAndScrollsWithSelection(t *testing.T) {
+	t.Parallel()
+
+	repos := make([]fixRepoState, 0, 8)
+	results := make([]fixSummaryResult, 0, 8)
+	for i := 0; i < 8; i++ {
+		repoPath := fmt.Sprintf("/repos/api-%02d", i)
+		repoName := fmt.Sprintf("api-%02d", i)
+		repos = append(repos, fixRepoState{
+			Record: domain.MachineRepoRecord{
+				Name:              repoName,
+				Path:              repoPath,
+				OriginURL:         "git@github.com:you/" + repoName + ".git",
+				Upstream:          "origin/main",
+				HasDirtyTracked:   true,
+				Syncable:          false,
+				UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
+			},
+			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/" + repoName + ".git", AutoPush: domain.AutoPushModeEnabled},
+		})
+		results = append(results, fixSummaryResult{
+			RepoName: repoName,
+			RepoPath: repoPath,
+			Action:   fixActionLabel(FixActionPush),
+			Status:   "applied",
+		})
+	}
+
+	m := newFixTUIModelForTest(repos)
+	m.summaryResults = results
+	m.viewMode = fixViewSummary
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 16})
+
+	view := ansi.Strip(m.viewSummaryContent())
+	if !strings.Contains(view, "↓ More results below (scroll down)") {
+		t.Fatalf("expected bottom overflow indicator in short summary viewport, got %q", view)
+	}
+	if strings.Contains(view, "api-07") {
+		t.Fatalf("expected short summary viewport to hide lower repos before scrolling, got %q", view)
+	}
+
+	for i := 0; i < 14; i++ {
+		_, _ = m.Update(testKeyPressCode(tea.KeyDown))
+	}
+
+	view = ansi.Strip(m.viewSummaryContent())
+	if !strings.Contains(view, "↑ More results above (scroll up)") {
+		t.Fatalf("expected top overflow indicator after scrolling summary viewport, got %q", view)
+	}
+	if m.summaryCursor != 14 {
+		t.Fatalf("summary cursor after moving down = %d, want 14", m.summaryCursor)
+	}
+	if m.summaryBodyViewport.YOffset() <= 0 {
+		t.Fatalf("expected summary viewport yoffset to advance after moving selection, got %d", m.summaryBodyViewport.YOffset())
+	}
+	if !strings.Contains(view, "Automated next fixes") {
+		t.Fatalf("expected summary viewport to keep the active follow-up section visible, got %q", view)
 	}
 }
 

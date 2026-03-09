@@ -119,6 +119,11 @@ type fixSummaryRepoGroup struct {
 	Items    []fixSummaryResult
 }
 
+type fixSummaryBodyRender struct {
+	Content        string
+	CandidateLines map[string]int
+}
+
 const (
 	fixWizardActionCancel = iota
 	fixWizardActionSkip
@@ -370,6 +375,8 @@ func (m *fixTUIModel) appendSummaryResultForRepo(repoName string, repoPath strin
 func (m *fixTUIModel) resetSummaryFollowUpState() {
 	m.summaryCursor = 0
 	m.summarySelectedFollowUps = map[string]bool{}
+	m.summaryCandidateLines = nil
+	m.summaryBodyViewport = viewport.Model{}
 }
 
 func (m *fixTUIModel) advanceWizard() {
@@ -1224,6 +1231,7 @@ func (m *fixTUIModel) updateWizard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m *fixTUIModel) updateSummary(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	candidates := m.summaryFollowUpCandidates()
 	m.syncSummaryFollowUpState(candidates)
+	m.syncSummaryViewport()
 
 	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
@@ -1235,18 +1243,36 @@ func (m *fixTUIModel) updateSummary(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.help.ShowAll = !m.help.ShowAll
 		return m, nil
 	}
-	if msg.String() == "up" && len(candidates) > 0 {
+	if msg.String() == "up" {
+		if len(candidates) == 0 {
+			m.scrollSummaryUp(1)
+			return m, nil
+		}
 		m.summaryCursor--
 		if m.summaryCursor < 0 {
 			m.summaryCursor = len(candidates) - 1
 		}
+		m.syncSummarySelectionViewport(candidates)
 		return m, nil
 	}
-	if msg.String() == "down" && len(candidates) > 0 {
+	if msg.String() == "down" {
+		if len(candidates) == 0 {
+			m.scrollSummaryDown(1)
+			return m, nil
+		}
 		m.summaryCursor++
 		if m.summaryCursor >= len(candidates) {
 			m.summaryCursor = 0
 		}
+		m.syncSummarySelectionViewport(candidates)
+		return m, nil
+	}
+	if msg.String() == "pgup" {
+		m.scrollSummaryUp(max(1, m.summaryBodyViewport.Height()-1))
+		return m, nil
+	}
+	if msg.String() == "pgdown" {
+		m.scrollSummaryDown(max(1, m.summaryBodyViewport.Height()-1))
 		return m, nil
 	}
 	if msg.String() == "space" && len(candidates) > 0 {
@@ -1925,51 +1951,221 @@ func longestANSIWidth(s string) int {
 func (m *fixTUIModel) viewSummaryContent() string {
 	candidates := m.summaryFollowUpCandidates()
 	m.syncSummaryFollowUpState(candidates)
-	groups := m.summaryRepoGroups()
+	m.syncSummaryViewport()
+
+	actions := m.clampSingleLine(m.renderSummaryActionButtons(candidates), m.summaryBodyLineWidth())
+	topIndicator := m.summaryScrollIndicatorTop()
+	bottomIndicator := m.summaryScrollIndicatorBottom()
 
 	var b strings.Builder
-	b.WriteString(labelStyle.Render("Fix outcomes and current syncability after revalidation."))
+	b.WriteString(topIndicator)
+	b.WriteString("\n")
+	b.WriteString(m.summaryBodyViewport.View())
+	b.WriteString("\n")
+	b.WriteString(bottomIndicator)
 	b.WriteString("\n\n")
-	b.WriteString(renderFieldBlock(false, "Session totals", "", m.renderSummaryTotals(), ""))
-	b.WriteString("\n\n")
+	b.WriteString(actions)
+	return b.String()
+}
+
+func (m *fixTUIModel) renderSummaryActionButtons(candidates []fixSummaryFollowUpCandidate) string {
+	selectedFollowUps := m.summarySelectedFollowUpCount(candidates)
+	if selectedFollowUps <= 0 {
+		return buttonStyle.Render(renderButtonLabel("Skip", false))
+	}
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		buttonStyle.Render(renderButtonLabel("Skip", false)),
+		buttonPrimaryStyle.Render(renderButtonLabel("Run selected fixes", false)),
+	)
+}
+
+func (m *fixTUIModel) buildSummaryBody(candidates []fixSummaryFollowUpCandidate) fixSummaryBodyRender {
+	groups := m.summaryRepoGroups()
+	candidateLines := map[string]int{}
+	parts := make([]string, 0, len(groups)+2)
+	currentLine := 0
+
+	appendPart := func(part string, candidateOffsets map[string]int, repoPath string) {
+		if len(parts) > 0 {
+			parts = append(parts, "", "")
+			currentLine += 2
+		}
+		blockStart := currentLine
+		parts = append(parts, part)
+		currentLine += lipgloss.Height(part)
+		if len(candidateOffsets) == 0 {
+			return
+		}
+		valueStart := 1
+		if strings.TrimSpace(repoPath) != "" {
+			valueStart++
+		}
+		for key, offset := range candidateOffsets {
+			candidateLines[key] = blockStart + valueStart + offset
+		}
+	}
+
+	heading := labelStyle.Render("Fix outcomes and current syncability after revalidation.")
+	parts = append(parts, heading)
+	currentLine += lipgloss.Height(heading)
+
+	appendPart(renderFieldBlock(false, "Session totals", "", m.renderSummaryTotals(), ""), nil, "")
 	if len(groups) == 0 {
-		b.WriteString(renderFieldBlock(false, "Actions", "", "No fixes were applied.", ""))
+		appendPart(renderFieldBlock(false, "Actions", "", "No fixes were applied.", ""), nil, "")
 	} else {
-		for i, group := range groups {
-			if i > 0 {
-				b.WriteString("\n\n")
-			}
+		for _, group := range groups {
 			repoName := strings.TrimSpace(group.RepoName)
 			if repoName == "" {
 				repoName = "(repository)"
 			}
-			b.WriteString(renderFieldBlock(
-				false,
-				repoName,
-				strings.TrimSpace(group.RepoPath),
-				m.renderSummaryRepoGroupValue(group, candidates),
-				"",
-			))
+			value, offsets := m.renderSummaryRepoGroupValueAndOffsets(group, candidates)
+			appendPart(renderFieldBlock(false, repoName, strings.TrimSpace(group.RepoPath), value, ""), offsets, group.RepoPath)
 		}
 	}
-	b.WriteString("\n\n")
-	selectedFollowUps := m.summarySelectedFollowUpCount(candidates)
-	if len(candidates) > 0 {
-		runStyle := buttonStyle
-		if selectedFollowUps > 0 {
-			runStyle = buttonPrimaryStyle
-		}
-		b.WriteString(runStyle.Render("Run selected fixes"))
-		b.WriteString(" ")
-		b.WriteString(buttonPrimaryStyle.Render("Done"))
-		b.WriteString("\n")
-		b.WriteString(hintStyle.Render("Enter runs selected fixes when any are checked; otherwise it returns to the repository list."))
-		return b.String()
+
+	return fixSummaryBodyRender{
+		Content:        strings.Join(parts, "\n"),
+		CandidateLines: candidateLines,
 	}
-	b.WriteString(buttonPrimaryStyle.Render("Done"))
-	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Enter or esc to return to repository list."))
-	return b.String()
+}
+
+func (m *fixTUIModel) summaryBodyLineWidth() int {
+	if w := m.viewContentWidth(); w > 0 {
+		inner := w - panelStyle.GetHorizontalFrameSize()
+		if inner > 0 {
+			return inner
+		}
+	}
+	return 0
+}
+
+func (m *fixTUIModel) summaryViewportSize(contentHeight int, contentWidth int, staticLines int) (int, int) {
+	if m.width <= 0 || m.height <= 0 {
+		if contentWidth < 1 {
+			contentWidth = 1
+		}
+		if contentHeight < 1 {
+			contentHeight = 1
+		}
+		return contentWidth, contentHeight
+	}
+
+	width := m.summaryBodyLineWidth()
+	if width <= 0 {
+		if contentWidth < 88 {
+			contentWidth = 88
+		}
+		width = contentWidth
+	}
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+
+	available := m.height - fixPageStyle.GetVerticalFrameSize()
+	available -= m.wizardHelpHeight()
+	available -= 1
+	available -= lipgloss.Height(m.viewTopChromeForMode(fixViewSummary))
+	if m.status != "" {
+		available++
+	}
+	if m.errText != "" {
+		available++
+	}
+	if available < panelStyle.GetVerticalFrameSize()+1 {
+		available = panelStyle.GetVerticalFrameSize() + 1
+	}
+
+	panelInner := available - panelStyle.GetVerticalFrameSize()
+	if staticLines < 1 {
+		staticLines = 1
+	}
+	height := panelInner - staticLines
+	if height < 1 {
+		height = 1
+	}
+	return width, height
+}
+
+func (m *fixTUIModel) syncSummaryViewport() {
+	candidates := m.summaryFollowUpCandidates()
+	m.syncSummaryFollowUpState(candidates)
+	render := m.buildSummaryBody(candidates)
+	actions := m.clampSingleLine(m.renderSummaryActionButtons(candidates), m.summaryBodyLineWidth())
+	staticLines := lipgloss.Height(actions) + 3
+	width, height := m.summaryViewportSize(lipgloss.Height(render.Content), longestANSIWidth(render.Content), staticLines)
+	if width < 1 {
+		width = 1
+	}
+	if height < 1 {
+		height = 1
+	}
+	if m.summaryBodyViewport.Width() <= 0 || m.summaryBodyViewport.Height() <= 0 {
+		m.summaryBodyViewport = viewport.New(viewport.WithWidth(width), viewport.WithHeight(height))
+	}
+	offset := m.summaryBodyViewport.YOffset()
+	m.summaryBodyViewport.SetWidth(width)
+	m.summaryBodyViewport.SetHeight(height)
+	m.summaryBodyViewport.SetContent(render.Content)
+	m.summaryBodyViewport.SetYOffset(offset)
+	m.summaryCandidateLines = render.CandidateLines
+	m.syncSummarySelectionViewport(candidates)
+}
+
+func (m *fixTUIModel) syncSummarySelectionViewport(candidates []fixSummaryFollowUpCandidate) {
+	if len(candidates) == 0 || m.summaryBodyViewport.Height() <= 0 {
+		return
+	}
+	if m.summaryCandidateLines == nil {
+		return
+	}
+	current := candidates[m.summaryCursor]
+	line, ok := m.summaryCandidateLines[current.Key]
+	if !ok {
+		return
+	}
+	top := m.summaryBodyViewport.YOffset()
+	bottom := top + m.summaryBodyViewport.Height() - 1
+	contextLines := min(4, max(0, m.summaryBodyViewport.Height()-1))
+	maxOffset := max(0, m.summaryBodyViewport.TotalLineCount()-m.summaryBodyViewport.Height())
+	switch {
+	case line < top:
+		target := max(0, line-contextLines)
+		m.summaryBodyViewport.SetYOffset(min(target, maxOffset))
+	case line > bottom:
+		target := max(0, line-contextLines)
+		m.summaryBodyViewport.SetYOffset(min(target, maxOffset))
+	}
+}
+
+func (m *fixTUIModel) summaryHasOverflow() bool {
+	return !(m.summaryBodyViewport.AtTop() && m.summaryBodyViewport.AtBottom())
+}
+
+func (m *fixTUIModel) summaryScrollIndicatorTop() string {
+	if !m.summaryHasOverflow() || m.summaryBodyViewport.AtTop() {
+		return ""
+	}
+	return hintStyle.Render(m.clampSingleLine("↑ More results above (scroll up)", m.summaryBodyLineWidth()))
+}
+
+func (m *fixTUIModel) summaryScrollIndicatorBottom() string {
+	if !m.summaryHasOverflow() || m.summaryBodyViewport.AtBottom() {
+		return ""
+	}
+	return hintStyle.Render(m.clampSingleLine("↓ More results below (scroll down)", m.summaryBodyLineWidth()))
+}
+
+func (m *fixTUIModel) scrollSummaryDown(lines int) bool {
+	before := m.summaryBodyViewport.YOffset()
+	m.summaryBodyViewport.ScrollDown(lines)
+	return m.summaryBodyViewport.YOffset() > before
+}
+
+func (m *fixTUIModel) scrollSummaryUp(lines int) bool {
+	before := m.summaryBodyViewport.YOffset()
+	m.summaryBodyViewport.ScrollUp(lines)
+	return m.summaryBodyViewport.YOffset() < before
 }
 
 func (m *fixTUIModel) summaryRepoGroups() []fixSummaryRepoGroup {
@@ -2085,7 +2281,13 @@ func (m *fixTUIModel) renderSummaryResultValue(item fixSummaryResult, candidates
 }
 
 func (m *fixTUIModel) renderSummaryRepoGroupValue(group fixSummaryRepoGroup, candidates []fixSummaryFollowUpCandidate) string {
+	value, _ := m.renderSummaryRepoGroupValueAndOffsets(group, candidates)
+	return value
+}
+
+func (m *fixTUIModel) renderSummaryRepoGroupValueAndOffsets(group fixSummaryRepoGroup, candidates []fixSummaryFollowUpCandidate) (string, map[string]int) {
 	lines := make([]string, 0, len(group.Items)+8)
+	candidateOffsets := map[string]int{}
 	for _, item := range group.Items {
 		lines = append(lines, fmt.Sprintf("%s %s: %s", renderSummaryResultMarker(item.Status), item.Action, item.Status))
 		if detail := strings.TrimSpace(item.Detail); detail != "" {
@@ -2124,6 +2326,7 @@ func (m *fixTUIModel) renderSummaryRepoGroupValue(group fixSummaryRepoGroup, can
 		if len(followUps) > 0 {
 			lines = append(lines, "", "Automated next fixes")
 			for _, followUp := range followUps {
+				candidateOffsets[followUp.Key] = len(lines)
 				lines = append(lines, m.renderSummaryFollowUpLine(followUp))
 			}
 		}
@@ -2140,7 +2343,7 @@ func (m *fixTUIModel) renderSummaryRepoGroupValue(group fixSummaryRepoGroup, can
 			}
 		}
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), candidateOffsets
 }
 
 func summaryRepoGroupOutcomeStatus(items []fixSummaryResult) string {
@@ -2380,6 +2583,7 @@ func (m *fixTUIModel) renderSummaryFollowUpLine(followUp fixSummaryFollowUpCandi
 		checked = "[x]"
 	}
 	cursor := " "
+	focused := false
 	candidates := m.summaryFollowUpCandidates()
 	for i, candidate := range candidates {
 		if candidate.Key != followUp.Key {
@@ -2387,10 +2591,19 @@ func (m *fixTUIModel) renderSummaryFollowUpLine(followUp fixSummaryFollowUpCandi
 		}
 		if i == m.summaryCursor {
 			cursor = "▸"
+			focused = true
 		}
 		break
 	}
-	return fmt.Sprintf("%s %s %s", cursor, checked, followUp.Label)
+	line := fmt.Sprintf("%s %s %s", cursor, checked, followUp.Label)
+	if !focused {
+		return line
+	}
+	return lipgloss.NewStyle().
+		Foreground(textColor).
+		Background(accentBgColor).
+		Bold(true).
+		Render(line)
 }
 
 func summaryUnsyncableReasonLabel(reason domain.UnsyncableReason) string {
