@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/niieani/bb-project/compare/v0.6.1...v0.6.2) (2026-03-17)
+
+
+### Bug Fixes
+
+* export Apple signing password to goreleaser env ([26bf10c](https://github.com/niieani/bb-project/commit/26bf10c5ea9a2cdb8e5723ce0124b80900edd1c5))
+
 ## [0.6.1](https://github.com/niieani/bb-project/compare/v0.6.0...v0.6.1) (2026-03-17)
 
 
