@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/niieani/bb-project/compare/v0.6.2...v0.6.3) (2026-03-17)
+
+
+### Bug Fixes
+
+* read 1password attachment content for release signing ([647a65b](https://github.com/niieani/bb-project/commit/647a65bc823ba43f4de0b7c56d06899d8a72bdcf))
+
 ## [0.6.2](https://github.com/niieani/bb-project/compare/v0.6.1...v0.6.2) (2026-03-17)
 
 
