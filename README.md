@@ -635,11 +635,21 @@ Release flow:
 1. Merge Conventional Commit messages into `main`.
 2. `release-please` opens/updates a release PR with version bump + changelog.
 3. Merge that PR to create a `vX.Y.Z` tag and GitHub release.
-4. The same `Release Please` workflow runs GoReleaser when a release is created, publishing binaries and updating the Homebrew tap cask.
+4. `Release Please` then calls the shared publish workflow, which runs GoReleaser, Developer ID signing + notarization for the macOS archives, and the Homebrew tap cask update.
+5. The standalone `Release` workflow exists only as a manual recovery path for republishing an existing tag through that same shared publish workflow.
 
 Required GitHub secrets:
 
 - `HOMEBREW_TAP_GITHUB_TOKEN`: PAT with push access to `<org>/homebrew-tap`.
+- `OP_SERVICE_ACCOUNT_TOKEN`: 1Password service account token with read access to the Apple release-signing items.
+
+Required 1Password references:
+
+- `op://Automation/Apple Developer App Store Connect AuthKey Github Releases/AuthKey.p8`
+- `op://Automation/Apple Developer App Store Connect AuthKey Github Releases/NOTARY_ISSUER_ID`
+- `op://Automation/Apple Developer App Store Connect AuthKey Github Releases/NOTARY_KEY_ID`
+- `op://Automation/Apple Release Signing Developer ID Certificate/Apple Release Signing Developer ID Certificate.p12`
+- `op://Automation/Apple Release Signing Developer ID Certificate/password`
 
 Homebrew install:
 

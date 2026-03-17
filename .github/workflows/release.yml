@@ -8,15 +8,17 @@ on:
     inputs:
       tag:
         description: "Existing tag to release (for example: v0.2.0)"
-        required: false
+        required: true
         type: string
 
 permissions:
   contents: write
 
 jobs:
-  goreleaser:
+  resolve-ref:
     runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
     steps:
       - name: Resolve ref
         id: ref
@@ -27,23 +29,9 @@ jobs:
           fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ steps.ref.outputs.ref }}
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: '~> v2'
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+  publish:
+    needs: resolve-ref
+    uses: ./.github/workflows/release-publish.yml
+    with:
+      ref: ${{ needs.resolve-ref.outputs.ref }}
+    secrets: inherit

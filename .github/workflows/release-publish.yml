@@ -1,0 +1,73 @@
+name: Release Publish
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to publish.
+        required: true
+        type: string
+    secrets:
+      HOMEBREW_TAP_GITHUB_TOKEN:
+        required: true
+      OP_SERVICE_ACCOUNT_TOKEN:
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref }}
+
+      - name: Fetch tags
+        run: git fetch --force --tags
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install 1Password CLI
+        uses: 1password/install-cli-action@v2
+
+      - name: Configure 1Password service account
+        uses: 1password/load-secrets-action/configure@v3
+        with:
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+      - name: Load Apple release metadata
+        uses: 1password/load-secrets-action@v3
+        with:
+          unset-previous: true
+        env:
+          MACOS_NOTARY_ISSUER_ID: op://Automation/Apple Developer App Store Connect AuthKey Github Releases/NOTARY_ISSUER_ID
+          MACOS_NOTARY_KEY_ID: op://Automation/Apple Developer App Store Connect AuthKey Github Releases/NOTARY_KEY_ID
+          MACOS_SIGN_PASSWORD: op://Automation/Apple Release Signing Developer ID Certificate/password
+
+      - name: Prepare Apple signing payloads
+        run: |
+          macos_notary_key="$(op read 'op://Automation/Apple Developer App Store Connect AuthKey Github Releases/AuthKey.p8' | base64 | tr -d "\n")"
+          macos_sign_p12="$(op read 'op://Automation/Apple Release Signing Developer ID Certificate/Apple Release Signing Developer ID Certificate.p12' | base64 | tr -d "\n")"
+          printf "::add-mask::%s\n" "$macos_notary_key"
+          printf "::add-mask::%s\n" "$macos_sign_p12"
+          {
+            printf "MACOS_NOTARY_KEY=%s\n" "$macos_notary_key"
+            printf "MACOS_SIGN_P12=%s\n" "$macos_sign_p12"
+          } >> "$GITHUB_ENV"
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
