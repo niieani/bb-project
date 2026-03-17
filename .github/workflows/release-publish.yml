@@ -58,7 +58,7 @@ jobs:
           trap 'rm -rf "$temp_dir"' EXIT
           op read 'op://Automation/Apple Developer App Store Connect AuthKey Github Releases/AuthKey.p8' --out-file "$temp_dir/AuthKey.p8"
           op read 'op://Automation/Apple Release Signing Developer ID Certificate/Apple Release Signing Developer ID Certificate.p12' --out-file "$temp_dir/developer-id.p12"
-          openssl pkcs12 -in "$temp_dir/developer-id.p12" -passin env:MACOS_SIGN_PASSWORD -noout >/dev/null
+          openssl pkcs12 -legacy -in "$temp_dir/developer-id.p12" -passin env:MACOS_SIGN_PASSWORD -noout >/dev/null
           macos_notary_key="$(base64 < "$temp_dir/AuthKey.p8" | tr -d "\n")"
           macos_sign_p12="$(base64 < "$temp_dir/developer-id.p12" | tr -d "\n")"
           printf "::add-mask::%s\n" "$macos_notary_key"
