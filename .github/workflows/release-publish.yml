@@ -54,9 +54,13 @@ jobs:
 
       - name: Prepare Apple signing payloads
         run: |
-          macos_notary_key="$(op read 'op://Automation/Apple Developer App Store Connect AuthKey Github Releases/AuthKey.p8' | base64 | tr -d "\n")"
-          macos_sign_p12="$(op read 'op://Automation/Apple Release Signing Developer ID Certificate/Apple Release Signing Developer ID Certificate.p12' | base64 | tr -d "\n")"
-          printf "::add-mask::%s\n" "$MACOS_SIGN_PASSWORD"
+          temp_dir="$(mktemp -d)"
+          trap 'rm -rf "$temp_dir"' EXIT
+          op read 'op://Automation/Apple Developer App Store Connect AuthKey Github Releases/AuthKey.p8' --out-file "$temp_dir/AuthKey.p8"
+          op read 'op://Automation/Apple Release Signing Developer ID Certificate/Apple Release Signing Developer ID Certificate.p12' --out-file "$temp_dir/developer-id.p12"
+          openssl pkcs12 -in "$temp_dir/developer-id.p12" -passin env:MACOS_SIGN_PASSWORD -noout >/dev/null
+          macos_notary_key="$(base64 < "$temp_dir/AuthKey.p8" | tr -d "\n")"
+          macos_sign_p12="$(base64 < "$temp_dir/developer-id.p12" | tr -d "\n")"
           printf "::add-mask::%s\n" "$macos_notary_key"
           printf "::add-mask::%s\n" "$macos_sign_p12"
           {
