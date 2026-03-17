@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.4](https://github.com/niieani/bb-project/compare/v0.6.3...v0.6.4) (2026-03-17)
+
+
+### Bug Fixes
+
+* allow legacy pkcs12 cipher in release check ([3dc5920](https://github.com/niieani/bb-project/commit/3dc592074529d9b119e3ea0a0725ba56251b18a3))
+
 ## [0.6.3](https://github.com/niieani/bb-project/compare/v0.6.2...v0.6.3) (2026-03-17)
 
 
