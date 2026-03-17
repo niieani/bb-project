@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/niieani/bb-project/compare/v0.6.0...v0.6.1) (2026-03-17)
+
+
+### Bug Fixes
+
+* sign and notarize macOS release artifacts ([6605745](https://github.com/niieani/bb-project/commit/6605745399a3eacb11bb93e24a424c76ded736fc))
+
 ## [0.6.0](https://github.com/niieani/bb-project/compare/v0.5.0...v0.6.0) (2026-03-17)
 
 
