@@ -45,6 +45,7 @@ jobs:
       - name: Load Apple release metadata
         uses: 1password/load-secrets-action@v3
         with:
+          export-env: true
           unset-previous: true
         env:
           MACOS_NOTARY_ISSUER_ID: op://Automation/Apple Developer App Store Connect AuthKey Github Releases/NOTARY_ISSUER_ID
@@ -55,6 +56,7 @@ jobs:
         run: |
           macos_notary_key="$(op read 'op://Automation/Apple Developer App Store Connect AuthKey Github Releases/AuthKey.p8' | base64 | tr -d "\n")"
           macos_sign_p12="$(op read 'op://Automation/Apple Release Signing Developer ID Certificate/Apple Release Signing Developer ID Certificate.p12' | base64 | tr -d "\n")"
+          printf "::add-mask::%s\n" "$MACOS_SIGN_PASSWORD"
           printf "::add-mask::%s\n" "$macos_notary_key"
           printf "::add-mask::%s\n" "$macos_sign_p12"
           {
