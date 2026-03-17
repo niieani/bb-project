@@ -25,6 +25,13 @@ type cloneRepoSpec struct {
 	RepoName string
 }
 
+type registeredCloneTarget struct {
+	RepoKey      string
+	CatalogName  string
+	RelativePath string
+	OriginURL    string
+}
+
 func (a *App) runClone(opts CloneOptions) (int, error) {
 	a.logf("clone: acquiring global lock")
 	lock, err := state.AcquireLock(a.Paths, "clone")
@@ -49,17 +56,30 @@ func (a *App) runClone(opts CloneOptions) (int, error) {
 }
 
 func (a *App) runCloneLocked(cfg domain.ConfigFile, machine *domain.MachineFile, opts CloneOptions) (cloneOutcome, error) {
-	spec, err := parseCloneRepoSpec(cfg, opts.Repo, a.Getenv)
+	registered, err := resolveRegisteredCloneTarget(a.Paths, cfg, opts.Repo, a.Getenv)
 	if err != nil {
 		return cloneOutcome{}, err
 	}
 
-	targetCatalog, err := resolveCloneCatalog(*machine, cfg, opts.Catalog)
+	specInput := opts.Repo
+	if registered != nil {
+		if strings.TrimSpace(registered.OriginURL) == "" {
+			return cloneOutcome{}, fmt.Errorf("registered repo %q is missing origin_url; cannot clone", registered.RepoKey)
+		}
+		specInput = registered.OriginURL
+	}
+
+	spec, err := parseCloneRepoSpec(cfg, specInput, a.Getenv)
 	if err != nil {
 		return cloneOutcome{}, err
 	}
 
-	repoKey, relativePath, repoName, err := resolveCloneTarget(targetCatalog, spec, opts.As)
+	targetCatalog, err := resolveCloneCatalog(*machine, cfg, opts.Catalog, registered)
+	if err != nil {
+		return cloneOutcome{}, err
+	}
+
+	repoKey, relativePath, repoName, err := resolveCloneTarget(targetCatalog, spec, opts.As, registered)
 	if err != nil {
 		return cloneOutcome{}, err
 	}
@@ -117,8 +137,18 @@ func (a *App) runCloneLocked(cfg domain.ConfigFile, machine *domain.MachineFile,
 	return cloneOutcome{Record: record}, nil
 }
 
-func resolveCloneCatalog(machine domain.MachineFile, cfg domain.ConfigFile, explicit string) (domain.Catalog, error) {
+func resolveCloneCatalog(machine domain.MachineFile, cfg domain.ConfigFile, explicit string, registered *registeredCloneTarget) (domain.Catalog, error) {
 	name := strings.TrimSpace(explicit)
+	if registered != nil {
+		expected := strings.TrimSpace(registered.CatalogName)
+		if expected == "" {
+			return domain.Catalog{}, fmt.Errorf("registered repo %q is missing catalog information", registered.RepoKey)
+		}
+		if name != "" && name != expected {
+			return domain.Catalog{}, fmt.Errorf("registered repo %q belongs to catalog %q, not %q", registered.RepoKey, expected, name)
+		}
+		name = expected
+	}
 	if name == "" {
 		name = strings.TrimSpace(cfg.Clone.DefaultCatalog)
 	}
@@ -132,12 +162,19 @@ func resolveCloneCatalog(machine domain.MachineFile, cfg domain.ConfigFile, expl
 	return catalog, nil
 }
 
-func resolveCloneTarget(catalog domain.Catalog, spec cloneRepoSpec, as string) (repoKey string, relativePath string, repoName string, err error) {
+func resolveCloneTarget(catalog domain.Catalog, spec cloneRepoSpec, as string, registered *registeredCloneTarget) (repoKey string, relativePath string, repoName string, err error) {
 	trimmedAs := strings.TrimSpace(as)
 	if trimmedAs != "" {
 		repoKey, relativePath, repoName, ok := domain.DeriveRepoKeyFromRelative(catalog, trimmedAs)
 		if !ok {
 			return "", "", "", fmt.Errorf("clone target path must match catalog layout depth %d", domain.EffectiveRepoPathDepth(catalog))
+		}
+		return repoKey, relativePath, repoName, nil
+	}
+	if registered != nil {
+		repoKey, relativePath, repoName, ok := domain.DeriveRepoKeyFromRelative(catalog, registered.RelativePath)
+		if !ok {
+			return "", "", "", fmt.Errorf("registered repo %q target path %q does not match catalog layout depth %d", registered.RepoKey, registered.RelativePath, domain.EffectiveRepoPathDepth(catalog))
 		}
 		return repoKey, relativePath, repoName, nil
 	}
@@ -203,6 +240,85 @@ func resolveCloneTransportOptions(cfg domain.ConfigFile, catalog string, opts Cl
 		only = append(only, pathSpec)
 	}
 	return shallow, filter, only
+}
+
+func resolveRegisteredCloneTarget(paths state.Paths, cfg domain.ConfigFile, input string, getenv func(string) string) (*registeredCloneTarget, error) {
+	repos, err := state.LoadAllRepoMetadata(paths)
+	if err != nil {
+		return nil, err
+	}
+
+	idx, err := selectRegisteredCloneMetadataIndex(repos, input)
+	if err != nil {
+		return nil, err
+	}
+	if idx == -1 {
+		spec, parseErr := parseCloneRepoSpec(cfg, input, getenv)
+		if parseErr != nil {
+			return nil, nil
+		}
+		idx, err = selectRepoMetadataByOrigin(repos, spec.CloneURL)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if idx == -1 {
+		return nil, nil
+	}
+
+	repoKey := strings.TrimSpace(repos[idx].RepoKey)
+	catalogName, relativePath, _, err := domain.ParseRepoKey(repoKey)
+	if err != nil {
+		return nil, fmt.Errorf("registered repo %q has invalid repo_key %q: %w", input, repoKey, err)
+	}
+
+	return &registeredCloneTarget{
+		RepoKey:      repoKey,
+		CatalogName:  catalogName,
+		RelativePath: relativePath,
+		OriginURL:    strings.TrimSpace(repos[idx].OriginURL),
+	}, nil
+}
+
+func selectRegisteredCloneMetadataIndex(repos []domain.RepoMetadataFile, selector string) (int, error) {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return -1, nil
+	}
+	if catalog, project, ok := splitCatalogProjectSelector(selector); ok {
+		selector = catalog + "/" + project
+	}
+	return selectRepoMetadataIndex(repos, selector)
+}
+
+func selectRepoMetadataByOrigin(repos []domain.RepoMetadataFile, origin string) (int, error) {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return -1, nil
+	}
+	matches := make([]int, 0, 2)
+	for i, repo := range repos {
+		if strings.TrimSpace(repo.OriginURL) == "" {
+			continue
+		}
+		same, err := originsMatchNormalized(repo.OriginURL, origin)
+		if err != nil || !same {
+			continue
+		}
+		matches = append(matches, i)
+	}
+	if len(matches) == 0 {
+		return -1, nil
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	keys := make([]string, 0, len(matches))
+	for _, idx := range matches {
+		keys = append(keys, repos[idx].RepoKey)
+	}
+	sort.Strings(keys)
+	return -1, fmt.Errorf("repo origin %q is ambiguous; matches: %s", origin, strings.Join(keys, ", "))
 }
 
 func parseCloneRepoSpec(cfg domain.ConfigFile, input string, getenv func(string) string) (cloneRepoSpec, error) {

@@ -12,6 +12,134 @@ import (
 	"bb-project/internal/state"
 )
 
+func TestRunCloneRegisteredRepoUsesMetadataResolution(t *testing.T) {
+	tests := []struct {
+		name     string
+		selector string
+	}{
+		{
+			name:     "unique project name infers registered catalog",
+			selector: "nara-baby-analysis",
+		},
+		{
+			name:     "owner repo infers registered catalog",
+			selector: "niieani/nara-baby-analysis",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Date(2026, 2, 16, 10, 0, 0, 0, time.UTC)
+			home := t.TempDir()
+			paths := state.NewPaths(home)
+			t.Setenv("BB_MACHINE_ID", "machine-a")
+
+			remoteRoot := filepath.Join(home, "remotes")
+			remotePath := setupCloneTestRemote(t, remoteRoot, "niieani", "nara-baby-analysis")
+			t.Setenv("BB_TEST_REMOTE_ROOT", remoteRoot)
+
+			cfg := state.DefaultConfig()
+			cfg.GitHub.Owner = "you"
+			if err := state.SaveConfig(paths, cfg); err != nil {
+				t.Fatalf("save config: %v", err)
+			}
+
+			machine := state.BootstrapMachine("machine-a", "host-a", now.Add(-time.Hour))
+			machine.DefaultCatalog = "references"
+			machine.Catalogs = []domain.Catalog{
+				{Name: "software", Root: filepath.Join(home, "catalogs", "software"), RepoPathDepth: 2},
+				{Name: "references", Root: filepath.Join(home, "catalogs", "references"), RepoPathDepth: 2},
+			}
+			if err := state.SaveMachine(paths, machine); err != nil {
+				t.Fatalf("save machine: %v", err)
+			}
+
+			if err := state.SaveRepoMetadata(paths, domain.RepoMetadataFile{
+				RepoKey:             "software/niieani/nara-baby-analysis",
+				Name:                "nara-baby-analysis",
+				OriginURL:           remotePath,
+				PreferredCatalog:    "software",
+				PushAccess:          domain.PushAccessUnknown,
+				BranchFollowEnabled: true,
+			}); err != nil {
+				t.Fatalf("save repo metadata: %v", err)
+			}
+
+			app := New(paths, &bytes.Buffer{}, &bytes.Buffer{})
+			app.Now = func() time.Time { return now }
+			app.Hostname = func() (string, error) { return "host-a", nil }
+
+			code, err := app.RunClone(CloneOptions{Repo: tt.selector})
+			if err != nil {
+				t.Fatalf("RunClone error: %v", err)
+			}
+			if code != 0 {
+				t.Fatalf("code = %d, want 0", code)
+			}
+
+			targetPath := filepath.Join(home, "catalogs", "software", "niieani", "nara-baby-analysis")
+			if _, err := os.Stat(filepath.Join(targetPath, ".git")); err != nil {
+				t.Fatalf("expected cloned repo in registered catalog: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(home, "catalogs", "references", "niieani", "nara-baby-analysis")); !os.IsNotExist(err) {
+				t.Fatalf("unexpected clone in machine default catalog: %v", err)
+			}
+		})
+	}
+}
+
+func TestRunCloneRegisteredRepoRejectsConflictingCatalogOverride(t *testing.T) {
+	now := time.Date(2026, 2, 16, 10, 0, 0, 0, time.UTC)
+	home := t.TempDir()
+	paths := state.NewPaths(home)
+	t.Setenv("BB_MACHINE_ID", "machine-a")
+
+	remoteRoot := filepath.Join(home, "remotes")
+	remotePath := setupCloneTestRemote(t, remoteRoot, "niieani", "nara-baby-analysis")
+	t.Setenv("BB_TEST_REMOTE_ROOT", remoteRoot)
+
+	cfg := state.DefaultConfig()
+	if err := state.SaveConfig(paths, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	machine := state.BootstrapMachine("machine-a", "host-a", now.Add(-time.Hour))
+	machine.Catalogs = []domain.Catalog{
+		{Name: "software", Root: filepath.Join(home, "catalogs", "software"), RepoPathDepth: 2},
+		{Name: "references", Root: filepath.Join(home, "catalogs", "references"), RepoPathDepth: 2},
+	}
+	if err := state.SaveMachine(paths, machine); err != nil {
+		t.Fatalf("save machine: %v", err)
+	}
+
+	if err := state.SaveRepoMetadata(paths, domain.RepoMetadataFile{
+		RepoKey:             "software/niieani/nara-baby-analysis",
+		Name:                "nara-baby-analysis",
+		OriginURL:           remotePath,
+		PreferredCatalog:    "software",
+		PushAccess:          domain.PushAccessUnknown,
+		BranchFollowEnabled: true,
+	}); err != nil {
+		t.Fatalf("save repo metadata: %v", err)
+	}
+
+	app := New(paths, &bytes.Buffer{}, &bytes.Buffer{})
+	app.Now = func() time.Time { return now }
+	app.Hostname = func() (string, error) { return "host-a", nil }
+
+	_, err := app.RunClone(CloneOptions{
+		Repo:    "nara-baby-analysis",
+		Catalog: "references",
+	})
+	if err == nil {
+		t.Fatal("expected conflicting catalog error")
+	}
+	if !strings.Contains(err.Error(), `belongs to catalog "software", not "references"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRunCloneGitHubHTTPLink(t *testing.T) {
 	now := time.Date(2026, 2, 16, 10, 0, 0, 0, time.UTC)
 	home := t.TempDir()

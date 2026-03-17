@@ -107,6 +107,10 @@ Wizard updates in `/Volumes/Projects/Software/bb-project/internal/app/config_wiz
 
 1. Input `<repo>` accepted forms:
 
+- Registered project selector:
+  - exact `repo_key`
+  - `catalog:project`
+  - unique project name
 - GitHub shorthand `org/repo`
 - GitHub HTTP/HTTPS repository link (for example `https://github.com/org/repo` or `http://github.com/org/repo`)
 - HTTPS/SSH git URL
@@ -114,6 +118,7 @@ Wizard updates in `/Volumes/Projects/Software/bb-project/internal/app/config_wiz
 
 2. Catalog selection precedence:
 
+- Registered project metadata (`repo_key` catalog)
 - `--catalog`
 - `config.clone.default_catalog`
 - error: `clone catalog is not configured; set clone.default_catalog or pass --catalog`
@@ -122,6 +127,7 @@ Wizard updates in `/Volumes/Projects/Software/bb-project/internal/app/config_wiz
 
 4. Repo target path derivation:
 
+- Registered project match uses the relative path from its `repo_key`.
 - Uses chosen catalog `repo_path_depth`.
 - Depth `1`: default relative path is `<repo-name>`.
 - Depth `2`: default relative path is `<owner>/<repo>` only when derivable.
@@ -160,6 +166,11 @@ Wizard updates in `/Volumes/Projects/Software/bb-project/internal/app/config_wiz
 - Observe cloned repo and upsert machine repo record immediately.
 - Save machine file immediately.
 - No full scan required.
+
+10. Registered project precedence:
+
+- If selector matches shared repo metadata, clone uses the metadata origin URL instead of re-deriving a remote from the raw input.
+- If `--catalog` conflicts with the registered repo catalog, command errors instead of cloning into a different catalog.
 
 ## Functional Spec: `bb link`
 

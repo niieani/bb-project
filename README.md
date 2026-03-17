@@ -168,6 +168,7 @@ Clone an existing repository into a configured catalog and immediately register 
 
 Accepted `<repo>` forms:
 
+- registered project selector (`repo_key`, `catalog:project`, or unique project name)
 - `org/repo`
 - GitHub HTTP/HTTPS repository link (`https://github.com/org/repo`)
 - HTTPS/SSH git URL
@@ -182,7 +183,9 @@ Flags:
 
 Behavior:
 
+- Resolves registered project metadata first. When input matches a registered project, clone uses the recorded origin URL, catalog, and canonical project path.
 - Uses clone defaults from `clone.*` config, then applies catalog preset mapping from `clone.catalog_preset`, then applies explicit CLI flags.
+- Registered project clones do not require `clone.default_catalog`; the repo's recorded catalog is authoritative.
 - Fails when target path conflicts and no `--as` is provided.
 - If repository already exists locally (same origin identity), command is a no-op and prints existing location.
 
