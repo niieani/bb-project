@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/niieani/bb-project/compare/v0.5.0...v0.6.0) (2026-03-17)
+
+
+### Features
+
+* migrate bubbles v2 component APIs across interactive fix/config flows ([a4b90f9](https://github.com/niieani/bb-project/commit/a4b90f9c7ab249cddebe9b0a10ecefc77f2fd9a3))
+
+
+### Bug Fixes
+
+* enforce minimum widths for all TUI text inputs ([1bc343d](https://github.com/niieani/bb-project/commit/1bc343d47a81fd69d4d0efbec3f45a0e8ef25c86))
+* prevent wizard input overflow from prompt-width miscalculation ([c70f7fd](https://github.com/niieani/bb-project/commit/c70f7fdfe300d39a9523877e6b0c8676a5a41536))
+* resolve registered project selectors in bb clone ([c4f2d8a](https://github.com/niieani/bb-project/commit/c4f2d8aa512df3275b6de5cb2c2c8fbef557d3cb))
+* **tui:** clarify bb fix summary follow-up actions ([0d96e43](https://github.com/niieani/bb-project/commit/0d96e43898f20eea1f230b8f1ac92f2f7ea37120))
+* wait in bb fix while global lock is held ([0708a0c](https://github.com/niieani/bb-project/commit/0708a0cfbecdad9310e441fc506f4fc08e6fe18e))
+
 ## [0.5.0](https://github.com/niieani/bb-project/compare/v0.4.0...v0.5.0) (2026-02-17)
 
 
