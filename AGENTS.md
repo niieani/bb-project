@@ -44,7 +44,6 @@ If user gives you UI/UX feedback, update it with a generalized rule.
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync
    git push
    git status  # MUST show "up to date with origin"
    ```
@@ -57,3 +56,19 @@ If user gives you UI/UX feedback, update it with a generalized rule.
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in `fp`. See `docs/agents/issue-tracker.md`.
+
+Brainstorms and other fp features see: FP_AGENTS.md
+
+### Triage labels
+
+Triage roles use the default label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repo: read root `CONTEXT.md` and root `docs/adr/` when present. See `docs/agents/domain.md`.

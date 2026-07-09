@@ -9,3 +9,6 @@ references/
 
 *.local
 *.local.*
+
+# Fiberplane local issue tracking
+.fp/
