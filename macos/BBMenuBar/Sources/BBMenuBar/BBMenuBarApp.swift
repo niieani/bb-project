@@ -8,6 +8,7 @@ struct BBMenuBarApp: App {
 
   init() {
     let arguments = CommandLine.arguments
+    let runtime = PlatformRuntimeConfiguration(arguments: arguments)
     let executableURL: URL?
     if let argumentIndex = arguments.firstIndex(of: "--bb-executable") {
       guard arguments.indices.contains(argumentIndex + 1) else {
@@ -17,18 +18,25 @@ struct BBMenuBarApp: App {
     } else {
       executableURL = nil
     }
-    let attentionRouter = AttentionWindowRouter()
-    let notificationClient = SystemNotificationClient(router: attentionRouter)
-    let notifications = NotificationCoordinator(
-      client: notificationClient, store: UserDefaultsNotificationStateStore())
-    let model = MenuBarModel(
-      client: ProcessBBClient(executableURL: executableURL), notifications: notifications)
+    let client = ProcessBBClient(executableURL: executableURL)
+    let model: MenuBarModel
+    if runtime.platformServicesEnabled {
+      let attentionRouter = AttentionWindowRouter()
+      let notificationClient = SystemNotificationClient(router: attentionRouter)
+      let notifications = NotificationCoordinator(
+        client: notificationClient, store: UserDefaultsNotificationStateStore())
+      model = MenuBarModel(client: client, notifications: notifications)
+    } else {
+      model = MenuBarModel(client: client)
+    }
     _model = State(initialValue: model)
     model.start(events: SystemRefreshEventSource(interval: .seconds(300)))
     Task { await model.refresh() }
-    Task {
-      await model.configureLaunchAtLogin(
-        LaunchAtLoginCoordinator(service: SystemLaunchAtLoginService()))
+    if runtime.platformServicesEnabled {
+      Task {
+        await model.configureLaunchAtLogin(
+          LaunchAtLoginCoordinator(service: SystemLaunchAtLoginService()))
+      }
     }
   }
 

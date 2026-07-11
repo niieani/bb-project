@@ -274,6 +274,7 @@ Empty states should never be blank. Include:
 ### Loading / Startup
 
 - Never show a blank screen with only a cursor while work is in progress.
+- Development/fixture launches must not attempt production-only OS registration or render its expected unavailability as an error. Keep production integrations enabled—and their failures explicit—in installed release mode.
 - Loading view includes:
   - Spinner.
   - One stable context sentence.
