@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.0](https://github.com/niieani/bb-project/compare/v0.6.4...v0.7.0) (2026-07-11)
+
+
+### Features
+
+* **fix:** group repositories by sync tier (BB-omwlbqoh) ([9759ff4](https://github.com/niieani/bb-project/commit/9759ff4fbd0c0c59bf0e782d964fb5726cdd3ce7))
+* **notify:** aggregate activity-aware alerts (BB-mncxyvws) ([6438911](https://github.com/niieani/bb-project/commit/6438911ee88ea8ba4ed8212d102535bdbfefd448))
+* **sync:** add tiered repo states (BB-tgjdlgzg) ([fab324b](https://github.com/niieani/bb-project/commit/fab324b78350e4de9c5af2f36e1b2fb7eccac744))
+* **sync:** verify remote format alignment (BB-ajbvgxuh) ([5d90d11](https://github.com/niieani/bb-project/commit/5d90d11d4c77e2bb45d6f28c41159bad1be4e107))
+
 ## [0.6.4](https://github.com/niieani/bb-project/compare/v0.6.3...v0.6.4) (2026-03-17)
 
 
