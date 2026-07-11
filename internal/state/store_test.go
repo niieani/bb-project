@@ -133,6 +133,22 @@ func TestLoadAllMachineFilesSkipsOldSchemaWithNamedWarning(t *testing.T) {
 	}
 }
 
+func TestLoadNotifyCacheDiscardsOldVersion(t *testing.T) {
+	t.Parallel()
+	paths := NewPaths(t.TempDir())
+	old := map[string]any{"version": 1, "last_sent": map[string]any{"repo": map[string]any{"fingerprint": "old"}}}
+	if err := SaveYAML(paths.NotifyCachePath(), old); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := LoadNotifyCache(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cache.Version != 2 || cache.LastSent.Fingerprint != "" {
+		t.Fatalf("cache = %+v", cache)
+	}
+}
+
 func TestLockFilePayload(t *testing.T) {
 	t.Parallel()
 
@@ -391,7 +407,8 @@ scheduler:
   interval_minutes: 60
 notify:
   enabled: true
-  dedupe: true
+  quiet_hours: 2
+  wip_stale_hours: 24
   throttle_minutes: 60
 `) + "\n"
 		if err := os.MkdirAll(paths.ConfigRoot(), 0o755); err != nil {

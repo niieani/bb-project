@@ -135,7 +135,7 @@ These concrete patterns should be followed:
 
 4. Notify
 
-- Edit `notify.enabled`, `notify.dedupe`, `notify.throttle_minutes`.
+- Edit `notify.enabled`, `notify.throttle_minutes`, `notify.quiet_hours`, and `notify.wip_stale_hours`.
 
 5. Catalogs
 

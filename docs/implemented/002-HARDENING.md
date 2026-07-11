@@ -146,7 +146,7 @@ This sequence keeps risk low and simplifies rollback.
   - `go test ./internal/e2e -run TestSyncEdgeCases -count=1`
 - Manual smoke (optional):
   - Simulate stale lock file, confirm automatic recovery.
-  - Simulate repeated unsyncable notifications across throttle window.
+  - Simulate repeated aggregate attention digests across the throttle window.
 
 ## Risks and Mitigations
 

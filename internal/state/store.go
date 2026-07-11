@@ -117,7 +117,7 @@ func DefaultConfig() domain.ConfigFile {
 		Scheduler: domain.SchedulerConfig{
 			IntervalMinutes: 60,
 		},
-		Notify: domain.NotifyConfig{Enabled: true, Dedupe: true, ThrottleMinutes: 60},
+		Notify: domain.NotifyConfig{Enabled: true, ThrottleMinutes: 60, QuietHours: 2, WIPStaleHours: 24},
 		Integrations: domain.Integrations{
 			Lumen: domain.LumenIntegrationConfig{
 				Enabled:                            true,
@@ -314,8 +314,7 @@ func LoadNotifyCache(paths Paths) (domain.NotifyCacheFile, error) {
 	cachePath := paths.NotifyCachePath()
 	if _, err := os.Stat(cachePath); errors.Is(err, os.ErrNotExist) {
 		return domain.NotifyCacheFile{
-			Version:          1,
-			LastSent:         map[string]domain.NotifyCacheEntry{},
+			Version:          2,
 			DeliveryFailures: map[string]domain.NotifyDeliveryFailure{},
 		}, nil
 	}
@@ -323,23 +322,18 @@ func LoadNotifyCache(paths Paths) (domain.NotifyCacheFile, error) {
 	if err := LoadYAML(cachePath, &cache); err != nil {
 		return domain.NotifyCacheFile{}, fmt.Errorf("parse %s: %w", cachePath, err)
 	}
-	if cache.LastSent == nil {
-		cache.LastSent = map[string]domain.NotifyCacheEntry{}
+	if cache.Version < 2 {
+		return domain.NotifyCacheFile{Version: 2, DeliveryFailures: map[string]domain.NotifyDeliveryFailure{}}, nil
 	}
 	if cache.DeliveryFailures == nil {
 		cache.DeliveryFailures = map[string]domain.NotifyDeliveryFailure{}
 	}
-	if cache.Version == 0 {
-		cache.Version = 1
-	}
+	cache.Version = 2
 	return cache, nil
 }
 
 func SaveNotifyCache(paths Paths, cache domain.NotifyCacheFile) error {
-	cache.Version = 1
-	if cache.LastSent == nil {
-		cache.LastSent = map[string]domain.NotifyCacheEntry{}
-	}
+	cache.Version = 2
 	if cache.DeliveryFailures == nil {
 		cache.DeliveryFailures = map[string]domain.NotifyDeliveryFailure{}
 	}

@@ -266,7 +266,7 @@ Flags:
 
 - `--include-catalog <name>` (repeatable)
 - `--push` (allow pushing ahead commits when repo policy blocks by default)
-- `--notify` (emit deduped unsyncable notifications)
+- `--notify` (emit the activity-aware attention digest)
 - `--notify-backend <stdout|osascript>` (override notification backend; falls back to `BB_NOTIFY_BACKEND`, then `stdout`)
 - `--dry-run` (observe/reconcile decisions without write-side sync actions)
 
@@ -507,8 +507,9 @@ scheduler:
   interval_minutes: 60
 notify:
   enabled: true
-  dedupe: true
   throttle_minutes: 60
+  quiet_hours: 2
+  wip_stale_hours: 24
 integrations:
   lumen:
     enabled: true
@@ -566,11 +567,12 @@ Precedence is `blocked` > `pending` > `wip` > `synced`. Unknown reasons fail exp
 
 When `sync --notify` is used:
 
-- only unsyncable repos are considered
-- repos with only non-blocking unsyncable reasons are skipped
-- notifications are deduplicated by reason fingerprint per repo cache key
+- one digest covers blocked repos outside the quiet period and WIP older than the stale threshold
+- pending repositories never notify
+- unchanged whole attention sets never repeat; changed sets still respect the throttle
+- the body lists at most four repositories plus an overflow count
 - backend selection priority: `--notify-backend` > `BB_NOTIFY_BACKEND` > `stdout`
-- `stdout` backend writes `notify <repo>: <fingerprint>`
+- `stdout` backend writes one `notify` digest with up to four repository lines and an overflow count
 - `osascript` backend sends macOS desktop notifications
 
 ## Safety Guarantees
@@ -682,7 +684,6 @@ Used primarily by test harness:
 ## Current Limitations
 
 - Sync orchestration code is large and being refactored in v1.1.
-- Notification throttle enforcement is planned in v1.1.
 
 ## Troubleshooting
 

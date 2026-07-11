@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -11,97 +12,128 @@ import (
 
 func (a *App) notifyUnsyncable(cfg domain.ConfigFile, repos []domain.MachineRepoRecord, backendOverride string) error {
 	if !cfg.Notify.Enabled {
-		a.logf("notify: disabled in config")
 		return nil
 	}
-	backendName, err := a.resolveNotifyBackend(backendOverride)
+	now := a.Now()
+	attention := notificationAttentionSet(repos, now, cfg.Notify)
+	cache, err := state.LoadNotifyCache(a.Paths)
+	if err != nil {
+		return err
+	}
+	if len(attention) == 0 {
+		if cache.LastSent.Fingerprint != "" {
+			cache.LastSent.Fingerprint = ""
+			return state.SaveNotifyCache(a.Paths, cache)
+		}
+		return nil
+	}
+	fingerprint := attentionFingerprint(attention)
+	if cache.LastSent.Fingerprint == fingerprint {
+		return nil
+	}
+	throttle := time.Duration(cfg.Notify.ThrottleMinutes) * time.Minute
+	if throttle > 0 && !cache.LastSent.SentAt.IsZero() && now.Sub(cache.LastSent.SentAt) >= 0 && now.Sub(cache.LastSent.SentAt) < throttle {
+		return nil
+	}
+	backend, err := a.resolveNotifyBackend(backendOverride)
 	if err != nil {
 		return err
 	}
 	factory := a.NewNotifySender
 	if factory == nil {
-		factory = func(name string) (notifySender, error) {
-			return newNotifySender(name, a.Stdout, a.RunCommand)
-		}
+		factory = func(name string) (notifySender, error) { return newNotifySender(name, a.Stdout, a.RunCommand) }
 	}
-	sender, err := factory(backendName)
+	sender, err := factory(backend)
 	if err != nil {
 		return err
 	}
-
-	cache, err := state.LoadNotifyCache(a.Paths)
-	if err != nil {
-		return err
+	msg := notifyMessage{Fingerprint: fingerprint, Body: attentionBody(attention)}
+	if err := sender.Send(msg); err != nil {
+		cache.DeliveryFailures[backend] = domain.NotifyDeliveryFailure{Backend: backend, Fingerprint: fingerprint, Error: err.Error(), FailedAt: now}
+		return state.SaveNotifyCache(a.Paths, cache)
 	}
-	now := a.Now()
-	throttleWindow := time.Duration(cfg.Notify.ThrottleMinutes) * time.Minute
-	for _, rec := range repos {
-		if rec.State == domain.RepoStateSynced {
-			continue
-		}
-		if rec.State != domain.RepoStateBlocked {
-			continue
-		}
-		fingerprint := unsyncableFingerprint(rec.Reasons)
-		cacheKey := notifyCacheKey(rec)
-		entry, ok := cache.LastSent[cacheKey]
-		if ok && entry.Fingerprint == fingerprint && cfg.Notify.Dedupe {
-			a.logf("notify: deduped %s (%s)", rec.Name, fingerprint)
-			continue
-		}
-		if ok && throttleWindow > 0 {
-			elapsed := now.Sub(entry.SentAt)
-			if elapsed >= 0 && elapsed < throttleWindow {
-				a.logf("notify: throttled %s (%s), remaining=%s", rec.Name, fingerprint, throttleWindow-elapsed)
-				continue
-			}
-		}
-		msg := notifyMessage{
-			Repo:        rec,
-			Fingerprint: fingerprint,
-		}
-		if err := sender.Send(msg); err != nil {
-			failureKey := notifyFailureCacheKey(backendName, rec)
-			a.logf("notify: backend %s failed for %s: %v", backendName, rec.Name, err)
-			cache.DeliveryFailures[failureKey] = domain.NotifyDeliveryFailure{
-				Backend:     backendName,
-				RepoKey:     strings.TrimSpace(rec.RepoKey),
-				RepoName:    strings.TrimSpace(rec.Name),
-				RepoPath:    strings.TrimSpace(rec.Path),
-				Fingerprint: fingerprint,
-				Error:       err.Error(),
-				FailedAt:    now,
-			}
-			continue
-		}
-		a.logf("notify: backend %s emitted for %s (%s)", backendName, rec.Name, fingerprint)
-		cache.LastSent[cacheKey] = domain.NotifyCacheEntry{Fingerprint: fingerprint, SentAt: now}
-		delete(cache.DeliveryFailures, notifyFailureCacheKey(backendName, rec))
-	}
+	cache.LastSent = domain.NotifyCacheEntry{Fingerprint: fingerprint, SentAt: now}
+	delete(cache.DeliveryFailures, backend)
 	return state.SaveNotifyCache(a.Paths, cache)
 }
 
-func notifyCacheKey(rec domain.MachineRepoRecord) string {
-	if strings.TrimSpace(rec.RepoKey) != "" {
-		return "repo_key:" + rec.RepoKey
+func notificationAttentionSet(repos []domain.MachineRepoRecord, now time.Time, cfg domain.NotifyConfig) []domain.MachineRepoRecord {
+	out := make([]domain.MachineRepoRecord, 0)
+	quiet := time.Duration(cfg.QuietHours) * time.Hour
+	stale := time.Duration(cfg.WIPStaleHours) * time.Hour
+	for _, r := range repos {
+		age := now.Sub(r.LastActivityAt)
+		unknown := r.LastActivityAt.IsZero()
+		if r.State == domain.RepoStateBlocked && (unknown || age >= quiet) {
+			out = append(out, r)
+		}
+		if r.State == domain.RepoStateWip && (unknown || age >= stale) {
+			out = append(out, r)
+		}
 	}
-	if strings.TrimSpace(rec.Path) != "" {
-		return "path:" + rec.Path
-	}
-	if strings.TrimSpace(rec.Name) != "" {
-		return "name:" + rec.Name
-	}
-	return "unknown"
+	sort.Slice(out, func(i, j int) bool { return notifyIdentity(out[i]) < notifyIdentity(out[j]) })
+	return out
 }
 
-func unsyncableFingerprint(reasons []domain.UnsyncableReason) string {
+func notifyIdentity(r domain.MachineRepoRecord) string {
+	if r.RepoKey != "" {
+		return r.RepoKey
+	}
+	if r.Name != "" {
+		return r.Name
+	}
+	return r.Path
+}
+func attentionFingerprint(repos []domain.MachineRepoRecord) string {
+	lines := make([]string, 0, len(repos))
+	for _, r := range repos {
+		reasons := make([]string, len(r.Reasons))
+		for i, v := range r.Reasons {
+			reasons[i] = string(v)
+		}
+		sort.Strings(reasons)
+		lines = append(lines, fmt.Sprintf("%s:%s:%s", notifyIdentity(r), r.State, strings.Join(reasons, "+")))
+	}
+	return strings.Join(lines, "\n")
+}
+func attentionBody(repos []domain.MachineRepoRecord) string {
+	lines := []string{fmt.Sprintf("%d repo(s) need attention:", len(repos))}
+	limit := min(4, len(repos))
+	for _, r := range repos[:limit] {
+		reason := "unknown"
+		if dominant, ok := dominantAttentionReason(r.Reasons); ok {
+			reason = string(dominant)
+		}
+		lines = append(lines, fmt.Sprintf("%s: %s", r.Name, reason))
+	}
+	if len(repos) > limit {
+		lines = append(lines, fmt.Sprintf("+%d more", len(repos)-limit))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func dominantAttentionReason(reasons []domain.UnsyncableReason) (domain.UnsyncableReason, bool) {
 	if len(reasons) == 0 {
-		return ""
+		return "", false
 	}
-	parts := make([]string, 0, len(reasons))
-	for _, r := range reasons {
-		parts = append(parts, string(r))
+	sorted := append([]domain.UnsyncableReason(nil), reasons...)
+	rank := func(r domain.UnsyncableReason) int {
+		switch domain.ReasonTier(r) {
+		case domain.RepoStateBlocked:
+			return 3
+		case domain.RepoStatePending:
+			return 2
+		case domain.RepoStateWip:
+			return 1
+		}
+		return 0
 	}
-	sort.Strings(parts)
-	return strings.Join(parts, "+")
+	sort.Slice(sorted, func(i, j int) bool {
+		ri, rj := rank(sorted[i]), rank(sorted[j])
+		if ri != rj {
+			return ri > rj
+		}
+		return sorted[i] < sorted[j]
+	})
+	return sorted[0], true
 }

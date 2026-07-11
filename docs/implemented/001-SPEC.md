@@ -168,7 +168,8 @@ sync:
   scan_freshness_seconds: 60
 notify:
   enabled: true
-  dedupe: true
+  quiet_hours: 2
+  wip_stale_hours: 24
   throttle_minutes: 60
 ```
 
@@ -644,7 +645,7 @@ Suggested exit codes:
 
 `bb sync --notify` sends macOS notifications only when:
 
-1. Repo is unsyncable and not deduped by fingerprint (`notify.dedupe=true`), and
+1. The aggregate attention set changed since the last sent digest, and
 2. Repo is outside the throttle window (`notify.throttle_minutes > 0`), or throttling is disabled (`notify.throttle_minutes <= 0`).
 
 Throttle semantics:

@@ -6,8 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-
-	"bb-project/internal/domain"
 )
 
 const (
@@ -17,8 +15,8 @@ const (
 )
 
 type notifyMessage struct {
-	Repo        domain.MachineRepoRecord
 	Fingerprint string
+	Body        string
 }
 
 type notifySender interface {
@@ -30,7 +28,7 @@ type stdoutNotifySender struct {
 }
 
 func (s *stdoutNotifySender) Send(msg notifyMessage) error {
-	_, err := fmt.Fprintf(s.out, "notify %s: %s\n", msg.Repo.Name, msg.Fingerprint)
+	_, err := fmt.Fprintf(s.out, "notify %s\n", msg.Body)
 	return err
 }
 
@@ -40,9 +38,7 @@ type osascriptNotifySender struct {
 
 func (s *osascriptNotifySender) Send(msg notifyMessage) error {
 	title := "bb sync"
-	subtitle := msg.Repo.Name
-	body := fmt.Sprintf("Unsyncable: %s", msg.Fingerprint)
-	script := fmt.Sprintf("display notification %s with title %s subtitle %s", applescriptQuote(body), applescriptQuote(title), applescriptQuote(subtitle))
+	script := fmt.Sprintf("display notification %s with title %s", applescriptQuote(msg.Body), applescriptQuote(title))
 	out, err := s.runCommand("osascript", "-e", script)
 	if err != nil {
 		return fmt.Errorf("osascript notify failed: %w: %s", err, strings.TrimSpace(out))
@@ -102,8 +98,4 @@ func applescriptQuote(value string) string {
 		"\r", "",
 	)
 	return `"` + replacer.Replace(value) + `"`
-}
-
-func notifyFailureCacheKey(backend string, rec domain.MachineRepoRecord) string {
-	return backend + "|" + notifyCacheKey(rec)
 }

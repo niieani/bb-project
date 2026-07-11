@@ -29,8 +29,7 @@ func TestRunDoctorReportsNotifyDeliveryWarning(t *testing.T) {
 	}
 
 	if err := state.SaveNotifyCache(paths, domain.NotifyCacheFile{
-		Version:  1,
-		LastSent: map[string]domain.NotifyCacheEntry{},
+		Version: 2,
 		DeliveryFailures: map[string]domain.NotifyDeliveryFailure{
 			"stdout|repo_key:software/api": {
 				Backend:  notifyBackendStdout,

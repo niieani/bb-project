@@ -48,8 +48,9 @@ const (
 const (
 	automationFocusScheduler = iota
 	automationFocusNotifyEnabled
-	automationFocusNotifyDedupe
 	automationFocusNotifyThrottle
+	automationFocusNotifyQuiet
+	automationFocusNotifyWIPStale
 	automationFocusCount
 )
 
@@ -206,6 +207,8 @@ type configWizardModel struct {
 	schedulerInterval textinput.Model
 
 	notifyThrottle  textinput.Model
+	notifyQuiet     textinput.Model
+	notifyWIPStale  textinput.Model
 	automationFocus int
 
 	fixesFocus     int
@@ -870,11 +873,6 @@ func (m *configWizardModel) updateAutomation(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.recomputeDirty()
 				return m, nil
 			}
-			if m.automationFocus == automationFocusNotifyDedupe {
-				m.config.Notify.Dedupe = !m.config.Notify.Dedupe
-				m.recomputeDirty()
-				return m, nil
-			}
 		case "enter":
 			if !m.focusTabs {
 				if v, err := strconv.Atoi(strings.TrimSpace(m.schedulerInterval.Value())); err == nil {
@@ -882,6 +880,12 @@ func (m *configWizardModel) updateAutomation(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if v, err := strconv.Atoi(strings.TrimSpace(m.notifyThrottle.Value())); err == nil {
 					m.config.Notify.ThrottleMinutes = v
+				}
+				if v, err := strconv.Atoi(strings.TrimSpace(m.notifyQuiet.Value())); err == nil {
+					m.config.Notify.QuietHours = v
+				}
+				if v, err := strconv.Atoi(strings.TrimSpace(m.notifyWIPStale.Value())); err == nil {
+					m.config.Notify.WIPStaleHours = v
 				}
 				m.advanceStep()
 				return m, nil
@@ -904,6 +908,16 @@ func (m *configWizardModel) updateAutomation(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notifyThrottle, cmd = m.notifyThrottle.Update(msg)
 		if v, err := strconv.Atoi(strings.TrimSpace(m.notifyThrottle.Value())); err == nil {
 			m.config.Notify.ThrottleMinutes = v
+		}
+	case automationFocusNotifyQuiet:
+		m.notifyQuiet, cmd = m.notifyQuiet.Update(msg)
+		if v, err := strconv.Atoi(strings.TrimSpace(m.notifyQuiet.Value())); err == nil {
+			m.config.Notify.QuietHours = v
+		}
+	case automationFocusNotifyWIPStale:
+		m.notifyWIPStale, cmd = m.notifyWIPStale.Update(msg)
+		if v, err := strconv.Atoi(strings.TrimSpace(m.notifyWIPStale.Value())); err == nil {
+			m.config.Notify.WIPStaleHours = v
 		}
 	default:
 		return m, nil
@@ -1362,6 +1376,17 @@ func (m *configWizardModel) initNotifyInput() {
 	}
 	throttle.Blur()
 	m.notifyThrottle = throttle
+	makeHours := func(value int) textinput.Model {
+		in := textinput.New()
+		in.Prompt = ""
+		in.Placeholder = "non-negative hours"
+		in.SetValue(strconv.Itoa(value))
+		in.Validate = throttle.Validate
+		in.Blur()
+		return in
+	}
+	m.notifyQuiet = makeHours(m.config.Notify.QuietHours)
+	m.notifyWIPStale = makeHours(m.config.Notify.WIPStaleHours)
 }
 
 func (m *configWizardModel) initCatalogTable() {
@@ -1463,6 +1488,8 @@ func (m *configWizardModel) syncInputWidths() {
 	m.githubOwnerInput.SetWidth(inputWidthFor(m.githubOwnerInput.Prompt))
 	m.schedulerInterval.SetWidth(inputWidthFor(m.schedulerInterval.Prompt))
 	m.notifyThrottle.SetWidth(inputWidthFor(m.notifyThrottle.Prompt))
+	m.notifyQuiet.SetWidth(inputWidthFor(m.notifyQuiet.Prompt))
+	m.notifyWIPStale.SetWidth(inputWidthFor(m.notifyWIPStale.Prompt))
 
 	if m.catalogEdit == nil {
 		return
@@ -1484,19 +1511,33 @@ func (m *configWizardModel) updateAutomationFocus() {
 	if m.focusTabs || m.step != stepAutomation {
 		m.schedulerInterval.Blur()
 		m.notifyThrottle.Blur()
+		m.notifyQuiet.Blur()
+		m.notifyWIPStale.Blur()
 		return
 	}
 	if m.automationFocus == automationFocusScheduler {
 		m.schedulerInterval.Focus()
 		m.notifyThrottle.Blur()
+		m.notifyQuiet.Blur()
+		m.notifyWIPStale.Blur()
 		return
 	}
 	m.schedulerInterval.Blur()
 	if m.automationFocus == automationFocusNotifyThrottle {
 		m.notifyThrottle.Focus()
+		m.notifyQuiet.Blur()
+		m.notifyWIPStale.Blur()
 		return
 	}
 	m.notifyThrottle.Blur()
+	m.notifyQuiet.Blur()
+	m.notifyWIPStale.Blur()
+	if m.automationFocus == automationFocusNotifyQuiet {
+		m.notifyQuiet.Focus()
+	}
+	if m.automationFocus == automationFocusNotifyWIPStale {
+		m.notifyWIPStale.Focus()
+	}
 }
 
 func (m *configWizardModel) updateFixesFocus() {
@@ -1658,6 +1699,12 @@ func (m *configWizardModel) validateCurrentStep() error {
 		if m.notifyThrottle.Err != nil {
 			return m.notifyThrottle.Err
 		}
+		if m.notifyQuiet.Err != nil {
+			return m.notifyQuiet.Err
+		}
+		if m.notifyWIPStale.Err != nil {
+			return m.notifyWIPStale.Err
+		}
 	case stepCatalogs:
 		if err := validateMachineForSave(m.machine); err != nil {
 			return err
@@ -1675,6 +1722,12 @@ func (m *configWizardModel) validateAll() error {
 	}
 	if v, err := strconv.Atoi(strings.TrimSpace(m.notifyThrottle.Value())); err == nil {
 		m.config.Notify.ThrottleMinutes = v
+	}
+	if v, err := strconv.Atoi(strings.TrimSpace(m.notifyQuiet.Value())); err == nil {
+		m.config.Notify.QuietHours = v
+	}
+	if v, err := strconv.Atoi(strings.TrimSpace(m.notifyWIPStale.Value())); err == nil {
+		m.config.Notify.WIPStaleHours = v
 	}
 	if err := validateConfigForSave(m.config); err != nil {
 		return err
@@ -1832,7 +1885,7 @@ func (m *configWizardModel) viewAutomation() string {
 	var b strings.Builder
 	b.WriteString(labelStyle.Render("Automation & Notifications"))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Configure background sync cadence and unsyncable notification behavior."))
+	b.WriteString(hintStyle.Render("Configure background sync cadence and attention notifications."))
 	b.WriteString("\n\n")
 	b.WriteString(renderFieldBlock(
 		!m.focusTabs && m.automationFocus == automationFocusScheduler,
@@ -1845,24 +1898,21 @@ func (m *configWizardModel) viewAutomation() string {
 	b.WriteString(renderToggleField(
 		!m.focusTabs && m.automationFocus == automationFocusNotifyEnabled,
 		"Enable notifications",
-		"Emits notification output for unsyncable repositories when --notify is used.",
+		"Emits one activity-aware attention digest when --notify is used.",
 		m.config.Notify.Enabled,
-	))
-	b.WriteString("\n\n")
-	b.WriteString(renderToggleField(
-		!m.focusTabs && m.automationFocus == automationFocusNotifyDedupe,
-		"Deduplicate notifications",
-		"Suppresses repeated notifications for unchanged unsyncable states.",
-		m.config.Notify.Dedupe,
 	))
 	b.WriteString("\n\n")
 	b.WriteString(renderFieldBlock(
 		!m.focusTabs && m.automationFocus == automationFocusNotifyThrottle,
 		"Notification throttle (minutes)",
-		"Minimum minutes between notifications for the same repository.",
+		"Minimum minutes between changed attention digests.",
 		renderInputContainer(m.notifyThrottle.View(), !m.focusTabs && m.automationFocus == automationFocusNotifyThrottle),
 		errorText(m.notifyThrottle.Err),
 	))
+	b.WriteString("\n\n")
+	b.WriteString(renderFieldBlock(!m.focusTabs && m.automationFocus == automationFocusNotifyQuiet, "Quiet period (hours)", "Suppress recently active blocked repositories.", renderInputContainer(m.notifyQuiet.View(), !m.focusTabs && m.automationFocus == automationFocusNotifyQuiet), errorText(m.notifyQuiet.Err)))
+	b.WriteString("\n\n")
+	b.WriteString(renderFieldBlock(!m.focusTabs && m.automationFocus == automationFocusNotifyWIPStale, "WIP stale threshold (hours)", "Include inactive work in progress after this age.", renderInputContainer(m.notifyWIPStale.View(), !m.focusTabs && m.automationFocus == automationFocusNotifyWIPStale), errorText(m.notifyWIPStale.Err)))
 	return b.String()
 }
 

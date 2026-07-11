@@ -164,7 +164,8 @@ sync:
   pull_ff_only: true
 notify:
   enabled: true
-  dedupe: true
+  quiet_hours: 2
+  wip_stale_hours: 24
   throttle_minutes: 60
 `) + "\n"
 }

@@ -143,8 +143,9 @@ type SchedulerConfig struct {
 
 type NotifyConfig struct {
 	Enabled         bool `yaml:"enabled"`
-	Dedupe          bool `yaml:"dedupe"`
 	ThrottleMinutes int  `yaml:"throttle_minutes"`
+	QuietHours      int  `yaml:"quiet_hours"`
+	WIPStaleHours   int  `yaml:"wip_stale_hours"`
 }
 
 type Integrations struct {
@@ -236,7 +237,7 @@ type ObservedRepoState struct {
 
 type NotifyCacheFile struct {
 	Version          int                              `yaml:"version"`
-	LastSent         map[string]NotifyCacheEntry      `yaml:"last_sent"`
+	LastSent         NotifyCacheEntry                 `yaml:"last_sent"`
 	DeliveryFailures map[string]NotifyDeliveryFailure `yaml:"delivery_failures,omitempty"`
 }
 

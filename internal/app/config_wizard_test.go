@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -111,6 +112,37 @@ func TestWizardSyncCanToggleAutomaticRemoteAlignment(t *testing.T) {
 	_, _ = m.Update(testKeyPressCode(tea.KeySpace))
 	if m.config.Sync.AutoAlignRemoteFormat == before {
 		t.Fatal("expected automatic remote alignment toggle to change")
+	}
+}
+
+func TestWizardNotificationActivityThresholdsRoundTrip(t *testing.T) {
+	t.Parallel()
+	m := testConfigWizardModel(t)
+	m.notifyQuiet.SetValue("3")
+	m.notifyWIPStale.SetValue("36")
+	if err := m.validateAll(); err != nil {
+		t.Fatal(err)
+	}
+	if m.config.Notify.QuietHours != 3 || m.config.Notify.WIPStaleHours != 36 {
+		t.Fatalf("notify = %+v", m.config.Notify)
+	}
+	paths := state.NewPaths(t.TempDir())
+	if err := state.SaveConfig(paths, m.config); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := state.LoadConfig(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Notify.QuietHours != 3 || loaded.Notify.WIPStaleHours != 36 {
+		t.Fatalf("loaded notify = %+v", loaded.Notify)
+	}
+	raw, err := os.ReadFile(paths.ConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "dedupe:") {
+		t.Fatalf("removed dedupe key persisted:\n%s", raw)
 	}
 }
 
