@@ -810,7 +810,7 @@ func (m *configWizardModel) updateSync(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncCursor = 0
 			return m, nil
 		}
-		if m.syncCursor < 5 {
+		if m.syncCursor < 6 {
 			m.syncCursor++
 		}
 	case "space":
@@ -827,7 +827,7 @@ func (m *configWizardModel) updateSync(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncCursor--
 		}
 	case "j":
-		if m.syncCursor < 5 {
+		if m.syncCursor < 6 {
 			m.syncCursor++
 		}
 	}
@@ -1554,12 +1554,14 @@ func (m *configWizardModel) toggleSyncOption(idx int) {
 	case 1:
 		m.config.Sync.IncludeUntrackedAsDirty = !m.config.Sync.IncludeUntrackedAsDirty
 	case 2:
-		m.config.Sync.DefaultAutoPushPrivate = !m.config.Sync.DefaultAutoPushPrivate
+		m.config.Sync.AutoAlignRemoteFormat = !m.config.Sync.AutoAlignRemoteFormat
 	case 3:
-		m.config.Sync.DefaultAutoPushPublic = !m.config.Sync.DefaultAutoPushPublic
+		m.config.Sync.DefaultAutoPushPrivate = !m.config.Sync.DefaultAutoPushPrivate
 	case 4:
-		m.config.Sync.FetchPrune = !m.config.Sync.FetchPrune
+		m.config.Sync.DefaultAutoPushPublic = !m.config.Sync.DefaultAutoPushPublic
 	case 5:
+		m.config.Sync.FetchPrune = !m.config.Sync.FetchPrune
+	case 6:
 		m.config.Sync.PullFFOnly = !m.config.Sync.PullFFOnly
 	}
 }
@@ -1783,6 +1785,7 @@ func (m *configWizardModel) viewSync() string {
 	labels := []string{
 		"Discover repositories automatically",
 		"Treat untracked files as dirty state",
+		"Align GitHub remote URL format automatically",
 		"Allow automatic push for private repositories",
 		"Allow automatic push for public repositories",
 		"Run fetch --prune during sync",
@@ -1790,7 +1793,8 @@ func (m *configWizardModel) viewSync() string {
 	}
 	descriptions := []string{
 		"Scans configured catalogs for git repos during sync operations.",
-		"Marks repositories unsyncable when untracked files are present.",
+		"Classifies repositories with untracked files as work in progress.",
+		"Rewrites mismatched origin URLs only after verifying the preferred URL is reachable.",
 		"Permits syncing to push ahead commits for private repositories.",
 		"Permits syncing to push ahead commits for public repositories.",
 		"Keeps remote tracking refs clean before reconciliation.",
@@ -1799,6 +1803,7 @@ func (m *configWizardModel) viewSync() string {
 	values := []bool{
 		m.config.Sync.AutoDiscover,
 		m.config.Sync.IncludeUntrackedAsDirty,
+		m.config.Sync.AutoAlignRemoteFormat,
 		m.config.Sync.DefaultAutoPushPrivate,
 		m.config.Sync.DefaultAutoPushPublic,
 		m.config.Sync.FetchPrune,

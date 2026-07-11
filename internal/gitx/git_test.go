@@ -3,9 +3,24 @@ package gitx
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestVerifyRemoteHeadsTimesOut(t *testing.T) {
+	dir := t.TempDir()
+	git := filepath.Join(dir, "git")
+	if err := os.WriteFile(git, []byte("#!/bin/sh\nsleep 2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	err := (Runner{}).VerifyRemoteHeads(dir, "origin", 10*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("error = %v", err)
+	}
+}
 
 func TestLooksLikePushAccessDenied(t *testing.T) {
 	t.Parallel()

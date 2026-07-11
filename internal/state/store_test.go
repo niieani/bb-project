@@ -255,6 +255,9 @@ func TestDefaultConfigSetsSchedulerInterval(t *testing.T) {
 	t.Parallel()
 
 	cfg := DefaultConfig()
+	if !cfg.Sync.AutoAlignRemoteFormat {
+		t.Fatal("automatic remote format alignment must default on")
+	}
 	if cfg.Scheduler.IntervalMinutes != 60 {
 		t.Fatalf("scheduler interval = %d, want 60", cfg.Scheduler.IntervalMinutes)
 	}

@@ -2,6 +2,7 @@ package gitx
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -268,6 +269,32 @@ func (r Runner) AddRemote(path, name, url string) error {
 func (r Runner) SetRemoteURL(path, name, url string) error {
 	_, err := r.RunGit(path, "remote", "set-url", name, url)
 	return err
+}
+
+func (r Runner) RemoteURLRaw(path, name string) (string, error) {
+	result, err := r.run(path, "git", "config", "--get", "remote."+name+".url")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(strings.TrimSuffix(result.Stdout, "\n"), "\r"), nil
+}
+
+func (r Runner) VerifyRemoteHeads(path, name string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--heads", name)
+	cmd.Dir = path
+	cmd.Env = gitCommandEnv(os.Environ(), r.effectiveIOMode())
+	var stderr bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("verify remote %s: %w", name, ctx.Err())
+		}
+		return fmt.Errorf("verify remote %s: %w: %s", name, err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }
 
 func (r Runner) CurrentBranch(path string) (string, error) {

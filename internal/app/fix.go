@@ -1886,12 +1886,10 @@ func (a *App) executeFixAction(
 			}
 		}
 
-		remoteName := plannedRemote(preferredRemote, target.Record.Upstream)
-		if resolvedRemote, remoteErr := a.Git.EffectiveRemote(path, remoteName); remoteErr == nil && strings.TrimSpace(resolvedRemote) != "" {
-			remoteName = strings.TrimSpace(resolvedRemote)
-		}
-		if strings.TrimSpace(remoteName) == "" {
-			remoteName = "origin"
+		remoteName := "origin"
+		previousOriginURL, err := a.Git.RemoteURLRaw(path, remoteName)
+		if err != nil {
+			return err
 		}
 
 		if err := runStep("remote-format-set-url", fixActionPlanEntry{
@@ -1899,7 +1897,7 @@ func (a *App) executeFixAction(
 			Command: true,
 			Summary: fmt.Sprintf("git remote set-url %s %s", remoteName, expectedOriginURL),
 		}, func() error {
-			return a.Git.SetRemoteURL(path, remoteName, expectedOriginURL)
+			return a.alignRemoteFormatVerified(path, remoteName, previousOriginURL, expectedOriginURL)
 		}); err != nil {
 			return err
 		}

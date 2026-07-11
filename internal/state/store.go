@@ -103,6 +103,7 @@ func DefaultConfig() domain.ConfigFile {
 		},
 		Sync: domain.SyncConfig{
 			AutoDiscover:            true,
+			AutoAlignRemoteFormat:   true,
 			IncludeUntrackedAsDirty: true,
 			DefaultAutoPushPrivate:  true,
 			DefaultAutoPushPublic:   false,

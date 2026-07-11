@@ -101,6 +101,19 @@ func TestWizardSyncSpaceTogglesAndEnterAdvances(t *testing.T) {
 	}
 }
 
+func TestWizardSyncCanToggleAutomaticRemoteAlignment(t *testing.T) {
+	t.Parallel()
+	m := testConfigWizardModel(t)
+	m.step = stepSync
+	m.focusTabs = false
+	m.syncCursor = 2
+	before := m.config.Sync.AutoAlignRemoteFormat
+	_, _ = m.Update(testKeyPressCode(tea.KeySpace))
+	if m.config.Sync.AutoAlignRemoteFormat == before {
+		t.Fatal("expected automatic remote alignment toggle to change")
+	}
+}
+
 func TestWizardAutomationInputEnterAdvancesToFixes(t *testing.T) {
 	m := testConfigWizardModel(t)
 	m.step = stepAutomation

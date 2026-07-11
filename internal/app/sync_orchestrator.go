@@ -32,6 +32,9 @@ func (a *App) runSync(opts SyncOptions) (int, error) {
 		return 2, err
 	}
 	a.logf("sync: selected %d catalog(s)", len(selectedCatalogs))
+	if err := a.alignRemoteFormatsBeforeObservation(cfg, selectedCatalogs, opts.DryRun); err != nil {
+		return 2, err
+	}
 
 	previous := previousRepoRecords(machine.Repos)
 	localRecords, transitionedToSynced, err := a.observePhase(cfg, selectedCatalogs, previous, opts)

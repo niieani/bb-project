@@ -260,6 +260,8 @@ Performs full convergence flow:
 5. pull/checkout and clone only when safe and allowed
 6. optionally emit notifications
 
+Before observation, sync can align a GitHub `origin` URL with `github.preferred_remote_url_template`. It sets the candidate URL, verifies it with bounded `git ls-remote --heads origin`, and keeps it only on success; failure restores the previous URL byte-for-byte and leaves `remote_format_mismatch` as a warning. Disable with `sync.auto_align_remote_format: false`. The `align-remote-format` fix uses the same verified operation.
+
 Flags:
 
 - `--include-catalog <name>` (repeatable)
@@ -493,6 +495,7 @@ link:
 move:
   post_hooks: []
 sync:
+  auto_align_remote_format: true
   auto_discover: true
   include_untracked_as_dirty: true
   default_auto_push_private: true

@@ -124,6 +124,7 @@ type LinkConfig struct {
 
 type SyncConfig struct {
 	AutoDiscover            bool `yaml:"auto_discover"`
+	AutoAlignRemoteFormat   bool `yaml:"auto_align_remote_format"`
 	IncludeUntrackedAsDirty bool `yaml:"include_untracked_as_dirty"`
 	DefaultAutoPushPrivate  bool `yaml:"default_auto_push_private"`
 	DefaultAutoPushPublic   bool `yaml:"default_auto_push_public"`
