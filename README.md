@@ -313,6 +313,16 @@ The Codex Run action uses the same build-and-run script. Development launches pa
 
 Opening the status item shows compact sections for local blocked repositories, stale local WIP, and eligible attention on other machines. Empty sections disappear. Each source reports failures independently, and the footer shows the latest successful sync time. `Sync now` runs `bb sync --quiet` outside the UI actor and refreshes status plus overview after completion, including non-zero sync outcomes. The app refreshes every five minutes and after macOS wake.
 
+Install and update the signed, notarized app through Homebrew; its cask installs `bb` as a dependency:
+
+```bash
+brew install --cask niieani/tap/bb-menubar
+brew upgrade --cask bb-menubar
+open -a BBMenuBar
+```
+
+Release, signing, and Gatekeeper verification details are in `docs/releasing-macos-menubar.md`.
+
 ### `bb overview [--all] [--json] [--include-catalog <name> ...]`
 
 Shows a read-only cross-machine matrix with the local machine first. Non-synced cells include the dominant reason and last-activity age; missing copies show as not cloned. Repositories synced everywhere collapse into one count unless `--all` is used. Stale machine publications are called out explicitly. `--json` is a stable full-matrix contract for tooling and always includes collapsed repositories, every machine, states, reasons, warnings, and timestamps. Overview always exits `0`, including when blocked repositories exist.
@@ -658,12 +668,11 @@ Release flow:
 1. Merge Conventional Commit messages into `main`.
 2. `release-please` opens/updates a release PR with version bump + changelog.
 3. Merge that PR to create a `vX.Y.Z` tag and GitHub release.
-4. `Release Please` then calls the shared publish workflow, which runs GoReleaser, Developer ID signing + notarization for the macOS archives, and the Homebrew tap cask update.
+4. `Release Please` then calls the shared publish workflow, which runs GoReleaser plus the native app build, Developer ID signing, notarization, release-asset upload, and Homebrew tap cask updates.
 5. The standalone `Release` workflow exists only as a manual recovery path for republishing an existing tag through that same shared publish workflow.
 
-Required GitHub secrets:
+Required GitHub secret:
 
-- `HOMEBREW_TAP_GITHUB_TOKEN`: PAT with push access to `<org>/homebrew-tap`.
 - `OP_SERVICE_ACCOUNT_TOKEN`: 1Password service account token with read access to the Apple release-signing items.
 
 Required 1Password references:
@@ -673,6 +682,7 @@ Required 1Password references:
 - `op://Automation/Apple Developer App Store Connect AuthKey Github Releases/NOTARY_KEY_ID`
 - `op://Automation/Apple Release Signing Developer ID Certificate/Apple Release Signing Developer ID Certificate.p12`
 - `op://Automation/Apple Release Signing Developer ID Certificate/password`
+- `op://Automation/GitHub Token for homebrew-tap/token`
 
 Homebrew install:
 

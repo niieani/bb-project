@@ -8,8 +8,6 @@ on:
         required: true
         type: string
     secrets:
-      HOMEBREW_TAP_GITHUB_TOKEN:
-        required: true
       OP_SERVICE_ACCOUNT_TOKEN:
         required: true
 
@@ -51,6 +49,7 @@ jobs:
           MACOS_NOTARY_ISSUER_ID: op://Automation/Apple Developer App Store Connect AuthKey Github Releases/NOTARY_ISSUER_ID
           MACOS_NOTARY_KEY_ID: op://Automation/Apple Developer App Store Connect AuthKey Github Releases/NOTARY_KEY_ID
           MACOS_SIGN_PASSWORD: op://Automation/Apple Release Signing Developer ID Certificate/password
+          HOMEBREW_TAP_GITHUB_TOKEN: op://Automation/GitHub Token for homebrew-tap/token
 
       - name: Prepare Apple signing payloads
         run: |
@@ -76,4 +75,109 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+  menubar-app:
+    needs: goreleaser
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref }}
+
+      - name: Fetch tags
+        run: git fetch --force --tags
+
+      - name: Verify Swift toolchain
+        run: swift --version
+
+      - name: Install 1Password CLI
+        uses: 1password/install-cli-action@v2
+
+      - name: Configure 1Password service account
+        uses: 1password/load-secrets-action/configure@v3
+        with:
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+      - name: Load Apple release metadata
+        uses: 1password/load-secrets-action@v3
+        with:
+          export-env: true
+          unset-previous: true
+        env:
+          MACOS_NOTARY_ISSUER_ID: op://Automation/Apple Developer App Store Connect AuthKey Github Releases/NOTARY_ISSUER_ID
+          MACOS_NOTARY_KEY_ID: op://Automation/Apple Developer App Store Connect AuthKey Github Releases/NOTARY_KEY_ID
+          MACOS_SIGN_PASSWORD: op://Automation/Apple Release Signing Developer ID Certificate/password
+          HOMEBREW_TAP_GITHUB_TOKEN: op://Automation/GitHub Token for homebrew-tap/token
+
+      - name: Prepare Apple signing keychain
+        run: |
+          signing_dir="$RUNNER_TEMP/apple-signing"
+          keychain="$RUNNER_TEMP/bb-release.keychain-db"
+          mkdir -p "$signing_dir"
+          op read 'op://Automation/Apple Developer App Store Connect AuthKey Github Releases/AuthKey.p8' --out-file "$signing_dir/AuthKey.p8"
+          op read 'op://Automation/Apple Release Signing Developer ID Certificate/Apple Release Signing Developer ID Certificate.p12' --out-file "$signing_dir/developer-id.p12"
+          security create-keychain -p "" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "" "$keychain"
+          security import "$signing_dir/developer-id.p12" -k "$keychain" -P "$MACOS_SIGN_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          identity="$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application/ {print $2; exit}')"
+          if [ -z "$identity" ]; then
+            echo "Developer ID Application identity not found" >&2
+            exit 1
+          fi
+          {
+            printf 'MACOS_SIGN_IDENTITY=%s\n' "$identity"
+            printf 'MACOS_NOTARY_KEY_PATH=%s\n' "$signing_dir/AuthKey.p8"
+          } >> "$GITHUB_ENV"
+
+      - name: Build, test, sign, and notarize app
+        id: package
+        run: |
+          tag="$(git describe --tags --exact-match)"
+          version="${tag#v}"
+          archive="$(script/package_macos_app.sh --version "$version" --output-dir "$RUNNER_TEMP/release")"
+          checksum="$archive.sha256"
+          (cd "$(dirname "$archive")" && shasum -a 256 "$(basename "$archive")" > "$(basename "$checksum")")
+          {
+            printf 'tag=%s\n' "$tag"
+            printf 'version=%s\n' "$version"
+            printf 'archive=%s\n' "$archive"
+            printf 'checksum=%s\n' "$checksum"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload notarized app to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release upload "${{ steps.package.outputs.tag }}"
+          "${{ steps.package.outputs.archive }}"
+          "${{ steps.package.outputs.checksum }}"
+          --clobber
+
+      - name: Publish Homebrew app cask
+        env:
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          tap_dir="$RUNNER_TEMP/homebrew-tap"
+          export GH_TOKEN="$HOMEBREW_TAP_GITHUB_TOKEN"
+          gh auth setup-git
+          git clone "https://github.com/${GITHUB_REPOSITORY_OWNER}/homebrew-tap.git" "$tap_dir"
+          script/render_homebrew_menubar_cask.sh \
+            --version "$VERSION" \
+            --sha256 "$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')" \
+            --repository "$GITHUB_REPOSITORY" \
+            --output "$tap_dir/Casks/bb-menubar.rb"
+          ruby -c "$tap_dir/Casks/bb-menubar.rb"
+          git -C "$tap_dir" config user.name "bb release bot"
+          git -C "$tap_dir" config user.email "actions@users.noreply.github.com"
+          git -C "$tap_dir" add Casks/bb-menubar.rb
+          if git -C "$tap_dir" diff --cached --quiet; then
+            exit 0
+          fi
+          git -C "$tap_dir" commit -m "chore: update bb-menubar to $VERSION"
+          git -C "$tap_dir" push
