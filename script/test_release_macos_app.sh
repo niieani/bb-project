@@ -30,6 +30,24 @@ grep -F 'script/render_homebrew_menubar_cask.sh' "$workflow" >/dev/null
 grep -F 'checksum="$archive.sha256"' "$workflow" >/dev/null
 grep -F 'NOTARY_WAIT_TIMEOUT="30m"' "$package_script" >/dev/null
 grep -F -- '--wait --timeout "$NOTARY_WAIT_TIMEOUT"' "$package_script" >/dev/null
+grep -F 'run_with_timeout 600 swift test' "$package_script" >/dev/null
+grep -F 'run_with_timeout 900 swift build' "$package_script" >/dev/null
+grep -F 'run_with_timeout 300 codesign' "$package_script" >/dev/null
+grep -F 'packaging_ref: refs/heads/main' "$ROOT_DIR/.github/workflows/release.yml" >/dev/null
+grep -F 'Use current recovery packaging harness' "$workflow" >/dev/null
+for step in \
+  'Test Swift app' \
+  'Build universal app bundle' \
+  'Sign app bundle' \
+  'Notarize and staple app bundle' \
+  'Archive notarized app'; do
+  grep -F "name: $step" "$workflow" >/dev/null
+done
+grep -F -- '--stage test' "$workflow" >/dev/null
+grep -F -- '--stage build' "$workflow" >/dev/null
+grep -F -- '--stage sign' "$workflow" >/dev/null
+grep -F -- '--stage notarize' "$workflow" >/dev/null
+grep -F -- '--stage archive' "$workflow" >/dev/null
 process_test="$ROOT_DIR/macos/BBMenuBar/Tests/BBMenuBarCoreTests/ProcessBBClientTests.swift"
 grep -F 'while [ ! -f' "$process_test" >/dev/null
 if grep -F '.milliseconds(100)' "$process_test" >/dev/null; then

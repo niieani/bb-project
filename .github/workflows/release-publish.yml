@@ -7,6 +7,11 @@ on:
         description: Git ref to publish.
         required: true
         type: string
+      packaging_ref:
+        description: Optional ref supplying the current packaging harness for a tagged recovery.
+        required: false
+        type: string
+        default: ""
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN:
         required: true
@@ -79,12 +84,22 @@ jobs:
   menubar-app:
     needs: goreleaser
     runs-on: macos-26
+    timeout-minutes: 75
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ inputs.ref }}
+
+      - name: Use current recovery packaging harness
+        if: ${{ inputs.packaging_ref != '' }}
+        env:
+          PACKAGING_REF: ${{ inputs.packaging_ref }}
+        run: |
+          git fetch origin "$PACKAGING_REF"
+          git show FETCH_HEAD:script/package_macos_app.sh > script/package_macos_app.sh
+          chmod +x script/package_macos_app.sh
 
       - name: Fetch tags
         run: git fetch --force --tags
@@ -134,17 +149,40 @@ jobs:
             printf 'MACOS_NOTARY_KEY_PATH=%s\n' "$signing_dir/AuthKey.p8"
           } >> "$GITHUB_ENV"
 
-      - name: Build, test, sign, and notarize app
-        id: package
+      - name: Prepare app release paths
+        id: app
         run: |
           tag="$(git describe --tags --exact-match)"
           version="${tag#v}"
-          archive="$(script/package_macos_app.sh --version "$version" --output-dir "$RUNNER_TEMP/release")"
-          checksum="$archive.sha256"
-          (cd "$(dirname "$archive")" && shasum -a 256 "$(basename "$archive")" > "$(basename "$checksum")")
+          output_dir="$RUNNER_TEMP/release"
+          mkdir -p "$output_dir"
           {
             printf 'tag=%s\n' "$tag"
             printf 'version=%s\n' "$version"
+            printf 'output_dir=%s\n' "$output_dir"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Test Swift app
+        run: script/package_macos_app.sh --stage test --version "${{ steps.app.outputs.version }}" --output-dir "${{ steps.app.outputs.output_dir }}"
+
+      - name: Build universal app bundle
+        run: script/package_macos_app.sh --stage build --version "${{ steps.app.outputs.version }}" --output-dir "${{ steps.app.outputs.output_dir }}"
+
+      - name: Sign app bundle
+        run: script/package_macos_app.sh --stage sign --version "${{ steps.app.outputs.version }}" --output-dir "${{ steps.app.outputs.output_dir }}"
+
+      - name: Notarize and staple app bundle
+        run: script/package_macos_app.sh --stage notarize --version "${{ steps.app.outputs.version }}" --output-dir "${{ steps.app.outputs.output_dir }}"
+
+      - name: Archive notarized app
+        id: package
+        run: |
+          archive="$(script/package_macos_app.sh --stage archive --version "${{ steps.app.outputs.version }}" --output-dir "${{ steps.app.outputs.output_dir }}")"
+          checksum="$archive.sha256"
+          (cd "$(dirname "$archive")" && shasum -a 256 "$(basename "$archive")" > "$(basename "$checksum")")
+          {
+            printf 'tag=%s\n' "${{ steps.app.outputs.tag }}"
+            printf 'version=%s\n' "${{ steps.app.outputs.version }}"
             printf 'archive=%s\n' "$archive"
             printf 'checksum=%s\n' "$checksum"
           } >> "$GITHUB_OUTPUT"
