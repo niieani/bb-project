@@ -43,3 +43,5 @@ Local unsigned packaging/config checks:
 script/test_release_macos_app.sh
 script/package_macos_app.sh --version 0.0.0 --output-dir temp.local/$(date +%F)/menubar-release
 ```
+
+Release-path concurrency tests use child-process handshakes, not wall-clock deadlines. Hosted macOS runner load can delay task scheduling without blocking the MainActor; fixed millisecond thresholds are therefore invalid release gates.

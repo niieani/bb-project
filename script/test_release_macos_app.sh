@@ -27,6 +27,12 @@ grep -F 'op://Automation/Apple Release Signing Developer ID Certificate/Apple Re
 grep -F 'op://Automation/GitHub Token for homebrew-tap/token' "$workflow" >/dev/null
 grep -F 'script/render_homebrew_menubar_cask.sh' "$workflow" >/dev/null
 grep -F 'checksum="$archive.sha256"' "$workflow" >/dev/null
+process_test="$ROOT_DIR/macos/BBMenuBar/Tests/BBMenuBarCoreTests/ProcessBBClientTests.swift"
+grep -F 'while [ ! -f' "$process_test" >/dev/null
+if grep -F '.milliseconds(100)' "$process_test" >/dev/null; then
+  echo "release tests must not depend on macOS runner wall-clock latency" >&2
+  exit 1
+fi
 if grep -F 'secrets.HOMEBREW_TAP_GITHUB_TOKEN' "$workflow" >/dev/null; then
   echo "Homebrew token must be loaded from 1Password" >&2
   exit 1
