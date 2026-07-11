@@ -40,7 +40,7 @@ func TestTargetedSyncChangesOnlySelectedRepository(t *testing.T) {
 		}
 		events = append(events, event)
 	}
-	if len(events) < 5 || events[0].Event != "operation_started" || events[1].Event != "repository_started" || events[len(events)-2].Event != "repository_finished" || events[len(events)-1].Event != "operation_finished" {
+	if len(events) < 6 || events[0].Event != "operation_started" || events[1].Event != "progress" || events[1].Phase != "discover" || events[2].Event != "repository_started" || events[len(events)-2].Event != "repository_finished" || events[len(events)-1].Event != "operation_finished" {
 		t.Fatalf("unexpected lifecycle order: %#v", events)
 	}
 	if events[len(events)-2].Repository != "software/api" || events[len(events)-2].Result != "success" {

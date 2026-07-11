@@ -2,6 +2,8 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +12,96 @@ import (
 	"bb-project/internal/domain"
 	"bb-project/internal/state"
 )
+
+func TestRunSyncEmitsOrderedCountedRepositoryEvents(t *testing.T) {
+	home := t.TempDir()
+	paths := state.NewPaths(home)
+	root := filepath.Join(home, "software")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdout := &bytes.Buffer{}
+	a := New(paths, stdout, &bytes.Buffer{})
+	for _, name := range []string{"api", "web"} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Git.InitRepo(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Git.AddOrigin(path, filepath.Join(home, "missing", name+".git")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := state.DefaultConfig()
+	cfg.Sync.FetchPrune = true
+	if err := state.SaveConfig(paths, cfg); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC)
+	machine := state.BootstrapMachine("test-machine", "test-machine", now)
+	machine.DefaultCatalog = "software"
+	machine.Catalogs = []domain.Catalog{{Name: "software", Root: root, RepoPathDepth: 1}}
+	if err := state.SaveMachine(paths, machine); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BB_MACHINE_ID", "test-machine")
+
+	code, err := a.runSync(SyncOptions{EventsJSON: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 1 {
+		t.Fatalf("code = %d, want attention exit 1", code)
+	}
+	var events []OperationEvent
+	decoder := json.NewDecoder(stdout)
+	for decoder.More() {
+		var event OperationEvent
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+	}
+	want := []struct {
+		event, repository string
+		completed, total  *int
+	}{
+		{"operation_started", "", nil, nil},
+		{"progress", "", intPointer(0), intPointer(2)},
+		{"repository_started", "software/api", intPointer(0), intPointer(2)},
+		{"progress", "software/api", intPointer(0), intPointer(2)},
+		{"progress", "software/api", intPointer(0), intPointer(2)},
+		{"repository_finished", "software/api", intPointer(1), intPointer(2)},
+		{"repository_started", "software/web", intPointer(1), intPointer(2)},
+		{"progress", "software/web", intPointer(1), intPointer(2)},
+		{"progress", "software/web", intPointer(1), intPointer(2)},
+		{"repository_finished", "software/web", intPointer(2), intPointer(2)},
+		{"operation_finished", "", intPointer(2), intPointer(2)},
+	}
+	if len(events) != len(want) {
+		t.Fatalf("events = %+v", events)
+	}
+	for i, expected := range want {
+		got := events[i]
+		if got.Event != expected.event || got.Repository != expected.repository || !equalIntPointers(got.Completed, expected.completed) || !equalIntPointers(got.Total, expected.total) {
+			t.Fatalf("event[%d] = %+v, want %+v", i, got, expected)
+		}
+	}
+	if events[5].Result != "failure" || !strings.Contains(events[5].Error, "pull_failed") {
+		t.Fatalf("api finish = %+v", events[5])
+	}
+}
+
+func intPointer(value int) *int { return &value }
+
+func equalIntPointers(left, right *int) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
 
 func TestAnyUnsyncableInSelectedCatalogsIgnoresNonBlockingReasons(t *testing.T) {
 	t.Parallel()

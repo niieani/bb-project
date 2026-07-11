@@ -31,7 +31,7 @@ func (a *App) alignRemoteFormatVerified(repoKey, path, remoteName, previousURL, 
 	return nil
 }
 
-func (a *App) alignRemoteFormatsBeforeObservation(cfg domain.ConfigFile, catalogs []domain.Catalog, dryRun bool) error {
+func (a *App) alignRemoteFormatsBeforeObservation(cfg domain.ConfigFile, catalogs []domain.Catalog, dryRun, eventsJSON bool) error {
 	if !cfg.Sync.AutoAlignRemoteFormat || dryRun {
 		return nil
 	}
@@ -51,6 +51,7 @@ func (a *App) alignRemoteFormatsBeforeObservation(cfg domain.ConfigFile, catalog
 		if !isGitHub || strings.TrimSpace(expected) == "" || strings.TrimSpace(expected) == strings.TrimSpace(origin) {
 			continue
 		}
+		a.emitOperationEvent(eventsJSON, OperationEvent{Event: "progress", Operation: "sync", Repository: repo.RepoKey, Phase: "remote_format", Message: "Aligning remote URL"})
 		if err := a.alignRemoteFormatVerified(repo.RepoKey, repo.Path, "origin", origin, expected); err != nil {
 			a.logf("sync: remote format alignment reverted for %s: %v", repo.Path, err)
 		}

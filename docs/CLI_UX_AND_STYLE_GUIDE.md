@@ -204,6 +204,8 @@ Confirmation ordering:
 
 Rules:
 
+- Long-running batch actions must identify the active item, show concise phase plus completed/total progress when known, and retain item-attributed failures; a global busy label alone is insufficient.
+
 - Default selections should be no-op (explicitly show `-` / "no action") rather than auto-selecting a mutating action.
 - Keep table cell content plain text (avoid embedding ANSI/lipgloss inside cell strings); style at the row/column layer instead.
 - Make summary/status chips responsive: if boxed chips cannot fit in one row, keep the same chip content/order/colors and degrade only by removing borders and wrapping at chip boundaries.

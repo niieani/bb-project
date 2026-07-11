@@ -21,6 +21,11 @@ public final class MenuBarModel {
   public private(set) var activeRepository: String?
   public private(set) var operationStatus: String?
   public private(set) var repositoryFailures: [String: String] = [:]
+  public var transientActiveRepository: String? {
+    MenuOperationPresentation(
+      presentation: presentation, activeRepository: activeRepository
+    ).transientRepository
+  }
 
   private let client: any BBClient
   private let notifications: NotificationCoordinator?
@@ -115,6 +120,7 @@ public final class MenuBarModel {
     }
     let syncError: String?
     var reportedFailure = false
+    var lastFailure: String?
     do {
       let stream = await makeStream()
       for try await event in stream {
@@ -123,35 +129,56 @@ public final class MenuBarModel {
         {
           activeRepository = eventRepository
         }
+        if event.event == "repository_finished", activeRepository == event.repository {
+          activeRepository = nil
+        }
+        if event.event == "repository_finished", event.result == "success",
+          let eventRepository = event.repository
+        {
+          repositoryFailures[eventRepository] = nil
+        }
         if event.result == "failure" {
+          if event.event == "operation_finished", reportedFailure {
+            continue
+          }
           reportedFailure = true
           let detail = event.error.flatMap { $0.isEmpty ? nil : $0 } ?? event.message
+          let attributed = event.repository.map { Self.attributedFailure($0, detail: detail) } ?? detail
+          lastFailure = attributed
           if let eventRepository = event.repository {
             if event.event == "repository_finished" || repositoryFailures[eventRepository] == nil {
               repositoryFailures[eventRepository] = detail
             }
-            operationStatus = repositoryFailures[eventRepository] ?? detail
+            operationStatus = Self.attributedFailure(
+              eventRepository, detail: repositoryFailures[eventRepository] ?? detail)
           } else {
             operationStatus = detail
           }
           continue
         }
-        if event.event == "operation_finished", reportedFailure { continue }
-        operationStatus = event.message
+        if event.event == "operation_finished", reportedFailure {
+          operationStatus = lastFailure
+          continue
+        }
+        operationStatus = Self.operationStatus(for: event)
       }
       syncError = nil
     } catch {
-      syncError = String(describing: error)
-      if let failedRepository = activeRepository ?? repository {
+      let detail = String(describing: error)
+      syncError = reportedFailure ? nil : detail
+      if !reportedFailure, let failedRepository = activeRepository ?? repository {
         if let specificFailure = repositoryFailures[failedRepository] {
           operationStatus = specificFailure
         } else {
-          repositoryFailures[failedRepository] = syncError
-          operationStatus = "\(name) failed: \(syncError!)"
+          repositoryFailures[failedRepository] = detail
+          operationStatus = Self.attributedFailure(failedRepository, detail: detail)
         }
-      } else {
-        operationStatus = "\(name) failed: \(syncError!)"
+      } else if !reportedFailure {
+        operationStatus = "\(name) failed: \(detail)"
       }
+    }
+    if reportedFailure, let lastFailure {
+      operationStatus = lastFailure
     }
     await refresh()
     if let syncError {
@@ -164,6 +191,17 @@ public final class MenuBarModel {
       operationStatus = "\(name) completed"
       if let repository { repositoryFailures[repository] = nil }
     }
+  }
+
+  private nonisolated static func operationStatus(for event: OperationEvent) -> String {
+    guard let completed = event.completed, let total = event.total, total > 0 else {
+      return event.message
+    }
+    return "\(event.message) · \(completed)/\(total)"
+  }
+
+  private nonisolated static func attributedFailure(_ repository: String, detail: String) -> String {
+    "\(repository.split(separator: "/").last.map(String.init) ?? repository): \(detail)"
   }
 
   public func configureLaunchAtLogin(_ coordinator: LaunchAtLoginCoordinator) async {

@@ -23,8 +23,28 @@ public struct MenuDetailsView: View {
   }
 
   public var body: some View {
+    let operation = MenuOperationPresentation(
+      presentation: presentation, activeRepository: activeRepository,
+      repositoryFailures: repositoryFailures)
     ScrollView(.vertical) {
       VStack(alignment: .leading, spacing: 10) {
+        if let repository = operation.transientRepository {
+          HStack(spacing: 7) {
+            ProgressView().controlSize(.small)
+            Text(repository.split(separator: "/").last.map(String.init) ?? repository)
+            Spacer()
+          }
+          .accessibilityLabel("Syncing \(repository)")
+          Divider()
+        }
+        ForEach(operation.transientFailures) { failure in
+          VStack(alignment: .leading, spacing: 1) {
+            Text(failure.title)
+            Text(failure.detail).font(.caption).foregroundStyle(.red).lineLimit(1)
+          }
+          .accessibilityLabel("\(failure.title), sync failed, \(failure.detail)")
+          Divider()
+        }
         ForEach(presentation.sections) { section in
           VStack(alignment: .leading, spacing: 4) {
             Text(section.title).font(.headline)
@@ -46,16 +66,52 @@ public struct MenuDetailsView: View {
       .fixedSize(horizontal: false, vertical: true)
     }
     .scrollIndicators(.visible)
-    .frame(height: MenuDetailsLayout.height(for: presentation))
+    .frame(
+      height: MenuDetailsLayout.height(
+        for: presentation,
+        transientRepository: operation.transientRepository,
+        transientFailureCount: operation.transientFailures.count))
+  }
+}
+
+public struct MenuOperationPresentation: Equatable, Sendable {
+  public let transientRepository: String?
+  public let transientFailures: [RepositoryOperationFailure]
+
+  public init(
+    presentation: MenuPresentation, activeRepository: String?,
+    repositoryFailures: [String: String] = [:]
+  ) {
+    let displayed = Set(presentation.sections.flatMap(\.items).map(\.repoKey))
+    transientRepository = activeRepository.flatMap { displayed.contains($0) ? nil : $0 }
+    transientFailures = repositoryFailures
+      .filter { !displayed.contains($0.key) && $0.key != activeRepository }
+      .map { RepositoryOperationFailure(repository: $0.key, detail: $0.value) }
+      .sorted { $0.repository < $1.repository }
+  }
+}
+
+public struct RepositoryOperationFailure: Equatable, Identifiable, Sendable {
+  public var id: String { repository }
+  public let repository: String
+  public let detail: String
+  public var title: String {
+    repository.split(separator: "/").last.map(String.init) ?? repository
   }
 }
 
 enum MenuDetailsLayout {
-  static func height(for presentation: MenuPresentation) -> CGFloat {
+  static func height(
+    for presentation: MenuPresentation, transientRepository: String? = nil,
+    transientFailureCount: Int = 0
+  ) -> CGFloat {
     let repositoryRows = presentation.sections.reduce(0) { $0 + $1.items.count }
+      + (transientRepository == nil ? 0 : 1) + transientFailureCount
     let estimatedContentHeight =
       CGFloat(
-        repositoryRows * 43 + presentation.sections.count * 38
+        repositoryRows * 43
+          + (presentation.sections.count + (transientRepository == nil ? 0 : 1)
+            + transientFailureCount) * 38
           + presentation.errors.count * 30)
     guard estimatedContentHeight > 0 else { return 0 }
     return min(480, max(44, estimatedContentHeight))

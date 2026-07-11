@@ -10,14 +10,12 @@ import (
 
 func (a *App) observePhase(
 	cfg domain.ConfigFile,
-	selectedCatalogs []domain.Catalog,
+	discovered []discoveredRepo,
 	previous map[string]domain.MachineRepoRecord,
 	opts SyncOptions,
+	completed *int,
+	total int,
 ) ([]domain.MachineRepoRecord, map[string]bool, error) {
-	discovered, err := discoverRepos(selectedCatalogs)
-	if err != nil {
-		return nil, nil, err
-	}
 	a.logf("sync: discovered %d local repo(s)", len(discovered))
 
 	localRecords := make([]domain.MachineRepoRecord, 0, len(previous))
@@ -30,12 +28,12 @@ func (a *App) observePhase(
 	}
 	transitionedToSynced := map[string]bool{}
 	for _, repo := range discovered {
-		if opts.Repository != "" && repo.RepoKey != opts.Repository {
-			continue
-		}
-		a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "progress", Operation: "sync", Repository: repo.RepoKey, Phase: "observe", Message: "Observing " + repo.Name})
-		rec, err := a.observeAndApplyLocalSync(cfg, repo, opts)
+		a.emitOperationEvent(opts.EventsJSON, withOperationCounts(OperationEvent{Event: "repository_started", Operation: "sync", Repository: repo.RepoKey, Phase: "observe", Message: "Checking " + repo.Name}, *completed, total))
+		a.emitOperationEvent(opts.EventsJSON, withOperationCounts(OperationEvent{Event: "progress", Operation: "sync", Repository: repo.RepoKey, Phase: "observe", Message: "Observing " + repo.Name}, *completed, total))
+		rec, err := a.observeAndApplyLocalSync(cfg, repo, opts, *completed, total)
 		if err != nil {
+			a.emitOperationEvent(opts.EventsJSON, withOperationCounts(OperationEvent{Event: "repository_finished", Operation: "sync", Repository: repo.RepoKey, Phase: "complete", Message: "Repository sync failed", Result: "failure", Error: err.Error()}, *completed+1, total))
+			*completed = *completed + 1
 			return nil, nil, err
 		}
 		key := repoRecordIdentityKey(rec)
@@ -43,6 +41,14 @@ func (a *App) observePhase(
 			transitionedToSynced[key] = true
 		}
 		localRecords = append(localRecords, rec)
+		*completed = *completed + 1
+		finished := OperationEvent{Event: "repository_finished", Operation: "sync", Repository: repo.RepoKey, Phase: "complete", Message: "Repository sync completed", Result: "success"}
+		if rec.State == domain.RepoStateBlocked {
+			finished.Message = "Repository needs attention"
+			finished.Result = "failure"
+			finished.Error = repositoryFailureDetail([]domain.MachineRepoRecord{rec}, repo.RepoKey)
+		}
+		a.emitOperationEvent(opts.EventsJSON, withOperationCounts(finished, *completed, total))
 	}
 	if opts.Repository != "" {
 		sort.Slice(localRecords, func(i, j int) bool {
@@ -53,7 +59,7 @@ func (a *App) observePhase(
 	return localRecords, transitionedToSynced, nil
 }
 
-func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRepo, opts SyncOptions) (domain.MachineRepoRecord, error) {
+func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRepo, opts SyncOptions, completed, total int) (domain.MachineRepoRecord, error) {
 	a.logf("sync: observing local repo %s", repo.Path)
 	rec, err := a.observeRepo(cfg, repo, opts.Push)
 	if err != nil {
@@ -61,7 +67,7 @@ func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRep
 	}
 
 	if cfg.Sync.FetchPrune && !opts.DryRun {
-		a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "progress", Operation: "sync", Repository: repo.RepoKey, Phase: "fetch", Message: "Fetching origin"})
+		a.emitOperationEvent(opts.EventsJSON, withOperationCounts(OperationEvent{Event: "progress", Operation: "sync", Repository: repo.RepoKey, Phase: "fetch", Message: "Fetching origin"}, completed, total))
 		a.logf("sync: fetch --prune %s", repo.Path)
 		if err := a.Git.FetchPrune(repo.Path); err != nil {
 			rec.State = domain.RepoStateBlocked
@@ -80,7 +86,7 @@ func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRep
 	}
 
 	if rec.Behind > 0 && rec.Ahead == 0 {
-		a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "progress", Operation: "sync", Repository: repo.RepoKey, Phase: "pull", Message: "Pulling fast-forward"})
+		a.emitOperationEvent(opts.EventsJSON, withOperationCounts(OperationEvent{Event: "progress", Operation: "sync", Repository: repo.RepoKey, Phase: "pull", Message: "Pulling fast-forward"}, completed, total))
 		a.logf("sync: pulling ff-only for %s", repo.Path)
 		if err := a.Git.PullFFOnly(repo.Path); err != nil {
 			rec.State = domain.RepoStateBlocked
@@ -99,7 +105,7 @@ func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRep
 			}
 		}
 		if autoPushMode != domain.AutoPushModeDisabled || opts.Push {
-			a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "progress", Operation: "sync", Repository: repo.RepoKey, Phase: "push", Message: "Pushing commits"})
+			a.emitOperationEvent(opts.EventsJSON, withOperationCounts(OperationEvent{Event: "progress", Operation: "sync", Repository: repo.RepoKey, Phase: "push", Message: "Pushing commits"}, completed, total))
 			a.logf("sync: pushing ahead commits for %s", repo.Path)
 			if err := a.Git.Push(repo.Path); err != nil {
 				rec.State = domain.RepoStateBlocked

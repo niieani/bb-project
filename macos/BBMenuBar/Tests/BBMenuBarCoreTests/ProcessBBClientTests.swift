@@ -10,7 +10,7 @@ struct ProcessBBClientTests {
     let executable = try makeExecutable(
       """
       dd if=/dev/zero bs=65536 count=32 >&2 2>/dev/null
-      printf '%s\n' '{"event":"operation_finished","operation":"sync","message":"done","result":"success"}'
+      printf '%s\n' '{"event":"operation_finished","operation":"sync","message":"done","result":"success","completed":2,"total":2}'
       """)
     defer { try? FileManager.default.removeItem(at: executable.deletingLastPathComponent()) }
     var received: [OperationEvent] = []
@@ -18,6 +18,8 @@ struct ProcessBBClientTests {
       received.append(event)
     }
     #expect(received.map(\.event) == ["operation_finished"])
+    #expect(received.first?.completed == 2)
+    #expect(received.first?.total == 2)
   }
 
   @Test("canceling event consumption terminates the child process")

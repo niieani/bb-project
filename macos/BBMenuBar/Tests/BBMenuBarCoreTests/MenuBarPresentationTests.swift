@@ -181,7 +181,7 @@ struct MenuBarPresentationTests {
     await client.fail(MenuTestFailure.sync)
     await operation.value
     #expect(model.repositoryFailures["software/synced"] == "pull failed")
-    #expect(model.operationStatus == "pull failed")
+    #expect(model.operationStatus == "synced: pull failed")
     #expect(model.activeRepository == nil)
     #expect(await client.refreshCalls() == 2)
   }
@@ -200,6 +200,76 @@ struct MenuBarPresentationTests {
     await operation.value
     #expect(model.operationStatus == "Fix completed")
     #expect(await client.refreshCalls() == 2)
+  }
+
+  @Test("global sync shows counted active repository, preserves row failures, and refreshes")
+  @MainActor
+  func globalSyncProgress() async {
+    let client = EventMenuClient(
+      status: try! fixtureData(area: "status", name: "mixed"),
+      overview: try! fixtureData(area: "overview", name: "mixed"))
+    let model = MenuBarModel(client: client)
+    let operation = Task { await model.syncNow() }
+    await eventually { await client.syncCalls() == 1 }
+    await client.send(OperationEvent(event: "operation_started", operation: "sync", repository: nil, phase: nil, message: "Starting sync", result: nil, error: nil, completed: 0, total: 2))
+    await client.send(OperationEvent(event: "repository_started", operation: "sync", repository: "software/hidden", phase: "observe", message: "Checking hidden", result: nil, error: nil, completed: 0, total: 2))
+    await client.send(OperationEvent(event: "progress", operation: "sync", repository: "software/hidden", phase: "fetch", message: "Fetching origin", result: nil, error: nil, completed: 0, total: 2))
+    await eventually { await MainActor.run { model.operationStatus == "Fetching origin · 0/2" } }
+    #expect(model.activeRepository == "software/hidden")
+    #expect(model.transientActiveRepository == "software/hidden")
+    await client.send(OperationEvent(event: "repository_finished", operation: "sync", repository: "software/hidden", phase: "complete", message: "Repository needs attention", result: "failure", error: "pull failed", completed: 1, total: 2))
+    await eventually { await MainActor.run { model.repositoryFailures["software/hidden"] == "pull failed" } }
+    #expect(model.activeRepository == nil)
+    #expect(MenuOperationPresentation(presentation: model.presentation, activeRepository: nil, repositoryFailures: model.repositoryFailures).transientFailures.map(\.repository).contains("software/hidden"))
+    await client.send(OperationEvent(event: "repository_started", operation: "sync", repository: "software/synced", phase: "observe", message: "Checking synced", result: nil, error: nil, completed: 1, total: 2))
+    await eventually { await MainActor.run { model.activeRepository == "software/synced" } }
+    #expect(model.transientActiveRepository == "software/synced")
+    await client.send(OperationEvent(event: "repository_finished", operation: "sync", repository: "software/synced", phase: "complete", message: "Repository sync completed", result: "success", error: nil, completed: 2, total: 2))
+    await client.send(OperationEvent(event: "operation_finished", operation: "sync", repository: nil, phase: nil, message: "Sync failed", result: "failure", error: nil, completed: 2, total: 2))
+    await client.fail(BBClientError.commandFailed(code: 1, detail: ""))
+    await operation.value
+    #expect(model.operationStatus == "hidden: pull failed")
+    #expect(!model.presentation.errors.contains { $0.contains("commandFailed") })
+    #expect(await client.refreshCalls() == 2)
+  }
+
+  @Test("transient operation row is only needed when active repository is absent")
+  func transientOperationRow() {
+    let presentation = MenuPresentation(sections: [MenuSection(title: "Known", items: [menuItem(state: .synced)])], lastSync: "now", errors: [])
+    #expect(MenuOperationPresentation(presentation: presentation, activeRepository: "software/missing").transientRepository == "software/missing")
+    #expect(MenuOperationPresentation(presentation: presentation, activeRepository: "software/repo").transientRepository == nil)
+    let failure = MenuOperationPresentation(
+      presentation: presentation, activeRepository: nil,
+      repositoryFailures: ["software/missing": "pull failed"])
+    #expect(failure.transientFailures.map(\.title) == ["missing"])
+    #expect(failure.transientFailures.map(\.detail) == ["pull failed"])
+    #expect(MenuDetailsLayout.height(for: MenuPresentation(sections: [], lastSync: "now", errors: []), transientRepository: "software/missing") > 0)
+  }
+
+  @Test("a later global success clears an earlier repository failure")
+  @MainActor
+  func globalSuccessClearsRepositoryFailure() async {
+    let client = EventMenuClient(
+      status: try! fixtureData(area: "status", name: "mixed"),
+      overview: try! fixtureData(area: "overview", name: "mixed"))
+    let model = MenuBarModel(client: client)
+
+    let failed = Task { await model.syncNow() }
+    await eventually { await client.syncCalls() == 1 }
+    await client.send(OperationEvent(event: "repository_finished", operation: "sync", repository: "software/hidden", phase: "complete", message: "Repository needs attention", result: "failure", error: "pull failed"))
+    await client.finish()
+    await failed.value
+    #expect(model.repositoryFailures["software/hidden"] == "pull failed")
+
+    await client.resetStream()
+    let succeeded = Task { await model.syncNow() }
+    await eventually { await client.syncCalls() == 2 }
+    await client.send(OperationEvent(event: "repository_started", operation: "sync", repository: "software/hidden", phase: "observe", message: "Checking hidden", result: nil, error: nil))
+    await eventually { await MainActor.run { model.activeRepository == "software/hidden" } }
+    await client.send(OperationEvent(event: "repository_finished", operation: "sync", repository: "software/hidden", phase: "complete", message: "Repository sync completed", result: "success", error: nil))
+    await client.finish()
+    await succeeded.value
+    #expect(model.repositoryFailures["software/hidden"] == nil)
   }
 
   @Test("interval and wake events each refresh")
@@ -317,8 +387,8 @@ private actor EventMenuClient: BBClient {
   private var syncCount = 0
   private var fixCount = 0
   private var refreshCount = 0
-  private let stream: AsyncThrowingStream<OperationEvent, Error>
-  private let continuation: AsyncThrowingStream<OperationEvent, Error>.Continuation
+  private var stream: AsyncThrowingStream<OperationEvent, Error>
+  private var continuation: AsyncThrowingStream<OperationEvent, Error>.Continuation
 
   init(status: Data, overview: Data) {
     self.status = status
@@ -346,7 +416,10 @@ private actor EventMenuClient: BBClient {
   func refreshCalls() -> Int { refreshCount }
   func send(_ event: OperationEvent) { continuation.yield(event) }
   func finish() { continuation.finish() }
-  func fail(_ error: MenuTestFailure) { continuation.finish(throwing: error) }
+  func fail(_ error: any Error) { continuation.finish(throwing: error) }
+  func resetStream() {
+    (stream, continuation) = AsyncThrowingStream.makeStream()
+  }
 }
 
 @MainActor

@@ -21,6 +21,23 @@ public struct OperationEvent: Decodable, Equatable, Sendable {
   public let message: String
   public let result: String?
   public let error: String?
+  public let completed: Int?
+  public let total: Int?
+
+  public init(
+    event: String, operation: String, repository: String?, phase: String?, message: String,
+    result: String?, error: String?, completed: Int? = nil, total: Int? = nil
+  ) {
+    self.event = event
+    self.operation = operation
+    self.repository = repository
+    self.phase = phase
+    self.message = message
+    self.result = result
+    self.error = error
+    self.completed = completed
+    self.total = total
+  }
 }
 
 public struct ProcessBBClient: BBClient {

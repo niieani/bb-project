@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -45,7 +46,8 @@ func TestRunSyncAutomaticRemoteAlignment(t *testing.T) {
 			}
 			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 			paths := state.NewPaths(t.TempDir())
-			app := New(paths, io.Discard, io.Discard)
+			stdout := &bytes.Buffer{}
+			app := New(paths, stdout, io.Discard)
 			now := time.Date(2026, 2, 17, 12, 0, 0, 0, time.UTC)
 			app.Now = func() time.Time { return now }
 			root := filepath.Join(paths.Home, "software")
@@ -79,7 +81,7 @@ func TestRunSyncAutomaticRemoteAlignment(t *testing.T) {
 			if err := os.WriteFile(paths.MachineIDPath(), []byte("test-machine\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			code, runErr := app.runSync(SyncOptions{})
+			code, runErr := app.runSync(SyncOptions{EventsJSON: true})
 			if runErr != nil || code != 0 {
 				t.Fatalf("runSync = code %d err %v", code, runErr)
 			}
@@ -120,6 +122,15 @@ func TestRunSyncAutomaticRemoteAlignment(t *testing.T) {
 			}
 			if tt.wantEvent != "" && !found {
 				t.Fatalf("missing %s in %+v", tt.wantEvent, events)
+			}
+			if tt.wantAligned {
+				output := stdout.String()
+				started := strings.Index(output, `"event":"operation_started"`)
+				aligned := strings.Index(output, `"phase":"remote_format"`)
+				observed := strings.Index(output, `"event":"repository_started"`)
+				if started < 0 || aligned <= started || observed <= aligned {
+					t.Fatalf("prep event order = %q", output)
+				}
 			}
 		})
 	}
@@ -261,7 +272,7 @@ func TestAlignRemoteFormatsBeforeObservationHonorsDisabledGate(t *testing.T) {
 	cfg := state.DefaultConfig()
 	cfg.Sync.AutoAlignRemoteFormat = false
 	cfg.GitHub.PreferredRemoteURLTemplate = "git@${org}.github.com:${org}/${repo}.git"
-	if err := app.alignRemoteFormatsBeforeObservation(cfg, []domain.Catalog{{Name: "software", Root: root, RepoPathDepth: 1}}, false); err != nil {
+	if err := app.alignRemoteFormatsBeforeObservation(cfg, []domain.Catalog{{Name: "software", Root: root, RepoPathDepth: 1}}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := app.Git.RepoOrigin(repo)

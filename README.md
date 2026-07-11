@@ -310,7 +310,7 @@ The Codex Run action uses the same build-and-run script. Development launches pa
 
 Opening the status item shows compact sections for local blocked repositories, stale local WIP, actionable local repositories, and eligible attention on other machines. Empty sections disappear. Go-owned action capabilities expose `Sync` only where synchronization can safely make progress and `Fix`/`Fix…` for deterministic non-interactive remedies; risky and remote actions remain unavailable. Row mutations stream the active repository and concise phase into the popup; competing mutations remain disabled and completion refreshes status plus overview. The app refreshes every five minutes and after macOS wake.
 
-Automation clients can run one repository with `bb sync --repo <repo-key> --events-json`. The JSON-lines stream reports operation/repository lifecycle, phase, message, result, and error without requiring clients to parse human logs.
+Automation clients can run one repository with `bb sync --repo <repo-key> --events-json`. The JSON-lines stream reports ordered operation/repository lifecycle, phase, message, result, error, and completed/total repository counts without requiring clients to parse human logs. Global sync uses the same stream, allowing clients to attribute live progress and failures to each repository.
 
 Machine clients may execute a status-advertised safe fix with `bb fix <repo-key> <action-id> --events-json --no-refresh`. Event mode rejects actions not explicitly classified safe for machine clients.
 

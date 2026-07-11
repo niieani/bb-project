@@ -12,6 +12,7 @@ import (
 
 func (a *App) runSync(opts SyncOptions) (code int, runErr error) {
 	started := a.Now()
+	completed, total := 0, 0
 	a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "operation_started", Operation: "sync", Repository: opts.Repository, Message: "Starting sync"})
 	defer func() {
 		event := OperationEvent{Event: "operation_finished", Operation: "sync", Repository: opts.Repository, Message: "Sync completed", Result: "success"}
@@ -22,7 +23,7 @@ func (a *App) runSync(opts SyncOptions) (code int, runErr error) {
 				event.Error = runErr.Error()
 			}
 		}
-		a.emitOperationEvent(opts.EventsJSON, event)
+		a.emitOperationEvent(opts.EventsJSON, withOperationCounts(event, completed, total))
 	}()
 	a.logf("sync: acquiring global lock")
 	lock, err := state.AcquireLock(a.Paths, "sync")
@@ -64,16 +65,22 @@ func (a *App) runSync(opts SyncOptions) (code int, runErr error) {
 	}
 	a.logf("sync: selected %d catalog(s)", len(selectedCatalogs))
 	if opts.Repository == "" {
-		if err := a.alignRemoteFormatsBeforeObservation(cfg, selectedCatalogs, opts.DryRun); err != nil {
+		if err := a.alignRemoteFormatsBeforeObservation(cfg, selectedCatalogs, opts.DryRun, opts.EventsJSON); err != nil {
 			return 2, err
 		}
 	}
-	if opts.Repository != "" {
-		a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "repository_started", Operation: "sync", Repository: opts.Repository, Phase: "observe", Message: "Checking repository"})
+	discovered, err := discoverRepos(selectedCatalogs)
+	if err != nil {
+		return 2, err
 	}
+	if opts.Repository != "" {
+		discovered = filterDiscoveredRepositories(discovered, opts.Repository)
+	}
+	total = len(discovered)
+	a.emitOperationEvent(opts.EventsJSON, withOperationCounts(OperationEvent{Event: "progress", Operation: "sync", Message: "Discovered repositories", Phase: "discover"}, completed, total))
 
 	previous := previousRepoRecords(machine.Repos)
-	localRecords, transitionedToSynced, err := a.observePhase(cfg, selectedCatalogs, previous, opts)
+	localRecords, transitionedToSynced, err := a.observePhase(cfg, discovered, previous, opts, &completed, total)
 	if err != nil {
 		return 2, err
 	}
@@ -98,15 +105,6 @@ func (a *App) runSync(opts SyncOptions) (code int, runErr error) {
 	}
 	a.logf("sync: published post-reconciliation observations")
 	blocked := anyUnsyncableInScope(machine.Repos, selectedCatalogMap, opts.Repository)
-	if opts.Repository != "" {
-		event := OperationEvent{Event: "repository_finished", Operation: "sync", Repository: opts.Repository, Phase: "complete", Message: "Repository sync completed", Result: "success"}
-		if blocked {
-			event.Message = "Repository needs attention"
-			event.Result = "failure"
-			event.Error = repositoryFailureDetail(machine.Repos, opts.Repository)
-		}
-		a.emitOperationEvent(opts.EventsJSON, event)
-	}
 
 	if blocked {
 		a.logf("sync: completed with blocked repos")
@@ -114,6 +112,16 @@ func (a *App) runSync(opts SyncOptions) (code int, runErr error) {
 	}
 	a.logf("sync: completed successfully")
 	return 0, nil
+}
+
+func filterDiscoveredRepositories(repos []discoveredRepo, repository string) []discoveredRepo {
+	filtered := make([]discoveredRepo, 0, 1)
+	for _, repo := range repos {
+		if repo.RepoKey == repository {
+			filtered = append(filtered, repo)
+		}
+	}
+	return filtered
 }
 
 func repositoryFailureDetail(repos []domain.MachineRepoRecord, repository string) string {
