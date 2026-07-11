@@ -1,10 +1,10 @@
 ## bb doctor
 
-Report unsyncable repositories and reasons.
+Report repositories grouped by state and reasons.
 
 ### Synopsis
 
-Report unsyncable repositories and reasons.
+Report repositories grouped by state and reasons.
 
 When GitHub integration is configured (or selected repositories use GitHub remotes),
 doctor also checks GitHub CLI prerequisites and emits warnings when gh is missing

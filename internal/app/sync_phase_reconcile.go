@@ -83,7 +83,7 @@ func (a *App) ensureFromWinners(
 
 		winner, ok := selectWinnerForRepo(allMachines, meta.RepoKey)
 		if !ok {
-			a.logf("sync: no syncable winner for %s", meta.RepoKey)
+			a.logf("sync: no synced winner for %s", meta.RepoKey)
 			continue
 		}
 		if winner.MachineID == machine.MachineID && len(matches) == 1 {

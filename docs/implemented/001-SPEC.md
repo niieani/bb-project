@@ -1,5 +1,7 @@
 # bb Project Sync Specification
 
+> State-model note: the original binary `syncable`/`unsyncable` model documented below is superseded by schema v2's `synced`/`pending`/`wip`/`blocked` tiers. See `docs/in-progress/2026-07-08.signal-repair/spec.md` until it moves to the implemented specification set.
+
 ## Motivation
 
 Working across multiple macOS computers creates repetitive and error-prone repository management work:

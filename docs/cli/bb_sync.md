@@ -12,7 +12,7 @@ bb sync [flags]
       --dry-run                       Show reconcile decisions without write-side sync actions.
   -h, --help                          help for sync
       --include-catalog stringArray   Limit scope to selected catalogs (repeatable).
-      --notify                        Emit notifications for unsyncable repositories.
+      --notify                        Emit one activity-aware repository attention digest.
       --notify-backend string         Notification backend override (stdout|osascript).
       --push                          Allow pushing ahead commits when policy blocks by default.
 ```

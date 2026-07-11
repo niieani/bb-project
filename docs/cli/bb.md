@@ -24,7 +24,7 @@ bb [flags]
 * [bb completion](bb_completion.md)	 - Generate shell completion scripts.
 * [bb config](bb_config.md)	 - Launch interactive configuration wizard.
 * [bb diff](bb_diff.md)	 - Launch Lumen visual diff in repository context.
-* [bb doctor](bb_doctor.md)	 - Report unsyncable repositories and reasons.
+* [bb doctor](bb_doctor.md)	 - Report repositories grouped by state and reasons.
 * [bb ensure](bb_ensure.md)	 - Alias for sync convergence over selected catalogs.
 * [bb fix](bb_fix.md)	 - Inspect repositories and apply context-aware fixes.
 * [bb info](bb_info.md)	 - Show resolved local project information.

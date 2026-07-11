@@ -334,14 +334,14 @@ Interactive apply behavior:
 - Wizard can generate a minimal root `.gitignore` when missing.
 - Wizard summary shows commits created by each applied step (short SHA + commit subject), including auto-generated commit messages.
 - In list mode, when repository details wrap (for example long paths or action-help text), `bb fix` shrinks the table viewport first so top chrome and footer help remain visible without truncating details text, and keeps one-row navigation stable (no sudden page jump when moving by one row).
-- In list mode, the primary panel uses a compact titled border (`bb fix · Interactive remediation for unsyncable repositories`) to preserve vertical space, and selected-repo metadata is rendered on one dot-separated line.
+- In list mode, the primary panel uses a compact titled border (`bb fix · Interactive remediation by repository state`) to preserve vertical space, and selected-repo metadata is rendered on one dot-separated line.
 - Busy list-mode states (for example `r` revalidation) now recolor the full primary-panel border consistently, including the titled top edge.
 - The list-mode summary stats row is responsive: it renders pill boxes when they fit, and on narrow terminals it keeps the same uppercase metric chips/order/colors but drops borders and wraps by chip to prevent horizontal overflow artifacts.
 - Selected-repo metadata wrapping is segment-aware (wraps at ` · ` boundaries), so labels stay attached to their values and avoid orphan trailing tokens on separate lines.
 - In list mode, `bb fix` keeps the primary panel top-anchored and places footer help immediately below it (no artificial spacer gap between panel and footer); available height is absorbed by list sizing.
 - In list mode, `enter` runs currently selected fixes; when none are selected, it runs the currently browsed fix for the selected repo.
 - In list mode, `i` toggles session ignore for the selected repo (ignore/unignore).
-- Interactive list ordering is by catalog (default catalog first), then `fixable`, `unsyncable`, `not cloned`, `syncable`, and `ignored`; repos with `clone_required` are surfaced as `not cloned`.
+- Interactive list ordering is globally `blocked`, stale `wip`, `pending`, fresh `wip`, `synced`, then `ignored`; catalogs (default first) order repositories within each tier. `clone_required` appears in the pending group.
 - Before computing fix eligibility, `bb fix` re-probes repositories whose cached `push_access` is `unknown`.
 - Targeted non-interactive `bb fix <project> [action]` computes risk checks and unknown push-access probes only for the selected repository.
 - Non-TUI `bb fix` execution passes through git stdio for synchronous git commands (for example interactive authentication prompts).
@@ -459,7 +459,7 @@ Examples:
 ## Exit Codes
 
 - `0`: success
-- `1`: command completed but found unsyncable state (`scan`, `sync`, `doctor`, `fix` list/apply when still unsyncable)
+- `1`: command completed but found blocked state (`scan`, `sync`, `doctor`, `fix` list/apply when still blocked)
 - `2`: usage error or hard failure
 
 ## Configuration
@@ -578,8 +578,8 @@ When `sync --notify` is used:
 ## Safety Guarantees
 
 - No writes into non-empty non-repo target paths during ensure/sync.
-- Existing conflicting target paths are marked unsyncable instead of overwritten.
-- Branch switching follows winner only when local repo is syncable.
+- Existing conflicting target paths are marked blocked instead of overwritten.
+- Branch switching follows winner only when local repo is synced.
 - No cross-catalog fallback during reconcile (`repo_key` catalog is authoritative).
 - Sync does not auto-clone by default (`auto_clone_on_sync` must be enabled per catalog).
 - Global per-machine lock prevents concurrent `bb` processes from racing local state writes.
@@ -715,7 +715,7 @@ Used primarily by test harness:
 - Set `github.owner` in `config.yaml`.
 - Check whether repo already exists with conflicting ownership/name.
 
-### Repo remains unsyncable
+### Repo remains blocked
 
 - Run:
   - `bb doctor`

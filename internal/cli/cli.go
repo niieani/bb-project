@@ -442,7 +442,7 @@ func newSyncCommand(runtime *runtimeState) *cobra.Command {
 
 	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
 	cmd.Flags().BoolVar(&push, "push", false, "Allow pushing ahead commits when policy blocks by default.")
-	cmd.Flags().BoolVar(&notify, "notify", false, "Emit notifications for unsyncable repositories.")
+	cmd.Flags().BoolVar(&notify, "notify", false, "Emit one activity-aware repository attention digest.")
 	cmd.Flags().StringVar(&notifyBackend, "notify-backend", "", "Notification backend override (stdout|osascript).")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show reconcile decisions without write-side sync actions.")
 
@@ -582,9 +582,9 @@ func newDoctorCommand(runtime *runtimeState) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "doctor",
-		Short: "Report unsyncable repositories and reasons.",
+		Short: "Report repositories grouped by state and reasons.",
 		Long: strings.TrimSpace(`
-Report unsyncable repositories and reasons.
+Report repositories grouped by state and reasons.
 
 When GitHub integration is configured (or selected repositories use GitHub remotes),
 doctor also checks GitHub CLI prerequisites and emits warnings when gh is missing

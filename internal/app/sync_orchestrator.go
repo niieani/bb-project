@@ -70,7 +70,7 @@ func (a *App) runSync(opts SyncOptions) (int, error) {
 	}
 
 	if anyUnsyncableInSelectedCatalogs(machine.Repos, selectedCatalogMap) {
-		a.logf("sync: completed with unsyncable repos")
+		a.logf("sync: completed with blocked repos")
 		return 1, nil
 	}
 	a.logf("sync: completed successfully")

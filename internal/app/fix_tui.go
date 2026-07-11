@@ -479,9 +479,11 @@ type fixTUIModel struct {
 
 	repoList list.Model
 
-	width  int
-	height int
-	isDark bool
+	width         int
+	height        int
+	isDark        bool
+	now           func() time.Time
+	wipStaleAfter time.Duration
 
 	status  string
 	errText string
@@ -552,9 +554,10 @@ type fixColumnLayout struct {
 type fixRepoTier int
 
 const (
-	fixRepoTierAutofixable fixRepoTier = iota
-	fixRepoTierUnsyncableBlocked
-	fixRepoTierNotCloned
+	fixRepoTierBlocked fixRepoTier = iota
+	fixRepoTierStaleWIP
+	fixRepoTierPending
+	fixRepoTierFreshWIP
 	fixRepoTierSynced
 )
 
@@ -599,12 +602,12 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	reasonsStyle := fixReasonsStyle
 	stateStyle := fixStateSyncedStyle
 	switch row.Tier {
-	case fixRepoTierAutofixable:
-		stateStyle = fixStateAutofixableStyle
-	case fixRepoTierUnsyncableBlocked:
+	case fixRepoTierBlocked:
 		stateStyle = fixStateUnsyncableStyle
-	case fixRepoTierNotCloned:
+	case fixRepoTierPending:
 		stateStyle = fixStateNotClonedStyle
+	case fixRepoTierStaleWIP, fixRepoTierFreshWIP:
+		stateStyle = fixStateAutofixableStyle
 	}
 	if row.Ignored {
 		repoStyle = repoStyle.Copy().Foreground(mutedTextColor).Faint(true)
@@ -673,7 +676,7 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 }
 
 const fixNoAction = "-"
-const fixTUISubtitle = "Interactive remediation for unsyncable repositories"
+const fixTUISubtitle = "Interactive remediation by repository state"
 
 const (
 	fixListDefaultWidth = 120
@@ -1198,6 +1201,15 @@ func normalizeFixBootProgressLine(line string) (string, bool) {
 func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUIModel, error) {
 	repoList := newFixRepoListModel(true)
 
+	now := func() time.Time { return time.Now().UTC() }
+	if app.Now != nil {
+		now = app.Now
+	}
+	cfg, err := state.LoadConfig(app.Paths)
+	if err != nil {
+		return nil, err
+	}
+	staleAfter := time.Duration(cfg.Notify.WIPStaleHours) * time.Hour
 	m := &fixTUIModel{
 		app:                      app,
 		includeCatalogs:          append([]string(nil), includeCatalogs...),
@@ -1216,6 +1228,7 @@ func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUI
 		repoList:                 repoList,
 		revalidateSpinner:        newFixProgressSpinner(),
 		immediateApplySpinner:    newFixProgressSpinner(),
+		now:                      now, wipStaleAfter: staleAfter,
 	}
 	m.applyTheme()
 	m.help.ShowAll = false
@@ -1782,22 +1795,24 @@ func (m *fixTUIModel) viewRepoDetails(repo fixRepoState) string {
 		reasonText = strings.Join(parts, ", ")
 	}
 
-	state := "syncable"
+	state := "synced"
 	stateStyle := fixStateSyncedStyle
 	if ignored {
 		state = "ignored"
 		stateStyle = fixStateIgnoredStyle
 	} else {
-		switch classifyFixRepo(repo, actions) {
-		case fixRepoTierAutofixable:
-			state = "fixable"
+		switch classifyFixRepoAt(repo, m.now(), m.wipStaleAfter) {
+		case fixRepoTierStaleWIP:
+			state = "stale wip"
 			stateStyle = fixStateAutofixableStyle
-		case fixRepoTierUnsyncableBlocked:
-			state = "unsyncable"
+		case fixRepoTierBlocked:
+			state = "blocked"
 			stateStyle = fixStateUnsyncableStyle
-		case fixRepoTierNotCloned:
-			state = "not cloned"
+		case fixRepoTierPending:
+			state = "pending"
 			stateStyle = fixStateNotClonedStyle
+		case fixRepoTierFreshWIP:
+			state = "wip"
 		}
 	}
 
@@ -1842,10 +1857,8 @@ func (m *fixTUIModel) viewRepoDetails(repo fixRepoState) string {
 func (m *fixTUIModel) viewFixSummary() string {
 	total := len(m.visible)
 	pending := 0
-	fixable := 0
 	blocked := 0
-	notCloned := 0
-	syncable := 0
+	staleWIP, pendingRepos, freshWIP, synced := 0, 0, 0, 0
 	ignored := 0
 	for _, repo := range m.visible {
 		actions := eligibleFixActions(repo.Record, repo.Meta, fixEligibilityContext{
@@ -1862,25 +1875,28 @@ func (m *fixTUIModel) viewFixSummary() string {
 			ignored++
 			continue
 		}
-		tier := classifyFixRepo(repo, actions)
+		tier := classifyFixRepoAt(repo, m.now(), m.wipStaleAfter)
 		switch tier {
-		case fixRepoTierAutofixable:
-			fixable++
-		case fixRepoTierUnsyncableBlocked:
+		case fixRepoTierBlocked:
 			blocked++
-		case fixRepoTierNotCloned:
-			notCloned++
+		case fixRepoTierStaleWIP:
+			staleWIP++
+		case fixRepoTierPending:
+			pendingRepos++
+		case fixRepoTierFreshWIP:
+			freshWIP++
 		case fixRepoTierSynced:
-			syncable++
+			synced++
 		}
 	}
 	segments := []fixSummarySegment{
 		{Value: fmt.Sprintf("%d repos", total), Fg: textColor},
 		{Value: fmt.Sprintf("%d selected", pending), Fg: textColor},
-		{Value: fmt.Sprintf("%d fixable", fixable), Fg: lipgloss.Color("214")},
-		{Value: fmt.Sprintf("%d unsyncable", blocked), Fg: errorFgColor},
-		{Value: fmt.Sprintf("%d not cloned", notCloned), Fg: warningColor},
-		{Value: fmt.Sprintf("%d syncable", syncable), Fg: successColor},
+		{Value: fmt.Sprintf("%d blocked", blocked), Fg: errorFgColor},
+		{Value: fmt.Sprintf("%d stale wip", staleWIP), Fg: lipgloss.Color("214")},
+		{Value: fmt.Sprintf("%d pending", pendingRepos), Fg: warningColor},
+		{Value: fmt.Sprintf("%d wip", freshWIP), Fg: warningColor},
+		{Value: fmt.Sprintf("%d synced", synced), Fg: successColor},
 		{Value: fmt.Sprintf("%d ignored", ignored), Fg: mutedTextColor},
 	}
 
@@ -1898,6 +1914,7 @@ func (m *fixTUIModel) viewFixSummary() string {
 		renderFixSummaryChip(segments[5].Value, segments[5].Fg, true),
 		" ",
 		renderFixSummaryChip(segments[6].Value, segments[6].Fg, true),
+		" ", renderFixSummaryChip(segments[7].Value, segments[7].Fg, true),
 	)
 	summaryWidth := m.repoDetailsLineWidth()
 	if summaryWidth <= 0 || lipgloss.Width(pills) <= summaryWidth {
@@ -2365,19 +2382,23 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 		entries = append(entries, fixVisibleEntry{
 			repo:    repo,
 			actions: actions,
-			tier:    classifyFixRepo(repo, actions),
+			tier:    classifyFixRepoAt(repo, m.now(), m.wipStaleAfter),
 		})
 	}
 
 	sort.SliceStable(entries, func(i, j int) bool {
+		iIgnored, jIgnored := m.ignored[entries[i].repo.Record.Path], m.ignored[entries[j].repo.Record.Path]
+		if iIgnored != jIgnored {
+			return !iIgnored
+		}
+		if entries[i].tier != entries[j].tier {
+			return entries[i].tier < entries[j].tier
+		}
 		if entries[i].repo.IsDefaultCatalog != entries[j].repo.IsDefaultCatalog {
 			return entries[i].repo.IsDefaultCatalog
 		}
 		if entries[i].repo.Record.Catalog != entries[j].repo.Record.Catalog {
 			return strings.ToLower(entries[i].repo.Record.Catalog) < strings.ToLower(entries[j].repo.Record.Catalog)
-		}
-		if entries[i].tier != entries[j].tier {
-			return entries[i].tier < entries[j].tier
 		}
 		leftName := strings.ToLower(entries[i].repo.Record.Name)
 		rightName := strings.ToLower(entries[j].repo.Record.Name)
@@ -2428,14 +2449,16 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			sortStrings(parts)
 			reasons = strings.Join(parts, ", ")
 		}
-		state := "syncable"
+		state := "synced"
 		switch entry.tier {
-		case fixRepoTierAutofixable:
-			state = "fixable"
-		case fixRepoTierUnsyncableBlocked:
-			state = "unsyncable"
-		case fixRepoTierNotCloned:
-			state = "not cloned"
+		case fixRepoTierStaleWIP:
+			state = "stale wip"
+		case fixRepoTierBlocked:
+			state = "blocked"
+		case fixRepoTierPending:
+			state = "pending"
+		case fixRepoTierFreshWIP:
+			state = "wip"
 		}
 		ignored := m.ignored[path]
 		if ignored {
@@ -3322,16 +3345,22 @@ func repoMetaAllowsAutoPush(meta *domain.RepoMetadataFile) bool {
 }
 
 func classifyFixRepo(repo fixRepoState, actions []string) fixRepoTier {
-	if repo.Record.State == domain.RepoStateSynced {
+	return classifyFixRepoAt(repo, time.Now().UTC(), 24*time.Hour)
+}
+func classifyFixRepoAt(repo fixRepoState, now time.Time, staleAfter time.Duration) fixRepoTier {
+	switch repo.Record.State {
+	case domain.RepoStateBlocked:
+		return fixRepoTierBlocked
+	case domain.RepoStatePending:
+		return fixRepoTierPending
+	case domain.RepoStateWip:
+		if repo.Record.LastActivityAt.IsZero() || now.Sub(repo.Record.LastActivityAt) >= staleAfter {
+			return fixRepoTierStaleWIP
+		}
+		return fixRepoTierFreshWIP
+	default:
 		return fixRepoTierSynced
 	}
-	if hasUnsyncableReason(repo.Record.Reasons, domain.ReasonCloneRequired) {
-		return fixRepoTierNotCloned
-	}
-	if unsyncableReasonsFullyCoverable(repo.Record.Reasons, fixActionsForSelection(actions)) {
-		return fixRepoTierAutofixable
-	}
-	return fixRepoTierUnsyncableBlocked
 }
 
 func hasUnsyncableReason(reasons []domain.UnsyncableReason, target domain.UnsyncableReason) bool {

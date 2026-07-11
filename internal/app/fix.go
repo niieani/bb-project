@@ -239,7 +239,7 @@ func (a *App) renderFixStatus(rec domain.MachineRepoRecord, actions []string) {
 	fmt.Fprintf(a.Stdout, "repo: %s\n", rec.Name)
 	fmt.Fprintf(a.Stdout, "path: %s\n", rec.Path)
 	fmt.Fprintf(a.Stdout, "catalog: %s\n", rec.Catalog)
-	fmt.Fprintf(a.Stdout, "syncable: %t\n", rec.State == domain.RepoStateSynced)
+	fmt.Fprintf(a.Stdout, "state: %s\n", rec.State)
 	if len(rec.Reasons) == 0 {
 		fmt.Fprintln(a.Stdout, "reasons: none")
 	} else {
@@ -1940,7 +1940,7 @@ func (a *App) executeFixAction(
 		if !ok {
 			return &fixIneligibleError{
 				Action: action,
-				Reason: "clone is blocked: no syncable winner is available for this repository yet",
+				Reason: "clone is blocked: no synced winner is available for this repository yet",
 			}
 		}
 

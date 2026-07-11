@@ -278,6 +278,8 @@ func newFixTUIModelForTest(repos []fixRepoState) *fixTUIModel {
 		help:                  help.New(),
 		revalidateSpinner:     newFixProgressSpinner(),
 		immediateApplySpinner: newFixProgressSpinner(),
+		now:                   func() time.Time { return time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC) },
+		wipStaleAfter:         24 * time.Hour,
 	}
 	m.rebuildList("")
 	return m
@@ -348,7 +350,7 @@ func TestFixTUIViewUsesCompactMainPanelChrome(t *testing.T) {
 
 	lines := strings.Split(view, "\n")
 	top := firstNonEmptyLine(lines)
-	if !strings.Contains(top, "╭") || !strings.Contains(top, "bb") || !strings.Contains(top, "fix") || !strings.Contains(top, "Interactive remediation for unsyncable repositories") {
+	if !strings.Contains(top, "╭") || !strings.Contains(top, "bb") || !strings.Contains(top, "fix") || !strings.Contains(top, "Interactive remediation by repository state") {
 		t.Fatalf("expected combined border title/subtitle on first content line, got %q", top)
 	}
 
@@ -780,7 +782,7 @@ func TestFixTUIUnignoreDoesNotClearOtherIgnoredRepos(t *testing.T) {
 	m := newFixTUIModelForTest(repos)
 	m.setCursor(0)
 	m.ignoreCurrentRepo()
-	m.setCursor(1)
+	m.setCursor(0)
 	m.unignoreCurrentRepo()
 
 	if !m.ignored["/repos/api"] {
@@ -1612,10 +1614,10 @@ func TestFixTUIWizardSummaryViewShowsSinglePreciseHeadingAndTotals(t *testing.T)
 	if !strings.Contains(view, "Errors: none") {
 		t.Fatalf("expected explicit zero-error text, got %q", view)
 	}
-	if !strings.Contains(view, "Revalidation") || !strings.Contains(view, "Syncable now: 1") || !strings.Contains(view, "Still unsyncable: 0") {
+	if !strings.Contains(view, "Revalidation") || !strings.Contains(view, "Synced now: 1") || !strings.Contains(view, "Still blocked: 0") {
 		t.Fatalf("expected revalidation totals, got %q", view)
 	}
-	if !strings.Contains(view, "Revalidation: syncable now.") {
+	if !strings.Contains(view, "Revalidation: synced now.") {
 		t.Fatalf("expected post-revalidation syncable outcome, got %q", view)
 	}
 }
@@ -1663,7 +1665,7 @@ func TestFixTUIWizardSummaryGroupsMultipleActionsPerRepoIntoSingleRepoBlock(t *t
 	if !strings.Contains(view, "✓ Create project & push: applied") {
 		t.Fatalf("expected create-project result in grouped repo block, got %q", view)
 	}
-	if got := strings.Count(view, "Revalidation: syncable now."); got != 1 {
+	if got := strings.Count(view, "Revalidation: synced now."); got != 1 {
 		t.Fatalf("expected single revalidation outcome line in grouped repo block, got count=%d, view=%q", got, view)
 	}
 }
@@ -1704,7 +1706,7 @@ func TestFixTUIWizardSummaryViewReportsWhenMoreFixesAreStillNeeded(t *testing.T)
 	m.viewMode = fixViewSummary
 
 	view := ansi.Strip(m.viewSummaryContent())
-	if !strings.Contains(view, "Revalidation: unsyncable (1 blocker).") {
+	if !strings.Contains(view, "Revalidation: blocked (1 blocker).") {
 		t.Fatalf("expected explicit unsyncable blocker count, got %q", view)
 	}
 	if !strings.Contains(view, "Remaining blockers") || !strings.Contains(view, "Branch diverged from upstream (diverged)") {
@@ -2595,7 +2597,7 @@ func TestFixTUIWizardViewUsesSingleTopLineWithoutExtraWizardHeaders(t *testing.T
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 140, Height: 28})
 
 	view := ansi.Strip(viewContent(m.View()))
-	if strings.Contains(view, "Interactive remediation for unsyncable repositories") {
+	if strings.Contains(view, "Interactive remediation by repository state") {
 		t.Fatalf("wizard should use compact single top line, got %q", view)
 	}
 	if strings.Contains(view, "Review context before applying this fix.") {
@@ -4126,17 +4128,40 @@ func TestFixTUIOrdersReposByTier(t *testing.T) {
 	}
 	m := newFixTUIModelForTest(repos)
 
-	if got := m.visible[0].Record.Name; got != "mmm-auto" {
-		t.Fatalf("first row = %q, want fixable repo first", got)
+	if got := m.visible[0].Record.Name; got != "aaa-blocked" {
+		t.Fatalf("first row = %q, want blocked repo first", got)
 	}
-	if got := m.visible[1].Record.Name; got != "aaa-blocked" {
-		t.Fatalf("second row = %q, want unsyncable blocked repo second", got)
+	if got := m.visible[1].Record.Name; got != "mmm-auto" {
+		t.Fatalf("second row = %q, want stale wip repo second", got)
 	}
 	if got := m.visible[2].Record.Name; got != "nnn-clone" {
 		t.Fatalf("third row = %q, want not-cloned repo third", got)
 	}
 	if got := m.visible[3].Record.Name; got != "zzz-sync" {
 		t.Fatalf("fourth row = %q, want syncable repo last", got)
+	}
+}
+
+func TestFixTUIOrdersAllStateGroupsGlobally(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	repos := []fixRepoState{
+		{Record: domain.MachineRepoRecord{Name: "synced", Path: "/z/synced", Catalog: "z", State: domain.RepoStateSynced}},
+		{Record: domain.MachineRepoRecord{Name: "fresh", Path: "/a/fresh", Catalog: "a", State: domain.RepoStateWip, LastActivityAt: now.Add(-time.Hour)}},
+		{Record: domain.MachineRepoRecord{Name: "pending", Path: "/z/pending", Catalog: "z", State: domain.RepoStatePending, Reasons: []domain.UnsyncableReason{domain.ReasonCloneRequired}}},
+		{Record: domain.MachineRepoRecord{Name: "stale", Path: "/a/stale", Catalog: "a", State: domain.RepoStateWip, LastActivityAt: now.Add(-25 * time.Hour), Reasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked}}},
+		{Record: domain.MachineRepoRecord{Name: "blocked", Path: "/z/blocked", Catalog: "z", State: domain.RepoStateBlocked, Reasons: []domain.UnsyncableReason{domain.ReasonDiverged}}},
+		{Record: domain.MachineRepoRecord{Name: "ignored", Path: "/a/ignored", Catalog: "a", State: domain.RepoStateBlocked, Reasons: []domain.UnsyncableReason{domain.ReasonDiverged}}},
+	}
+	m := newFixTUIModelForTest(repos)
+	m.now = func() time.Time { return now }
+	m.ignored["/a/ignored"] = true
+	m.rebuildList("")
+	want := []string{"blocked", "stale", "pending", "fresh", "synced", "ignored"}
+	for i, name := range want {
+		if got := m.visible[i].Record.Name; got != name {
+			t.Fatalf("order[%d]=%q want %q", i, got, name)
+		}
 	}
 }
 
@@ -4177,7 +4202,7 @@ func TestFixRepoDelegateLeavesWrapGuardColumn(t *testing.T) {
 		State:            "unsyncable",
 		Reasons:          "dirty_tracked, dirty_untracked, missing_origin",
 		ScheduledActions: []string{FixActionEnableAutoPush},
-		Tier:             fixRepoTierAutofixable,
+		Tier:             fixRepoTierFreshWIP,
 	}
 
 	var b strings.Builder
@@ -5012,7 +5037,7 @@ func TestFixTUIFixSummaryFallsBackToWrappedTextWhenPillsDoNotFit(t *testing.T) {
 	if strings.Contains(summary, ":") {
 		t.Fatalf("fallback should keep pill content format (NUMBER TEXT), got %q", summary)
 	}
-	wantOrder := []string{"12 REPOS", "0 SELECTED", "0 FIXABLE", "12 UNSYNCABLE", "0 NOT CLONED", "0 SYNCABLE", "0 IGNORED"}
+	wantOrder := []string{"12 REPOS", "0 SELECTED", "0 BLOCKED", "0 STALE WIP", "0 PENDING", "0 WIP", "12 SYNCED", "0 IGNORED"}
 	last := -1
 	for _, token := range wantOrder {
 		idx := strings.Index(summary, token)
@@ -5066,7 +5091,7 @@ func TestClassifyFixRepoMarksUnsyncableRepoAsFixableWhenReasonsAreCoverable(t *t
 			Path:      "/repos/api",
 			OriginURL: "",
 			Upstream:  "",
-			State:     domain.RepoStateBlocked,
+			State:     domain.RepoStateWip,
 			Reasons: []domain.UnsyncableReason{
 				domain.ReasonMissingOrigin,
 			},
@@ -5078,8 +5103,8 @@ func TestClassifyFixRepoMarksUnsyncableRepoAsFixableWhenReasonsAreCoverable(t *t
 		Risk:        repo.Risk,
 	})
 
-	if got := classifyFixRepo(repo, actions); got != fixRepoTierAutofixable {
-		t.Fatalf("tier = %v, want fixable when there are eligible bb actions", got)
+	if got := classifyFixRepo(repo, actions); got != fixRepoTierStaleWIP {
+		t.Fatalf("tier = %v, want stale wip", got)
 	}
 }
 
@@ -5113,7 +5138,7 @@ func TestClassifyFixRepoMarksUnsyncableWhenReasonsAreNotCoverable(t *testing.T) 
 		Risk:        repo.Risk,
 	})
 
-	if got := classifyFixRepo(repo, actions); got != fixRepoTierUnsyncableBlocked {
+	if got := classifyFixRepo(repo, actions); got != fixRepoTierBlocked {
 		t.Fatalf("tier = %v, want unsyncable when no bb fix covers all reasons", got)
 	}
 }
@@ -5128,7 +5153,7 @@ func TestClassifyFixRepoMarksCreateProjectDirtyMissingOriginAsFixable(t *testing
 			Path:         "/repos/api",
 			OriginURL:    "",
 			Upstream:     "",
-			State:        domain.RepoStateBlocked,
+			State:        domain.RepoStateWip,
 			HasUntracked: true,
 			Reasons: []domain.UnsyncableReason{
 				domain.ReasonDirtyUntracked,
@@ -5146,8 +5171,8 @@ func TestClassifyFixRepoMarksCreateProjectDirtyMissingOriginAsFixable(t *testing
 	if !containsAction(actions, FixActionCreateProject) {
 		t.Fatalf("expected %q action, got %v", FixActionCreateProject, actions)
 	}
-	if got := classifyFixRepo(repo, actions); got != fixRepoTierAutofixable {
-		t.Fatalf("tier = %v, want fixable when create-project can resolve all reasons", got)
+	if got := classifyFixRepo(repo, actions); got != fixRepoTierStaleWIP {
+		t.Fatalf("tier = %v, want stale wip", got)
 	}
 }
 
@@ -5181,8 +5206,8 @@ func TestClassifyFixRepoMarksReadOnlyPushAccessAsFixableWithForkAction(t *testin
 	if !containsAction(actions, FixActionForkAndRetarget) {
 		t.Fatalf("expected fork-and-retarget action, got %v", actions)
 	}
-	if got := classifyFixRepo(repo, actions); got != fixRepoTierAutofixable {
-		t.Fatalf("tier = %v, want fixable for read-only remote", got)
+	if got := classifyFixRepo(repo, actions); got != fixRepoTierBlocked {
+		t.Fatalf("tier = %v, want blocked", got)
 	}
 }
 
@@ -5208,7 +5233,7 @@ func TestClassifyFixRepoMarksSyncProbeFailedAsBlocked(t *testing.T) {
 	}
 	actions := []string{FixActionSyncWithUpstream}
 
-	if got := classifyFixRepo(repo, actions); got != fixRepoTierUnsyncableBlocked {
+	if got := classifyFixRepo(repo, actions); got != fixRepoTierBlocked {
 		t.Fatalf("tier = %v, want unsyncable when sync feasibility probe was inconclusive", got)
 	}
 }
@@ -5222,7 +5247,7 @@ func TestClassifyFixRepoMarksCloneRequiredAsNotCloned(t *testing.T) {
 			Path:      "/repos/api",
 			OriginURL: "git@github.com:you/api.git",
 			Upstream:  "origin/main",
-			State:     domain.RepoStateBlocked,
+			State:     domain.RepoStatePending,
 			Reasons: []domain.UnsyncableReason{
 				domain.ReasonCloneRequired,
 			},
@@ -5230,7 +5255,7 @@ func TestClassifyFixRepoMarksCloneRequiredAsNotCloned(t *testing.T) {
 	}
 	actions := []string{FixActionClone}
 
-	if got := classifyFixRepo(repo, actions); got != fixRepoTierNotCloned {
+	if got := classifyFixRepo(repo, actions); got != fixRepoTierPending {
 		t.Fatalf("tier = %v, want not-cloned tier for clone-required repos", got)
 	}
 }

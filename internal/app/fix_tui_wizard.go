@@ -2220,8 +2220,8 @@ func (m *fixTUIModel) renderSummaryTotals() string {
 	lines = append(lines, "")
 	lines = append(lines, "Revalidation")
 	lines = append(lines,
-		fmt.Sprintf("%s Syncable now: %d", lipgloss.NewStyle().Foreground(successColor).Bold(true).Render("✓"), syncableNow),
-		fmt.Sprintf("%s Still unsyncable: %d", lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("!"), stillUnsyncable),
+		fmt.Sprintf("%s Synced now: %d", lipgloss.NewStyle().Foreground(successColor).Bold(true).Render("✓"), syncableNow),
+		fmt.Sprintf("%s Still blocked: %d", lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("!"), stillUnsyncable),
 		fmt.Sprintf("%s Manual intervention required: %d", lipgloss.NewStyle().Foreground(accentColor).Bold(true).Render("!"), manualRequired),
 	)
 	return strings.Join(lines, "\n")
@@ -2399,17 +2399,17 @@ func (m *fixTUIModel) summaryOutcomeLine(item fixSummaryResult, repo fixRepoStat
 			return "Result: applied; revalidated state unavailable."
 		}
 		if repo.Record.State == domain.RepoStateSynced {
-			return "Revalidation: syncable now."
+			return "Revalidation: synced now."
 		}
 		blockers := len(repo.Record.Reasons)
 		if blockers <= 0 {
-			return "Revalidation: unsyncable."
+			return "Revalidation: blocked."
 		}
 		label := "blockers"
 		if blockers == 1 {
 			label = "blocker"
 		}
-		return fmt.Sprintf("Revalidation: unsyncable (%d %s).", blockers, label)
+		return fmt.Sprintf("Revalidation: blocked (%d %s).", blockers, label)
 	case "skipped":
 		return "Result: skipped; no repository changes."
 	case "failed":
@@ -2417,7 +2417,7 @@ func (m *fixTUIModel) summaryOutcomeLine(item fixSummaryResult, repo fixRepoStat
 			return "Result: action failed before completion."
 		}
 		if repo.Record.State == domain.RepoStateSynced {
-			return "Result: action failed, but repository is syncable."
+			return "Result: action failed, but repository is synced."
 		}
 		return "Result: action failed; repository still needs fixes."
 	default:

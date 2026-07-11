@@ -1214,7 +1214,7 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 		}
 	}
 	rec.StateHash = domain.ComputeStateHash(rec)
-	a.logf("scan: repo=%s branch=%s syncable=%t ahead=%d behind=%d", repo.Path, rec.Branch, rec.State == domain.RepoStateSynced, rec.Ahead, rec.Behind)
+	a.logf("scan: repo=%s branch=%s state=%s ahead=%d behind=%d", repo.Path, rec.Branch, rec.State, rec.Ahead, rec.Behind)
 	return rec, nil
 }
 
@@ -1367,7 +1367,7 @@ func (a *App) RunScan(opts ScanOptions) (int, error) {
 		return 2, err
 	}
 	if unsyncable {
-		a.logf("scan: completed with unsyncable repos")
+		a.logf("scan: completed with blocked repos")
 		return 1, nil
 	}
 	a.logf("scan: completed successfully")
@@ -1457,19 +1457,39 @@ func (a *App) RunDoctor(include []string) (int, error) {
 		allowed[c.Name] = struct{}{}
 	}
 	blocked := false
+	groups := map[string][]domain.MachineRepoRecord{"blocked": {}, "stale wip": {}, "pending": {}, "warnings": {}}
 	for _, r := range machine.Repos {
 		if _, ok := allowed[r.Catalog]; !ok {
 			continue
 		}
-		if r.State != domain.RepoStateSynced || len(r.Warnings) > 0 {
-			fmt.Fprintf(a.Stdout, "%s: %s %v", r.Name, r.State, r.Reasons)
-			if len(r.Warnings) > 0 {
-				fmt.Fprintf(a.Stdout, " warnings=%v", r.Warnings)
+		switch r.State {
+		case domain.RepoStateBlocked:
+			groups["blocked"] = append(groups["blocked"], r)
+		case domain.RepoStateWip:
+			if r.LastActivityAt.IsZero() || a.Now().Sub(r.LastActivityAt) >= time.Duration(cfg.Notify.WIPStaleHours)*time.Hour {
+				groups["stale wip"] = append(groups["stale wip"], r)
 			}
-			fmt.Fprintln(a.Stdout)
+		case domain.RepoStatePending:
+			groups["pending"] = append(groups["pending"], r)
+		}
+		if len(r.Warnings) > 0 {
+			groups["warnings"] = append(groups["warnings"], r)
 		}
 		if r.State == domain.RepoStateBlocked {
 			blocked = true
+		}
+	}
+	for _, name := range []string{"blocked", "stale wip", "pending", "warnings"} {
+		if len(groups[name]) == 0 {
+			continue
+		}
+		fmt.Fprintf(a.Stdout, "%s:\n", name)
+		for _, r := range groups[name] {
+			fmt.Fprintf(a.Stdout, "  %s: %v", r.Name, r.Reasons)
+			if name == "warnings" {
+				fmt.Fprintf(a.Stdout, " %v", r.Warnings)
+			}
+			fmt.Fprintln(a.Stdout)
 		}
 	}
 
