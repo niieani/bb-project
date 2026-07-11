@@ -66,6 +66,7 @@ type SyncOptions struct {
 	EventsJSON      bool
 	Push            bool
 	DryRun          bool
+	progress        *syncOperationProgress
 }
 
 type SchedulerInstallOptions struct{}

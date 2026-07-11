@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -73,10 +74,10 @@ func TestRunSyncEmitsOrderedCountedRepositoryEvents(t *testing.T) {
 		{"repository_started", "software/api", intPointer(0), intPointer(2)},
 		{"progress", "software/api", intPointer(0), intPointer(2)},
 		{"progress", "software/api", intPointer(0), intPointer(2)},
+		{"repository_started", "software/web", intPointer(0), intPointer(2)},
+		{"progress", "software/web", intPointer(0), intPointer(2)},
+		{"progress", "software/web", intPointer(0), intPointer(2)},
 		{"repository_finished", "software/api", intPointer(1), intPointer(2)},
-		{"repository_started", "software/web", intPointer(1), intPointer(2)},
-		{"progress", "software/web", intPointer(1), intPointer(2)},
-		{"progress", "software/web", intPointer(1), intPointer(2)},
 		{"repository_finished", "software/web", intPointer(2), intPointer(2)},
 		{"operation_finished", "", intPointer(2), intPointer(2)},
 	}
@@ -89,8 +90,150 @@ func TestRunSyncEmitsOrderedCountedRepositoryEvents(t *testing.T) {
 			t.Fatalf("event[%d] = %+v, want %+v", i, got, expected)
 		}
 	}
-	if events[5].Result != "failure" || !strings.Contains(events[5].Error, "pull_failed") {
-		t.Fatalf("api finish = %+v", events[5])
+	if events[8].Result != "failure" || !strings.Contains(events[8].Error, "pull_failed") {
+		t.Fatalf("api finish = %+v", events[8])
+	}
+}
+
+func TestTargetedCloneRequiredEmitsFailureLifecycleWhenAutoCloneDisabled(t *testing.T) {
+	events, _, code, err := runCloneSync(t, false, false, true)
+	if err != nil || code != 0 {
+		t.Fatalf("sync = code %d err %v", code, err)
+	}
+	assertTargetedCloneLifecycle(t, events, "failure")
+}
+
+func TestTargetedCloneRequiredEmitsSuccessfulCloneLifecycle(t *testing.T) {
+	events, target, code, err := runCloneSync(t, true, true, true)
+	if err != nil || code != 0 {
+		t.Fatalf("sync = code %d err %v", code, err)
+	}
+	assertTargetedCloneLifecycle(t, events, "success")
+	if _, err := os.Stat(filepath.Join(target, "README.md")); err != nil {
+		t.Fatalf("cloned repository unavailable: %v", err)
+	}
+}
+
+func TestGlobalCloneReconciliationCompletesBeforeRepositoryFinish(t *testing.T) {
+	events, target, code, err := runCloneSync(t, true, true, false)
+	if err != nil || code != 0 {
+		t.Fatalf("sync = code %d err %v", code, err)
+	}
+	assertTargetedCloneLifecycle(t, events, "success")
+	finishedIndex := len(events) - 2
+	cloneIndex := -1
+	for i, event := range events {
+		if event.Phase == "clone" {
+			cloneIndex = i
+		}
+	}
+	if cloneIndex < 0 || cloneIndex >= finishedIndex {
+		t.Fatalf("clone/finish order = %+v", events)
+	}
+	if _, err := os.Stat(filepath.Join(target, "README.md")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runCloneSync(t *testing.T, autoClone, validOrigin, targeted bool) ([]OperationEvent, string, int, error) {
+	t.Helper()
+	home := t.TempDir()
+	paths := state.NewPaths(home)
+	root := filepath.Join(home, "software")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 11, 10, 0, 0, 0, time.UTC)
+	autoCloneValue := autoClone
+	local := state.BootstrapMachine("local", "local", now)
+	local.DefaultCatalog = "software"
+	local.Catalogs = []domain.Catalog{{Name: "software", Root: root, RepoPathDepth: 1, AutoCloneOnSync: &autoCloneValue}}
+	local.Repos = []domain.MachineRepoRecord{{RepoKey: "software/api", Name: "api", Catalog: "software", Path: filepath.Join(root, "api"), State: domain.RepoStatePending, Reasons: []domain.UnsyncableReason{domain.ReasonCloneRequired}}}
+	if err := state.SaveMachine(paths, local); err != nil {
+		t.Fatal(err)
+	}
+	stdout := &bytes.Buffer{}
+	a := New(paths, stdout, &bytes.Buffer{})
+	origin := filepath.Join(home, "api.git")
+	if validOrigin {
+		if _, err := a.Git.RunGit(home, "init", "--bare", origin); err != nil {
+			t.Fatal(err)
+		}
+		seed := filepath.Join(home, "seed")
+		if err := os.MkdirAll(seed, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Git.InitRepo(seed); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(seed, "README.md"), []byte("api\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Git.AddAll(seed); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Git.Commit(seed, "initial"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.Git.RunGit(seed, "branch", "-M", "main"); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Git.AddOrigin(seed, origin); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.Git.RunGit(seed, "push", "-u", "origin", "main"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	remote := state.BootstrapMachine("remote", "remote", now)
+	remote.Repos = []domain.MachineRepoRecord{{RepoKey: "software/api", Name: "api", Catalog: "software", Path: "/remote/api", OriginURL: origin, Branch: "main", State: domain.RepoStateSynced}}
+	if err := state.SaveMachine(paths, remote); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SaveRepoMetadata(paths, domain.RepoMetadataFile{RepoKey: "software/api", Name: "api", OriginURL: origin}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.SaveConfig(paths, state.DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BB_MACHINE_ID", "local")
+	opts := SyncOptions{EventsJSON: true}
+	if targeted {
+		opts.Repository = "software/api"
+	}
+	code, err := a.runSync(opts)
+	var events []OperationEvent
+	decoder := json.NewDecoder(stdout)
+	for decoder.More() {
+		var event OperationEvent
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+	}
+	return events, filepath.Join(root, "api"), code, err
+}
+
+func assertTargetedCloneLifecycle(t *testing.T, events []OperationEvent, result string) {
+	t.Helper()
+	if len(events) < 7 || events[0].Event != "operation_started" || events[1].Phase != "discover" {
+		t.Fatalf("events = %+v", events)
+	}
+	foundClone := false
+	for _, event := range events {
+		if event.Repository == "software/api" && event.Phase == "clone" {
+			foundClone = true
+		}
+	}
+	if !foundClone {
+		t.Fatalf("missing clone progress: %+v", events)
+	}
+	finished := events[len(events)-2]
+	if finished.Event != "repository_finished" || finished.Repository != "software/api" || finished.Result != result || finished.Completed == nil || *finished.Completed != 1 || finished.Total == nil || *finished.Total != 1 {
+		t.Fatalf("finish = %+v", finished)
+	}
+	if events[len(events)-1].Event != "operation_finished" {
+		t.Fatalf("terminal event = %+v", events[len(events)-1])
 	}
 }
 
@@ -101,6 +244,91 @@ func equalIntPointers(left, right *int) bool {
 		return left == nil && right == nil
 	}
 	return *left == *right
+}
+
+func TestObserveHardErrorEmitsAttributedRepositoryFailure(t *testing.T) {
+	stdout := &bytes.Buffer{}
+	a := New(state.NewPaths(t.TempDir()), stdout, &bytes.Buffer{})
+	repoPath := t.TempDir()
+	progress := newSyncOperationProgress(a, true, 1)
+	_, _, err := a.observePhase(domain.ConfigFile{}, []discoveredRepo{{RepoKey: "software/api", Name: "api", Path: repoPath, Catalog: domain.Catalog{Name: "software"}}}, nil, SyncOptions{EventsJSON: true, progress: progress})
+	if err == nil {
+		t.Fatal("expected observation error")
+	}
+	var events []OperationEvent
+	decoder := json.NewDecoder(stdout)
+	for decoder.More() {
+		var event OperationEvent
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+	}
+	finished := events[len(events)-1]
+	if finished.Event != "repository_finished" || finished.Repository != "software/api" || finished.Result != "failure" || finished.Error == "" || finished.Completed == nil || *finished.Completed != 1 {
+		t.Fatalf("finish = %+v", finished)
+	}
+}
+
+func TestReconcileHardErrorEmitsAttributedRepositoryFailure(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, "software")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "api")
+	if err := os.Symlink(target, target); err != nil {
+		t.Fatal(err)
+	}
+	stdout := &bytes.Buffer{}
+	a := New(state.NewPaths(home), stdout, &bytes.Buffer{})
+	progress := newSyncOperationProgress(a, true, 1)
+	meta := domain.RepoMetadataFile{RepoKey: "software/api", Name: "api", OriginURL: "https://example.com/api.git"}
+	machine := domain.MachineFile{MachineID: "local"}
+	remote := domain.MachineFile{MachineID: "remote", Repos: []domain.MachineRepoRecord{{RepoKey: "software/api", OriginURL: meta.OriginURL, Branch: "main", State: domain.RepoStateSynced}}}
+	err := a.ensureFromWinners(domain.ConfigFile{}, &machine, []domain.MachineFile{remote}, []domain.RepoMetadataFile{meta}, map[string]domain.Catalog{"software": {Name: "software", Root: root}}, nil, SyncOptions{EventsJSON: true, progress: progress})
+	if err == nil {
+		t.Fatal("expected reconciliation error")
+	}
+	var events []OperationEvent
+	decoder := json.NewDecoder(stdout)
+	for decoder.More() {
+		var event OperationEvent
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+	}
+	finished := events[len(events)-1]
+	if finished.Event != "repository_finished" || finished.Repository != "software/api" || finished.Result != "failure" || finished.Error == "" || finished.Completed == nil || *finished.Completed != 1 {
+		t.Fatalf("finish = %+v", finished)
+	}
+}
+
+func TestPlannedSyncRepositoriesExcludesSkippedMetadata(t *testing.T) {
+	discovered := []discoveredRepo{{RepoKey: "software/local"}}
+	metas := []domain.RepoMetadataFile{
+		{RepoKey: "software/current", OriginURL: "current.git", PreviousRepoKeys: []string{"software/historical"}},
+		{RepoKey: "software/historical", OriginURL: "old.git"},
+		{RepoKey: "software/empty-origin"},
+		{RepoKey: "software/no-winner", OriginURL: "missing.git"},
+	}
+	machines := []domain.MachineFile{{MachineID: "remote", Repos: []domain.MachineRepoRecord{{RepoKey: "software/current", State: domain.RepoStateSynced}}}}
+	got := plannedSyncRepositories(discovered, machines, metas, map[string]domain.Catalog{"software": {Name: "software"}}, "")
+	if want := []string{"software/current", "software/local"}; !slices.Equal(got, want) {
+		t.Fatalf("planned = %v, want %v", got, want)
+	}
+	stdout := &bytes.Buffer{}
+	a := New(state.NewPaths(t.TempDir()), stdout, &bytes.Buffer{})
+	machine := domain.MachineFile{MachineID: "local"}
+	noWinner := domain.RepoMetadataFile{RepoKey: "software/no-winner", OriginURL: "missing.git"}
+	progress := newSyncOperationProgress(a, true, 0)
+	if err := a.ensureFromWinners(domain.ConfigFile{}, &machine, nil, []domain.RepoMetadataFile{noWinner}, map[string]domain.Catalog{"software": {Name: "software", Root: t.TempDir()}}, nil, SyncOptions{EventsJSON: true, progress: progress}); err != nil {
+		t.Fatal(err)
+	}
+	if stdout.Len() != 0 || progress.completed != 0 {
+		t.Fatalf("skipped metadata emitted phantom lifecycle: %q", stdout.String())
+	}
 }
 
 func TestAnyUnsyncableInSelectedCatalogsIgnoresNonBlockingReasons(t *testing.T) {

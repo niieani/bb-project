@@ -89,6 +89,7 @@ func (a *App) ensureFromWinners(
 			a.logf("sync: no synced winner for %s", meta.RepoKey)
 			continue
 		}
+		opts.progress.progress(meta.RepoKey, "reconcile", "Reconciling repository")
 		if winner.MachineID == machine.MachineID && len(matches) == 1 {
 			if remoteWinner, ok := selectWinnerForRepoExcluding(allMachines, meta.RepoKey, machine.MachineID); ok {
 				key := repoRecordIdentityKey(machine.Repos[matches[0]])
@@ -102,7 +103,7 @@ func (a *App) ensureFromWinners(
 
 		pathConflictReason, err := validateTargetPath(a.Git, targetPath, meta.OriginURL, meta.PreferredRemote)
 		if err != nil {
-			return err
+			return opts.progress.fail(meta.RepoKey, err)
 		}
 		if pathConflictReason != "" {
 			a.logf("sync: path conflict at %s: %s", targetPath, pathConflictReason)
@@ -122,6 +123,7 @@ func (a *App) ensureFromWinners(
 
 			changed := local.Branch != winner.Record.Branch || local.Behind > 0
 			if local.Branch != winner.Record.Branch {
+				opts.progress.progress(meta.RepoKey, "checkout", "Checking out winner branch")
 				a.logf("sync: checking out branch %s in %s", winner.Record.Branch, local.Path)
 				if err := a.Git.CheckoutWithPreferredRemote(local.Path, winner.Record.Branch, meta.PreferredRemote); err != nil {
 					machine.Repos[idx].State = domain.RepoStateBlocked
@@ -132,9 +134,11 @@ func (a *App) ensureFromWinners(
 			}
 
 			if cfg.Sync.FetchPrune {
+				opts.progress.progress(meta.RepoKey, "fetch", "Fetching origin")
 				a.logf("sync: fetch --prune %s before pull", local.Path)
 				_ = a.Git.FetchPrune(local.Path)
 			}
+			opts.progress.progress(meta.RepoKey, "pull", "Pulling winner state")
 			a.logf("sync: pull --ff-only %s", local.Path)
 			if err := a.Git.PullFFOnly(local.Path); err != nil {
 				machine.Repos[idx].State = domain.RepoStateBlocked
@@ -157,7 +161,7 @@ func (a *App) ensureFromWinners(
 				RepoKey: meta.RepoKey,
 			}, opts.Push)
 			if err != nil {
-				return err
+				return opts.progress.fail(meta.RepoKey, err)
 			}
 			machine.Repos[idx] = updated
 			continue
@@ -167,6 +171,7 @@ func (a *App) ensureFromWinners(
 			continue
 		}
 		a.logf("sync: ensuring local copy at %s", targetPath)
+		opts.progress.progress(meta.RepoKey, "clone", "Ensuring local copy")
 		if err := a.ensureLocalCopy(
 			cfg,
 			machine,
@@ -178,7 +183,7 @@ func (a *App) ensureFromWinners(
 			opts,
 			targetCatalog.AllowsAutoCloneOnSync(),
 		); err != nil {
-			return err
+			return opts.progress.fail(meta.RepoKey, err)
 		}
 	}
 
@@ -307,6 +312,7 @@ func (a *App) ensureLocalCopy(
 			return nil
 		}
 		a.logf("sync: cloning %s into %s", winner.Record.OriginURL, targetPath)
+		opts.progress.progress(meta.RepoKey, "clone", "Cloning repository")
 		if err := a.Git.Clone(winner.Record.OriginURL, targetPath); err != nil {
 			a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCheckoutFailed)
 			return nil
@@ -329,6 +335,7 @@ func (a *App) ensureLocalCopy(
 				return nil
 			}
 			a.logf("sync: cloning into empty directory %s", targetPath)
+			opts.progress.progress(meta.RepoKey, "clone", "Cloning repository")
 			if err := a.Git.Clone(winner.Record.OriginURL, targetPath); err != nil {
 				a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCheckoutFailed)
 				return nil
@@ -357,9 +364,11 @@ func (a *App) ensureLocalCopy(
 		return nil
 	}
 	if cfg.Sync.FetchPrune {
+		opts.progress.progress(meta.RepoKey, "fetch", "Fetching origin")
 		a.logf("sync: fetch --prune %s", targetPath)
 		_ = a.Git.FetchPrune(targetPath)
 	}
+	opts.progress.progress(meta.RepoKey, "pull", "Pulling winner state")
 	a.logf("sync: pull --ff-only %s", targetPath)
 	if err := a.Git.PullFFOnly(targetPath); err != nil {
 		a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonPullFailed)

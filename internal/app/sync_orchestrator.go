@@ -15,6 +15,9 @@ func (a *App) runSync(opts SyncOptions) (code int, runErr error) {
 	completed, total := 0, 0
 	a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "operation_started", Operation: "sync", Repository: opts.Repository, Message: "Starting sync"})
 	defer func() {
+		if opts.progress != nil {
+			completed, total = opts.progress.completed, opts.progress.total
+		}
 		event := OperationEvent{Event: "operation_finished", Operation: "sync", Repository: opts.Repository, Message: "Sync completed", Result: "success"}
 		if runErr != nil || code != 0 {
 			event.Message = "Sync failed"
@@ -76,11 +79,17 @@ func (a *App) runSync(opts SyncOptions) (code int, runErr error) {
 	if opts.Repository != "" {
 		discovered = filterDiscoveredRepositories(discovered, opts.Repository)
 	}
-	total = len(discovered)
+	plannedMachines, plannedMetas, err := loadSyncReconcileInputs(a.Paths)
+	if err != nil {
+		return 2, err
+	}
+	planned := plannedSyncRepositories(discovered, plannedMachines, plannedMetas, selectedCatalogMap, opts.Repository)
+	total = len(planned)
+	opts.progress = newSyncOperationProgress(a, opts.EventsJSON, total)
 	a.emitOperationEvent(opts.EventsJSON, withOperationCounts(OperationEvent{Event: "progress", Operation: "sync", Message: "Discovered repositories", Phase: "discover"}, completed, total))
 
 	previous := previousRepoRecords(machine.Repos)
-	localRecords, transitionedToSynced, err := a.observePhase(cfg, discovered, previous, opts, &completed, total)
+	localRecords, transitionedToSynced, err := a.observePhase(cfg, discovered, previous, opts)
 	if err != nil {
 		return 2, err
 	}
@@ -99,6 +108,10 @@ func (a *App) runSync(opts SyncOptions) (code int, runErr error) {
 		return 2, err
 	}
 	a.logf("sync: winner reconciliation completed")
+	for _, repository := range planned {
+		opts.progress.finish(repository, findRepositoryRecord(machine.Repos, repository))
+	}
+	completed = opts.progress.completed
 
 	if err := persistMachineRecords(a.Paths, &machine, previous, a.Now); err != nil {
 		return 2, err
@@ -112,6 +125,49 @@ func (a *App) runSync(opts SyncOptions) (code int, runErr error) {
 	}
 	a.logf("sync: completed successfully")
 	return 0, nil
+}
+
+func plannedSyncRepositories(discovered []discoveredRepo, machines []domain.MachineFile, metas []domain.RepoMetadataFile, selected map[string]domain.Catalog, repository string) []string {
+	keys := map[string]bool{}
+	for _, repo := range discovered {
+		keys[repo.RepoKey] = true
+	}
+	moveIndex, _ := buildRepoMoveIndex(metas)
+	for _, meta := range metas {
+		if repository != "" && meta.RepoKey != repository {
+			continue
+		}
+		if strings.TrimSpace(meta.RepoKey) == "" || strings.TrimSpace(meta.OriginURL) == "" {
+			continue
+		}
+		if _, historical := moveIndex[strings.TrimSpace(meta.RepoKey)]; historical {
+			continue
+		}
+		if _, ok := selectWinnerForRepo(machines, meta.RepoKey); !ok {
+			continue
+		}
+		catalog, _, _, err := domain.ParseRepoKey(meta.RepoKey)
+		if err == nil {
+			if _, ok := selected[catalog]; ok {
+				keys[meta.RepoKey] = true
+			}
+		}
+	}
+	result := make([]string, 0, len(keys))
+	for key := range keys {
+		result = append(result, key)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func findRepositoryRecord(repos []domain.MachineRepoRecord, repository string) *domain.MachineRepoRecord {
+	for i := range repos {
+		if repos[i].RepoKey == repository {
+			return &repos[i]
+		}
+	}
+	return nil
 }
 
 func filterDiscoveredRepositories(repos []discoveredRepo, repository string) []discoveredRepo {
