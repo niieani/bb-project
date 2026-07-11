@@ -96,6 +96,17 @@ func TestOverviewTwoMachineRealGitGolden(t *testing.T) {
 		{RepoKey: "software/blocked", Cells: []app.OverviewCell{{MachineID: "a-machine", Present: true, State: domain.RepoStateBlocked, Reasons: []domain.UnsyncableReason{domain.ReasonDiverged}, LastActivityAt: now.Add(-2 * time.Hour)}, {MachineID: "b-machine", Reasons: empty, Warnings: empty}}},
 		{RepoKey: "software/clean", SyncedEverywhere: true, Cells: []app.OverviewCell{{MachineID: "a-machine", Present: true, State: domain.RepoStateSynced}, {MachineID: "b-machine", Present: true, State: domain.RepoStateSynced}}},
 	}, SyncedEverywhere: 1, Warnings: []string{}}
+	for repoIndex := range want.Repos {
+		for cellIndex := range want.Repos[repoIndex].Cells {
+			cell := &want.Repos[repoIndex].Cells[cellIndex]
+			if cell.Reasons == nil {
+				cell.Reasons = []domain.UnsyncableReason{}
+			}
+			if cell.Warnings == nil {
+				cell.Warnings = []domain.UnsyncableReason{}
+			}
+		}
+	}
 	if !reflect.DeepEqual(matrix, want) {
 		t.Fatalf("JSON matrix:\n%+v\nwant:\n%+v\nraw:\n%s", matrix, want, jsonOut)
 	}

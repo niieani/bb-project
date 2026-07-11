@@ -80,6 +80,14 @@ func TestOverviewPlainAndJSONContract(t *testing.T) {
 	assertJSONKeys(t, repo, []string{"cells", "repo_key", "synced_everywhere"})
 	cell := repo["cells"].([]any)[0].(map[string]any)
 	assertJSONKeys(t, cell, []string{"last_activity_at", "machine_id", "present", "reasons", "state", "warnings"})
+	for _, rawRepo := range contract["repos"].([]any) {
+		for _, rawCell := range rawRepo.(map[string]any)["cells"].([]any) {
+			cell := rawCell.(map[string]any)
+			if cell["reasons"] == nil || cell["warnings"] == nil {
+				t.Fatalf("overview array fields must encode as arrays, cell=%#v", cell)
+			}
+		}
+	}
 	out.Reset()
 	if code, err := a.RunOverview(OverviewOptions{All: true}); err != nil || code != 0 {
 		t.Fatal(err)

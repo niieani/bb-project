@@ -108,7 +108,11 @@ func (a *App) RunOverview(opts OverviewOptions) (int, error) {
 			keys[meta.RepoKey] = true
 		}
 	}
-	matrix := OverviewMatrix{Warnings: loadWarnings}
+	matrix := OverviewMatrix{
+		Machines: []OverviewMachine{},
+		Repos:    []OverviewRepo{},
+		Warnings: append([]string{}, loadWarnings...),
+	}
 	now := a.Now()
 	staleAfter := time.Duration(cfg.Overview.MachineStaleDays) * 24 * time.Hour
 	for _, m := range machines {
@@ -126,15 +130,15 @@ func (a *App) RunOverview(opts OverviewOptions) (int, error) {
 	}
 	sort.Strings(ordered)
 	for _, key := range ordered {
-		row := OverviewRepo{RepoKey: key, SyncedEverywhere: true}
+		row := OverviewRepo{RepoKey: key, Cells: []OverviewCell{}, SyncedEverywhere: true}
 		for _, m := range machines {
 			cell := OverviewCell{MachineID: m.MachineID, Reasons: []domain.UnsyncableReason{}, Warnings: []domain.UnsyncableReason{}}
 			for _, r := range m.Repos {
 				if r.RepoKey == key {
 					cell.Present = true
 					cell.State = r.State
-					cell.Reasons = r.Reasons
-					cell.Warnings = r.Warnings
+					cell.Reasons = append([]domain.UnsyncableReason{}, r.Reasons...)
+					cell.Warnings = append([]domain.UnsyncableReason{}, r.Warnings...)
 					cell.LastActivityAt = r.LastActivityAt
 					break
 				}

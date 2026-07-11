@@ -9,7 +9,7 @@ public struct MenuDetailsView: View {
 
   public var body: some View {
     ScrollView(.vertical) {
-      LazyVStack(alignment: .leading, spacing: 10) {
+      VStack(alignment: .leading, spacing: 10) {
         ForEach(presentation.sections) { section in
           VStack(alignment: .leading, spacing: 4) {
             Text(section.title).font(.headline)
