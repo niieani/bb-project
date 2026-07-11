@@ -19,7 +19,7 @@
   - `dirty_untracked`: ~18, `dirty_tracked`: ~12 — normal WIP; permanent steady state
     for active repos (`sync.include_untracked_as_dirty: true`).
   - genuinely actionable (`diverged`, `missing_origin`): ~4 repos.
-- Scheduler installed, 60 min interval, `osascript` backend.
+- Scheduler installed at a 60-minute interval.
 
 ## Root-cause analysis
 
@@ -33,11 +33,10 @@
    `Syncable=false` + `remote_format_mismatch` when origin URL != preferred template.
    The repo is then excluded from winner selection AND local convergence. A fix action
    (`align-remote-format`) exists but must be applied manually per repo.
-   (`remote_format_mismatch` is already non-blocking for notify/exit-code via
+   (`remote_format_mismatch` is already non-blocking for attention/exit-code via
    `IsBlockingUnsyncableReason`, but the `Syncable=false` side effect is the damage.)
 
-3. **Notification model is inverted and context-blind.**
-   `internal/app/sync_phase_notify.go`:
+3. **The former notification model was inverted and context-blind.**
    - one notification per repo per fingerprint change; fingerprint = sorted reason set,
      which churns while working (`dirty_tracked` -> `+dirty_untracked` -> `+ahead`),
      re-notifying on every churn (dedupe only suppresses identical fingerprints).
@@ -57,16 +56,14 @@
 - Winner selection (requires `Syncable`): `internal/domain/winner.go`
 - State hash: `internal/domain/statehash.go`
 - Observation/scan incl. remote-format check: `internal/app/app.go` (~1150-1220)
-- Notify pipeline + cache: `internal/app/sync_phase_notify.go`,
-  `internal/app/notify_backend.go`, `state.Load/SaveNotifyCache`
-  (`domain.NotifyCacheFile`)
+- Fleet attention contract: `internal/app/status_contract.go`
 - Machine/repo state schema: `internal/domain/types.go`
   (`MachineFile`, `MachineRepoRecord`, `ObservedRepoState`)
 - Store/bootstrap/load-all: `internal/state/store.go`
-- Status/doctor: `internal/app` (status, doctor + `doctor_notify_test.go`)
+- Status/doctor: `internal/app`
 - Fix actions incl. `align-remote-format`: `internal/app/fix.go` (~300, ~480)
 - Defaults: `internal/state/store.go:106` (`IncludeUntrackedAsDirty: true`),
-  `:119` (`Notify{Enabled, Dedupe, ThrottleMinutes: 60}`)
+  attention-policy defaults near the scheduler defaults.
 
 ## Owner decisions (from alignment Q&A, 2026-07-08)
 

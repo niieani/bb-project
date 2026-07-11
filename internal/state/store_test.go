@@ -133,19 +133,33 @@ func TestLoadAllMachineFilesSkipsOldSchemaWithNamedWarning(t *testing.T) {
 	}
 }
 
-func TestLoadNotifyCacheDiscardsOldVersion(t *testing.T) {
+func TestLoadConfigRejectsLegacyNotifySection(t *testing.T) {
 	t.Parallel()
 	paths := NewPaths(t.TempDir())
-	old := map[string]any{"version": 1, "last_sent": map[string]any{"repo": map[string]any{"fingerprint": "old"}}}
-	if err := SaveYAML(paths.NotifyCachePath(), old); err != nil {
+	if err := os.MkdirAll(paths.ConfigRoot(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cache, err := LoadNotifyCache(paths)
-	if err != nil {
+	if err := os.WriteFile(paths.ConfigPath(), []byte("version: 1\nnotify:\n  throttle_minutes: 60\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if cache.Version != 2 || cache.LastSent.Fingerprint != "" {
-		t.Fatalf("cache = %+v", cache)
+	_, err := LoadConfig(paths)
+	if err == nil || !strings.Contains(err.Error(), "attention") {
+		t.Fatalf("legacy notify section error = %v, want explicit attention rename error", err)
+	}
+}
+
+func TestLoadConfigRejectsRemovedAttentionEnabledKey(t *testing.T) {
+	t.Parallel()
+	paths := NewPaths(t.TempDir())
+	if err := os.MkdirAll(paths.ConfigRoot(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.ConfigPath(), []byte("version: 1\nattention:\n  enabled: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadConfig(paths)
+	if err == nil || !strings.Contains(err.Error(), "enabled") {
+		t.Fatalf("removed attention.enabled error = %v, want explicit unknown-field error", err)
 	}
 }
 
@@ -408,8 +422,7 @@ sync:
   scan_freshness_seconds: 60
 scheduler:
   interval_minutes: 60
-notify:
-  enabled: true
+attention:
   quiet_hours: 2
   wip_stale_hours: 24
   throttle_minutes: 60

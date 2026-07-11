@@ -23,8 +23,8 @@ func TestConfigWizardInputsHaveMinimumWidth(t *testing.T) {
 	if got := m.schedulerInterval.Width(); got < minUsableInputWidth {
 		t.Fatalf("scheduler interval input width = %d, want >= %d", got, minUsableInputWidth)
 	}
-	if got := m.notifyThrottle.Width(); got < minUsableInputWidth {
-		t.Fatalf("notify throttle input width = %d, want >= %d", got, minUsableInputWidth)
+	if got := m.attentionThrottle.Width(); got < minUsableInputWidth {
+		t.Fatalf("attention throttle input width = %d, want >= %d", got, minUsableInputWidth)
 	}
 
 	m.startCatalogAddEditor()

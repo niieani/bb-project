@@ -420,8 +420,6 @@ func newScanCommand(runtime *runtimeState) *cobra.Command {
 func newSyncCommand(runtime *runtimeState) *cobra.Command {
 	var includeCatalogs []string
 	var push bool
-	var notify bool
-	var notifyBackend string
 	var dryRun bool
 
 	cmd := &cobra.Command{
@@ -436,8 +434,6 @@ func newSyncCommand(runtime *runtimeState) *cobra.Command {
 			code, err := runner.RunSync(app.SyncOptions{
 				IncludeCatalogs: includeCatalogs,
 				Push:            push,
-				Notify:          notify,
-				NotifyBackend:   notifyBackend,
 				DryRun:          dryRun,
 			})
 			return withExitCode(code, err)
@@ -446,8 +442,6 @@ func newSyncCommand(runtime *runtimeState) *cobra.Command {
 
 	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
 	cmd.Flags().BoolVar(&push, "push", false, "Allow pushing ahead commits when policy blocks by default.")
-	cmd.Flags().BoolVar(&notify, "notify", false, "Emit one activity-aware repository attention digest.")
-	cmd.Flags().StringVar(&notifyBackend, "notify-backend", "", "Notification backend override (stdout|osascript).")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show reconcile decisions without write-side sync actions.")
 
 	return cmd
@@ -681,7 +675,6 @@ func newSchedulerCommand(runtime *runtimeState) *cobra.Command {
 		},
 	}
 
-	var notifyBackend string
 	installCmd := &cobra.Command{
 		Use:   "install",
 		Short: "Install or update periodic scheduler job for bb sync.",
@@ -691,14 +684,10 @@ func newSchedulerCommand(runtime *runtimeState) *cobra.Command {
 			if err != nil {
 				return withExitCode(2, err)
 			}
-			code, err := runner.RunSchedulerInstall(app.SchedulerInstallOptions{
-				NotifyBackend: notifyBackend,
-			})
+			code, err := runner.RunSchedulerInstall(app.SchedulerInstallOptions{})
 			return withExitCode(code, err)
 		},
 	}
-	installCmd.Flags().StringVar(&notifyBackend, "notify-backend", "", "Notification backend for scheduled runs (stdout|osascript).")
-
 	statusCmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show scheduler installation status.",

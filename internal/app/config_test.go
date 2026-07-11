@@ -85,7 +85,7 @@ func TestRunConfigAppliesChanges(t *testing.T) {
 
 	wantCfg := cfg
 	wantCfg.GitHub.Owner = "new-owner"
-	wantCfg.Notify.ThrottleMinutes = 5
+	wantCfg.Attention.ThrottleMinutes = 5
 	missingRoot := filepath.Join(home, "references")
 	wantMachine := machine
 	wantMachine.Catalogs = append(wantMachine.Catalogs, domain.Catalog{Name: "references", Root: missingRoot})
@@ -111,8 +111,8 @@ func TestRunConfigAppliesChanges(t *testing.T) {
 	if gotCfg.GitHub.Owner != "new-owner" {
 		t.Fatalf("owner = %q, want %q", gotCfg.GitHub.Owner, "new-owner")
 	}
-	if gotCfg.Notify.ThrottleMinutes != 5 {
-		t.Fatalf("throttle = %d, want 5", gotCfg.Notify.ThrottleMinutes)
+	if gotCfg.Attention.ThrottleMinutes != 5 {
+		t.Fatalf("throttle = %d, want 5", gotCfg.Attention.ThrottleMinutes)
 	}
 
 	gotMachine, err := state.LoadMachine(paths, "machine-a")

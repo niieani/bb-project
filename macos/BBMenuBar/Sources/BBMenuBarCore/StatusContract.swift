@@ -58,11 +58,13 @@ public struct FleetAttention: Decodable, Sendable {
   public let items: [AttentionItem]
   public let eligibleCount: Int
   public let fingerprint: String
+  public let throttleMinutes: Int
 
   enum CodingKeys: String, CodingKey {
     case items
     case eligibleCount = "eligible_count"
     case fingerprint
+    case throttleMinutes = "throttle_minutes"
   }
 }
 

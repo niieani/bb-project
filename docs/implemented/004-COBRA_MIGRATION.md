@@ -23,7 +23,7 @@ Migrate `/Volumes/Projects/Software/bb-project/internal/cli` from manual argumen
 
 - `bb init [project]` with `--catalog`, `--public`, `--push`, `--https`.
 - `bb scan` with repeatable `--include-catalog`.
-- `bb sync` with repeatable `--include-catalog`, `--push`, `--notify`, `--dry-run`.
+- `bb sync` with repeatable `--include-catalog`, `--push`, `--dry-run`.
 - `bb status` with `--json`, repeatable `--include-catalog`.
 - `bb doctor` with repeatable `--include-catalog`.
 - `bb ensure` with repeatable `--include-catalog`.

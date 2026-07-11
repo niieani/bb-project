@@ -1209,7 +1209,7 @@ func newFixTUIModel(app *App, includeCatalogs []string, noRefresh bool) (*fixTUI
 	if err != nil {
 		return nil, err
 	}
-	staleAfter := time.Duration(cfg.Notify.WIPStaleHours) * time.Hour
+	staleAfter := time.Duration(cfg.Attention.WIPStaleHours) * time.Hour
 	m := &fixTUIModel{
 		app:                      app,
 		includeCatalogs:          append([]string(nil), includeCatalogs...),

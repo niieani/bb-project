@@ -47,10 +47,9 @@ const (
 
 const (
 	automationFocusScheduler = iota
-	automationFocusNotifyEnabled
-	automationFocusNotifyThrottle
-	automationFocusNotifyQuiet
-	automationFocusNotifyWIPStale
+	automationFocusAttentionThrottle
+	automationFocusAttentionQuiet
+	automationFocusAttentionWIPStale
 	automationFocusCount
 )
 
@@ -206,10 +205,10 @@ type configWizardModel struct {
 
 	schedulerInterval textinput.Model
 
-	notifyThrottle  textinput.Model
-	notifyQuiet     textinput.Model
-	notifyWIPStale  textinput.Model
-	automationFocus int
+	attentionThrottle textinput.Model
+	attentionQuiet    textinput.Model
+	attentionWIPStale textinput.Model
+	automationFocus   int
 
 	fixesFocus     int
 	lumenAvailable bool
@@ -498,7 +497,7 @@ func newConfigWizardModel(input ConfigWizardInput) *configWizardModel {
 	}
 	m.initGitHubInputs()
 	m.initSchedulerInput()
-	m.initNotifyInput()
+	m.initAttentionInput()
 	m.initCatalogTable()
 	m.focusTabs = true
 	m.onStepChanged()
@@ -864,28 +863,19 @@ func (m *configWizardModel) updateAutomation(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.updateAutomationFocus()
 			return m, nil
-		case "space":
-			if m.focusTabs {
-				return m, nil
-			}
-			if m.automationFocus == automationFocusNotifyEnabled {
-				m.config.Notify.Enabled = !m.config.Notify.Enabled
-				m.recomputeDirty()
-				return m, nil
-			}
 		case "enter":
 			if !m.focusTabs {
 				if v, err := strconv.Atoi(strings.TrimSpace(m.schedulerInterval.Value())); err == nil {
 					m.config.Scheduler.IntervalMinutes = v
 				}
-				if v, err := strconv.Atoi(strings.TrimSpace(m.notifyThrottle.Value())); err == nil {
-					m.config.Notify.ThrottleMinutes = v
+				if v, err := strconv.Atoi(strings.TrimSpace(m.attentionThrottle.Value())); err == nil {
+					m.config.Attention.ThrottleMinutes = v
 				}
-				if v, err := strconv.Atoi(strings.TrimSpace(m.notifyQuiet.Value())); err == nil {
-					m.config.Notify.QuietHours = v
+				if v, err := strconv.Atoi(strings.TrimSpace(m.attentionQuiet.Value())); err == nil {
+					m.config.Attention.QuietHours = v
 				}
-				if v, err := strconv.Atoi(strings.TrimSpace(m.notifyWIPStale.Value())); err == nil {
-					m.config.Notify.WIPStaleHours = v
+				if v, err := strconv.Atoi(strings.TrimSpace(m.attentionWIPStale.Value())); err == nil {
+					m.config.Attention.WIPStaleHours = v
 				}
 				m.advanceStep()
 				return m, nil
@@ -904,20 +894,20 @@ func (m *configWizardModel) updateAutomation(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v, err := strconv.Atoi(strings.TrimSpace(m.schedulerInterval.Value())); err == nil {
 			m.config.Scheduler.IntervalMinutes = v
 		}
-	case automationFocusNotifyThrottle:
-		m.notifyThrottle, cmd = m.notifyThrottle.Update(msg)
-		if v, err := strconv.Atoi(strings.TrimSpace(m.notifyThrottle.Value())); err == nil {
-			m.config.Notify.ThrottleMinutes = v
+	case automationFocusAttentionThrottle:
+		m.attentionThrottle, cmd = m.attentionThrottle.Update(msg)
+		if v, err := strconv.Atoi(strings.TrimSpace(m.attentionThrottle.Value())); err == nil {
+			m.config.Attention.ThrottleMinutes = v
 		}
-	case automationFocusNotifyQuiet:
-		m.notifyQuiet, cmd = m.notifyQuiet.Update(msg)
-		if v, err := strconv.Atoi(strings.TrimSpace(m.notifyQuiet.Value())); err == nil {
-			m.config.Notify.QuietHours = v
+	case automationFocusAttentionQuiet:
+		m.attentionQuiet, cmd = m.attentionQuiet.Update(msg)
+		if v, err := strconv.Atoi(strings.TrimSpace(m.attentionQuiet.Value())); err == nil {
+			m.config.Attention.QuietHours = v
 		}
-	case automationFocusNotifyWIPStale:
-		m.notifyWIPStale, cmd = m.notifyWIPStale.Update(msg)
-		if v, err := strconv.Atoi(strings.TrimSpace(m.notifyWIPStale.Value())); err == nil {
-			m.config.Notify.WIPStaleHours = v
+	case automationFocusAttentionWIPStale:
+		m.attentionWIPStale, cmd = m.attentionWIPStale.Update(msg)
+		if v, err := strconv.Atoi(strings.TrimSpace(m.attentionWIPStale.Value())); err == nil {
+			m.config.Attention.WIPStaleHours = v
 		}
 	default:
 		return m, nil
@@ -1359,11 +1349,11 @@ func (m *configWizardModel) initSchedulerInput() {
 	m.schedulerInterval = interval
 }
 
-func (m *configWizardModel) initNotifyInput() {
+func (m *configWizardModel) initAttentionInput() {
 	throttle := textinput.New()
 	throttle.Prompt = ""
 	throttle.Placeholder = "non-negative integer"
-	throttle.SetValue(strconv.Itoa(m.config.Notify.ThrottleMinutes))
+	throttle.SetValue(strconv.Itoa(m.config.Attention.ThrottleMinutes))
 	throttle.Validate = func(v string) error {
 		n, err := strconv.Atoi(strings.TrimSpace(v))
 		if err != nil {
@@ -1375,7 +1365,7 @@ func (m *configWizardModel) initNotifyInput() {
 		return nil
 	}
 	throttle.Blur()
-	m.notifyThrottle = throttle
+	m.attentionThrottle = throttle
 	makeHours := func(value int) textinput.Model {
 		in := textinput.New()
 		in.Prompt = ""
@@ -1385,8 +1375,8 @@ func (m *configWizardModel) initNotifyInput() {
 		in.Blur()
 		return in
 	}
-	m.notifyQuiet = makeHours(m.config.Notify.QuietHours)
-	m.notifyWIPStale = makeHours(m.config.Notify.WIPStaleHours)
+	m.attentionQuiet = makeHours(m.config.Attention.QuietHours)
+	m.attentionWIPStale = makeHours(m.config.Attention.WIPStaleHours)
 }
 
 func (m *configWizardModel) initCatalogTable() {
@@ -1487,9 +1477,9 @@ func (m *configWizardModel) syncInputWidths() {
 
 	m.githubOwnerInput.SetWidth(inputWidthFor(m.githubOwnerInput.Prompt))
 	m.schedulerInterval.SetWidth(inputWidthFor(m.schedulerInterval.Prompt))
-	m.notifyThrottle.SetWidth(inputWidthFor(m.notifyThrottle.Prompt))
-	m.notifyQuiet.SetWidth(inputWidthFor(m.notifyQuiet.Prompt))
-	m.notifyWIPStale.SetWidth(inputWidthFor(m.notifyWIPStale.Prompt))
+	m.attentionThrottle.SetWidth(inputWidthFor(m.attentionThrottle.Prompt))
+	m.attentionQuiet.SetWidth(inputWidthFor(m.attentionQuiet.Prompt))
+	m.attentionWIPStale.SetWidth(inputWidthFor(m.attentionWIPStale.Prompt))
 
 	if m.catalogEdit == nil {
 		return
@@ -1510,33 +1500,33 @@ func (m *configWizardModel) updateGitHubFocus() {
 func (m *configWizardModel) updateAutomationFocus() {
 	if m.focusTabs || m.step != stepAutomation {
 		m.schedulerInterval.Blur()
-		m.notifyThrottle.Blur()
-		m.notifyQuiet.Blur()
-		m.notifyWIPStale.Blur()
+		m.attentionThrottle.Blur()
+		m.attentionQuiet.Blur()
+		m.attentionWIPStale.Blur()
 		return
 	}
 	if m.automationFocus == automationFocusScheduler {
 		m.schedulerInterval.Focus()
-		m.notifyThrottle.Blur()
-		m.notifyQuiet.Blur()
-		m.notifyWIPStale.Blur()
+		m.attentionThrottle.Blur()
+		m.attentionQuiet.Blur()
+		m.attentionWIPStale.Blur()
 		return
 	}
 	m.schedulerInterval.Blur()
-	if m.automationFocus == automationFocusNotifyThrottle {
-		m.notifyThrottle.Focus()
-		m.notifyQuiet.Blur()
-		m.notifyWIPStale.Blur()
+	if m.automationFocus == automationFocusAttentionThrottle {
+		m.attentionThrottle.Focus()
+		m.attentionQuiet.Blur()
+		m.attentionWIPStale.Blur()
 		return
 	}
-	m.notifyThrottle.Blur()
-	m.notifyQuiet.Blur()
-	m.notifyWIPStale.Blur()
-	if m.automationFocus == automationFocusNotifyQuiet {
-		m.notifyQuiet.Focus()
+	m.attentionThrottle.Blur()
+	m.attentionQuiet.Blur()
+	m.attentionWIPStale.Blur()
+	if m.automationFocus == automationFocusAttentionQuiet {
+		m.attentionQuiet.Focus()
 	}
-	if m.automationFocus == automationFocusNotifyWIPStale {
-		m.notifyWIPStale.Focus()
+	if m.automationFocus == automationFocusAttentionWIPStale {
+		m.attentionWIPStale.Focus()
 	}
 }
 
@@ -1696,14 +1686,14 @@ func (m *configWizardModel) validateCurrentStep() error {
 		if m.schedulerInterval.Err != nil {
 			return m.schedulerInterval.Err
 		}
-		if m.notifyThrottle.Err != nil {
-			return m.notifyThrottle.Err
+		if m.attentionThrottle.Err != nil {
+			return m.attentionThrottle.Err
 		}
-		if m.notifyQuiet.Err != nil {
-			return m.notifyQuiet.Err
+		if m.attentionQuiet.Err != nil {
+			return m.attentionQuiet.Err
 		}
-		if m.notifyWIPStale.Err != nil {
-			return m.notifyWIPStale.Err
+		if m.attentionWIPStale.Err != nil {
+			return m.attentionWIPStale.Err
 		}
 	case stepCatalogs:
 		if err := validateMachineForSave(m.machine); err != nil {
@@ -1720,14 +1710,14 @@ func (m *configWizardModel) validateAll() error {
 	if v, err := strconv.Atoi(strings.TrimSpace(m.schedulerInterval.Value())); err == nil {
 		m.config.Scheduler.IntervalMinutes = v
 	}
-	if v, err := strconv.Atoi(strings.TrimSpace(m.notifyThrottle.Value())); err == nil {
-		m.config.Notify.ThrottleMinutes = v
+	if v, err := strconv.Atoi(strings.TrimSpace(m.attentionThrottle.Value())); err == nil {
+		m.config.Attention.ThrottleMinutes = v
 	}
-	if v, err := strconv.Atoi(strings.TrimSpace(m.notifyQuiet.Value())); err == nil {
-		m.config.Notify.QuietHours = v
+	if v, err := strconv.Atoi(strings.TrimSpace(m.attentionQuiet.Value())); err == nil {
+		m.config.Attention.QuietHours = v
 	}
-	if v, err := strconv.Atoi(strings.TrimSpace(m.notifyWIPStale.Value())); err == nil {
-		m.config.Notify.WIPStaleHours = v
+	if v, err := strconv.Atoi(strings.TrimSpace(m.attentionWIPStale.Value())); err == nil {
+		m.config.Attention.WIPStaleHours = v
 	}
 	if err := validateConfigForSave(m.config); err != nil {
 		return err
@@ -1883,36 +1873,29 @@ func (m *configWizardModel) viewSync() string {
 
 func (m *configWizardModel) viewAutomation() string {
 	var b strings.Builder
-	b.WriteString(labelStyle.Render("Automation & Notifications"))
+	b.WriteString(labelStyle.Render("Automation & Attention Policy"))
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("Configure background sync cadence and attention notifications."))
+	b.WriteString(hintStyle.Render("Configure background sync cadence and Go-owned attention policy."))
 	b.WriteString("\n\n")
 	b.WriteString(renderFieldBlock(
 		!m.focusTabs && m.automationFocus == automationFocusScheduler,
 		"Run interval (minutes)",
-		"Scheduler launch interval for background `bb sync --notify`.",
+		"Scheduler launch interval for background `bb sync --quiet`.",
 		renderInputContainer(m.schedulerInterval.View(), !m.focusTabs && m.automationFocus == automationFocusScheduler),
 		errorText(m.schedulerInterval.Err),
 	))
 	b.WriteString("\n\n")
-	b.WriteString(renderToggleField(
-		!m.focusTabs && m.automationFocus == automationFocusNotifyEnabled,
-		"Enable notifications",
-		"Emits one activity-aware attention digest when --notify is used.",
-		m.config.Notify.Enabled,
-	))
-	b.WriteString("\n\n")
 	b.WriteString(renderFieldBlock(
-		!m.focusTabs && m.automationFocus == automationFocusNotifyThrottle,
+		!m.focusTabs && m.automationFocus == automationFocusAttentionThrottle,
 		"Notification throttle (minutes)",
 		"Minimum minutes between changed attention digests.",
-		renderInputContainer(m.notifyThrottle.View(), !m.focusTabs && m.automationFocus == automationFocusNotifyThrottle),
-		errorText(m.notifyThrottle.Err),
+		renderInputContainer(m.attentionThrottle.View(), !m.focusTabs && m.automationFocus == automationFocusAttentionThrottle),
+		errorText(m.attentionThrottle.Err),
 	))
 	b.WriteString("\n\n")
-	b.WriteString(renderFieldBlock(!m.focusTabs && m.automationFocus == automationFocusNotifyQuiet, "Quiet period (hours)", "Suppress recently active blocked repositories.", renderInputContainer(m.notifyQuiet.View(), !m.focusTabs && m.automationFocus == automationFocusNotifyQuiet), errorText(m.notifyQuiet.Err)))
+	b.WriteString(renderFieldBlock(!m.focusTabs && m.automationFocus == automationFocusAttentionQuiet, "Quiet period (hours)", "Suppress recently active blocked repositories.", renderInputContainer(m.attentionQuiet.View(), !m.focusTabs && m.automationFocus == automationFocusAttentionQuiet), errorText(m.attentionQuiet.Err)))
 	b.WriteString("\n\n")
-	b.WriteString(renderFieldBlock(!m.focusTabs && m.automationFocus == automationFocusNotifyWIPStale, "WIP stale threshold (hours)", "Include inactive work in progress after this age.", renderInputContainer(m.notifyWIPStale.View(), !m.focusTabs && m.automationFocus == automationFocusNotifyWIPStale), errorText(m.notifyWIPStale.Err)))
+	b.WriteString(renderFieldBlock(!m.focusTabs && m.automationFocus == automationFocusAttentionWIPStale, "WIP stale threshold (hours)", "Include inactive work in progress after this age.", renderInputContainer(m.attentionWIPStale.View(), !m.focusTabs && m.automationFocus == automationFocusAttentionWIPStale), errorText(m.attentionWIPStale.Err)))
 	return b.String()
 }
 
@@ -2158,8 +2141,8 @@ func (m *configWizardModel) diffLines() []string {
 	if m.originalConfig.Scheduler != m.config.Scheduler {
 		out = append(out, "scheduler settings updated")
 	}
-	if m.originalConfig.Notify != m.config.Notify {
-		out = append(out, "notify settings updated")
+	if m.originalConfig.Attention != m.config.Attention {
+		out = append(out, "attention settings updated")
 	}
 	if m.originalConfig.Integrations != m.config.Integrations {
 		out = append(out, "integration settings updated")

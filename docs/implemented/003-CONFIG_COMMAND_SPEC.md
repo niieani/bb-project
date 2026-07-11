@@ -88,7 +88,7 @@ These concrete patterns should be followed:
 - `bubbles/textinput`:
   - Use `Validate` and `Err` on each field.
   - `github.owner` validator: trimmed, non-empty.
-  - `notify.throttle_minutes` validator: integer and `>= 0`.
+  - `attention.throttle_minutes` validator: integer and `>= 0`.
 - `bubbles/table`:
   - Catalog listing with columns `Name`, `Root`, `Layout`, `Default`.
   - Uses focus/blur when entering/exiting catalog edit mode.
@@ -104,7 +104,7 @@ These concrete patterns should be followed:
   1. Intro.
   2. GitHub + state transport.
   3. Sync options.
-  4. Notify options.
+  4. Attention-policy options.
   5. Catalog management.
   6. Review + apply.
 
@@ -133,9 +133,9 @@ These concrete patterns should be followed:
 
 - Edit all `sync.*` booleans.
 
-4. Notify
+4. Attention policy
 
-- Edit `notify.enabled`, `notify.throttle_minutes`, `notify.quiet_hours`, and `notify.wip_stale_hours`.
+- Edit `attention.throttle_minutes`, `attention.quiet_hours`, and `attention.wip_stale_hours`.
 
 5. Catalogs
 
@@ -168,7 +168,7 @@ These concrete patterns should be followed:
 ## Validation Rules
 
 - `github.owner` must be non-empty after trim.
-- `notify.throttle_minutes` must be integer `>= 0`.
+- `attention.throttle_minutes` must be integer `>= 0`.
 - At least one catalog required.
 - `default_catalog` must reference an existing catalog.
 - Catalog names unique and non-empty.

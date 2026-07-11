@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -18,14 +19,13 @@ import (
 )
 
 const (
-	ConfigDirName   = ".config/bb-project"
-	LocalStateDir   = ".local/state/bb-project"
-	ConfigFileName  = "config.yaml"
-	MachineDirName  = "machines"
-	RepoDirName     = "repos"
-	MachineIDFile   = "machine-id"
-	LockFileName    = "lock"
-	NotifyCacheName = "notify-cache.yaml"
+	ConfigDirName  = ".config/bb-project"
+	LocalStateDir  = ".local/state/bb-project"
+	ConfigFileName = "config.yaml"
+	MachineDirName = "machines"
+	RepoDirName    = "repos"
+	MachineIDFile  = "machine-id"
+	LockFileName   = "lock"
 )
 
 type Paths struct {
@@ -66,10 +66,6 @@ func (p Paths) MachineIDPath() string {
 
 func (p Paths) LockPath() string {
 	return filepath.Join(p.LocalStateRoot(), LockFileName)
-}
-
-func (p Paths) NotifyCachePath() string {
-	return filepath.Join(p.LocalStateRoot(), NotifyCacheName)
 }
 
 func (p Paths) JournalDir() string { return filepath.Join(p.ConfigRoot(), "journal") }
@@ -122,9 +118,9 @@ func DefaultConfig() domain.ConfigFile {
 		Scheduler: domain.SchedulerConfig{
 			IntervalMinutes: 60,
 		},
-		Notify:   domain.NotifyConfig{Enabled: true, ThrottleMinutes: 60, QuietHours: 2, WIPStaleHours: 24},
-		Overview: domain.OverviewConfig{MachineStaleDays: 3},
-		Journal:  domain.JournalConfig{MaxEntries: 500},
+		Attention: domain.AttentionConfig{ThrottleMinutes: 60, QuietHours: 2, WIPStaleHours: 24},
+		Overview:  domain.OverviewConfig{MachineStaleDays: 3},
+		Journal:   domain.JournalConfig{MaxEntries: 500},
 		Integrations: domain.Integrations{
 			Lumen: domain.LumenIntegrationConfig{
 				Enabled:                            true,
@@ -145,12 +141,26 @@ func LoadConfig(paths Paths) (domain.ConfigFile, error) {
 		return cfg, nil
 	}
 
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return domain.ConfigFile{}, err
+	}
+	var sections map[string]yaml.Node
+	if err := yaml.Unmarshal(raw, &sections); err != nil {
+		return domain.ConfigFile{}, fmt.Errorf("parse %s: %w", cfgPath, err)
+	}
+	if _, legacy := sections["notify"]; legacy {
+		return domain.ConfigFile{}, fmt.Errorf("parse %s: notify section was removed; rename it to attention and remove enabled", cfgPath)
+	}
+
 	cfg := DefaultConfig()
 	// Clear map defaults before unmarshal so explicit empty maps in YAML remain empty
 	// instead of inheriting seeded defaults from the in-memory template.
 	cfg.Clone.Presets = nil
 	cfg.Clone.CatalogPreset = nil
-	if err := LoadYAML(cfgPath, &cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
 		return domain.ConfigFile{}, fmt.Errorf("parse %s: %w", cfgPath, err)
 	}
 	if cfg.Version == 0 {
@@ -318,36 +328,6 @@ func LoadAllMachineFilesWithWarnings(paths Paths) ([]domain.MachineFile, []strin
 		out = append(out, m)
 	}
 	return out, warnings, nil
-}
-
-func LoadNotifyCache(paths Paths) (domain.NotifyCacheFile, error) {
-	cachePath := paths.NotifyCachePath()
-	if _, err := os.Stat(cachePath); errors.Is(err, os.ErrNotExist) {
-		return domain.NotifyCacheFile{
-			Version:          2,
-			DeliveryFailures: map[string]domain.NotifyDeliveryFailure{},
-		}, nil
-	}
-	var cache domain.NotifyCacheFile
-	if err := LoadYAML(cachePath, &cache); err != nil {
-		return domain.NotifyCacheFile{}, fmt.Errorf("parse %s: %w", cachePath, err)
-	}
-	if cache.Version < 2 {
-		return domain.NotifyCacheFile{Version: 2, DeliveryFailures: map[string]domain.NotifyDeliveryFailure{}}, nil
-	}
-	if cache.DeliveryFailures == nil {
-		cache.DeliveryFailures = map[string]domain.NotifyDeliveryFailure{}
-	}
-	cache.Version = 2
-	return cache, nil
-}
-
-func SaveNotifyCache(paths Paths, cache domain.NotifyCacheFile) error {
-	cache.Version = 2
-	if cache.DeliveryFailures == nil {
-		cache.DeliveryFailures = map[string]domain.NotifyDeliveryFailure{}
-	}
-	return SaveYAML(paths.NotifyCachePath(), cache)
 }
 
 func LoadYAML(path string, out any) error {

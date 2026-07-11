@@ -1,2 +1,2 @@
-- [x] cron/notification installator
+- [x] periodic launchd scheduler
 - [x] "this will run the following commands"

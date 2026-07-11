@@ -115,16 +115,16 @@ func TestWizardSyncCanToggleAutomaticRemoteAlignment(t *testing.T) {
 	}
 }
 
-func TestWizardNotificationActivityThresholdsRoundTrip(t *testing.T) {
+func TestWizardAttentionPolicyThresholdsRoundTrip(t *testing.T) {
 	t.Parallel()
 	m := testConfigWizardModel(t)
-	m.notifyQuiet.SetValue("3")
-	m.notifyWIPStale.SetValue("36")
+	m.attentionQuiet.SetValue("3")
+	m.attentionWIPStale.SetValue("36")
 	if err := m.validateAll(); err != nil {
 		t.Fatal(err)
 	}
-	if m.config.Notify.QuietHours != 3 || m.config.Notify.WIPStaleHours != 36 {
-		t.Fatalf("notify = %+v", m.config.Notify)
+	if m.config.Attention.QuietHours != 3 || m.config.Attention.WIPStaleHours != 36 {
+		t.Fatalf("attention = %+v", m.config.Attention)
 	}
 	paths := state.NewPaths(t.TempDir())
 	if err := state.SaveConfig(paths, m.config); err != nil {
@@ -134,8 +134,8 @@ func TestWizardNotificationActivityThresholdsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Notify.QuietHours != 3 || loaded.Notify.WIPStaleHours != 36 {
-		t.Fatalf("loaded notify = %+v", loaded.Notify)
+	if loaded.Attention.QuietHours != 3 || loaded.Attention.WIPStaleHours != 36 {
+		t.Fatalf("loaded attention = %+v", loaded.Attention)
 	}
 	raw, err := os.ReadFile(paths.ConfigPath())
 	if err != nil {
@@ -143,6 +143,9 @@ func TestWizardNotificationActivityThresholdsRoundTrip(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "dedupe:") {
 		t.Fatalf("removed dedupe key persisted:\n%s", raw)
+	}
+	if strings.Contains(string(raw), "notify:") || !strings.Contains(string(raw), "attention:") {
+		t.Fatalf("config must persist only the attention section:\n%s", raw)
 	}
 }
 

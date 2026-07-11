@@ -91,14 +91,13 @@ This is a deliberate breaking change with no migration: old repo metadata files 
    - Parse `repo_key` to select catalog and relative target path.
    - Keep origin mismatch checks against `repo_id` for safety on target-path adoption.
 
-6. **Refactor sync observe/publish and notification keys**
+6. **Refactor sync observe/publish and attention identities**
    - Files:
      - `/Volumes/Projects/Software/bb-project/internal/app/sync_phase_observe.go`
      - `/Volumes/Projects/Software/bb-project/internal/app/sync_phase_publish.go`
-     - `/Volumes/Projects/Software/bb-project/internal/app/sync_phase_notify.go`
    - Metadata lookup by `repo_key`.
    - Previous-record continuity keys use `repo_key|path`.
-   - Notify cache key priority becomes: `repo_key`, then `repo_id`, then path/name fallback.
+   - Fleet attention identity priority becomes: `repo_key`, then `repo_id`, then path/name fallback.
 
 7. **Refactor fix/repo command metadata selection**
    - Files:

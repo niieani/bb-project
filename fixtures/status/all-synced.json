@@ -12,6 +12,6 @@
   }],
   "summary": {"total": 1, "synced": 1, "pending": 0, "wip": 0, "blocked": 0, "warnings": 0},
   "last_sync": null,
-  "attention": {"items": [], "eligible_count": 0, "fingerprint": ""},
+  "attention": {"throttle_minutes": 60, "items": [], "eligible_count": 0, "fingerprint": ""},
   "source_warnings": []
 }

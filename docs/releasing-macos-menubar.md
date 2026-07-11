@@ -15,7 +15,7 @@ brew upgrade --cask bb-menubar
 open -a BBMenuBar
 ```
 
-The app requires macOS 14 or later. Its cask depends on the tap's `bb` cask, so a first install provides the CLI that the app invokes; future upgrades remain independent and explicit.
+The app requires macOS 14 or later. Its cask depends on the tap's `bb` cask, so a first install provides the CLI that the app invokes; future upgrades remain independent and explicit. On first launch it requests notification permission and registers with macOS launch-at-login; verify both against the installed signed bundle, not a SwiftPM development executable.
 
 ## Release verification
 
@@ -36,6 +36,8 @@ brew audit --cask --strict niieani/tap/bb-menubar
 brew reinstall --cask niieani/tap/bb-menubar
 open -a BBMenuBar
 ```
+
+Then verify the menu reports no notification or launch-at-login error, trigger an eligible attention snapshot, confirm the banner is attributed to BBMenuBar, click it to open the exact digest list, and confirm interval/wake refresh can deliver without a terminal process.
 
 Local unsigned packaging/config checks:
 

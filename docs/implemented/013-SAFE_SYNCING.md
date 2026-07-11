@@ -69,12 +69,12 @@ When sync determines a local copy is missing/empty:
 - if `auto_clone_on_sync=true`: clone + branch ensure + pull flow proceeds
 - if `auto_clone_on_sync=false`: no clone; repo is marked unsyncable with `clone_required`
 
-### 3. Exit semantics and notifications
+### 3. Exit semantics and attention
 
 `clone_required` (and `catalog_not_mapped`) are non-blocking reasons:
 
 - `bb sync` exit code `1` only for blocking unsyncable reasons
-- notify path ignores repos that have only non-blocking unsyncable reasons
+- Go attention eligibility excludes pending repositories
 
 This keeps “not cloned yet” visible without failing healthy sync convergence checks.
 

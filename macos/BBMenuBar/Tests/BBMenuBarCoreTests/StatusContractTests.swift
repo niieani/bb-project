@@ -18,6 +18,7 @@ struct StatusContractTests {
     let contract = try JSONDecoder.bb.decode(StatusContract.self, from: fixture(named: "mixed"))
 
     #expect(contract.attention.eligibleCount == 4)
+    #expect(contract.attention.throttleMinutes == 60)
     #expect(
       contract.attention.items.contains {
         $0.machineID == "machine-b" && $0.repoKey == "references/remote-only" && $0.eligible

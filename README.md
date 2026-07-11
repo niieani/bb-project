@@ -87,7 +87,7 @@ This wizard configures:
 - `github.owner` (required)
 - default visibility and remote protocol
 - optional `github.preferred_remote_url_template` for custom GitHub remote URL formatting
-- sync/notify options
+- sync and attention-policy options
 - Lumen integration defaults (install tips and optional AI commit generation when commit message is empty)
 - catalogs, per-catalog repository layout depth (`1` or `2`), and default catalog
 
@@ -258,7 +258,6 @@ Performs full convergence flow:
 3. load all machine and repo metadata state
 4. reconcile by winner
 5. pull/checkout and clone only when safe and allowed
-6. optionally emit notifications
 
 Before observation, sync can align a GitHub `origin` URL with `github.preferred_remote_url_template`. It sets the candidate URL, verifies it with bounded `git ls-remote --heads origin`, and keeps it only on success; failure restores the previous URL byte-for-byte and leaves `remote_format_mismatch` as a warning. Disable with `sync.auto_align_remote_format: false`. The `align-remote-format` fix uses the same verified operation.
 
@@ -266,8 +265,6 @@ Flags:
 
 - `--include-catalog <name>` (repeatable)
 - `--push` (allow pushing ahead commits when repo policy blocks by default)
-- `--notify` (emit the activity-aware attention digest)
-- `--notify-backend <stdout|osascript>` (override notification backend; falls back to `BB_NOTIFY_BACKEND`, then `stdout`)
 - `--dry-run` (observe/reconcile decisions without write-side sync actions)
 
 Additional behavior:
@@ -293,7 +290,7 @@ The JSON contract exposes:
 - `summary` counts for total/synced/pending/wip/blocked repositories and warnings
 - `last_sync`: the local machine's latest `sync_run` journal event, or explicit `null` before the first run
 - `attention.items`: fleet-wide non-synced repositories with machine/repository identity, state, reasons, dominant reason, activity time, and Go-computed notification `eligible` status
-- `attention.eligible_count` and a deterministic SHA-256 `attention.fingerprint` covering the eligible fleet attention set
+- `attention.eligible_count`, Go-owned `attention.throttle_minutes`, and a deterministic SHA-256 `attention.fingerprint` covering the eligible fleet attention set
 - `source_warnings`: explicit fleet-state loading warnings, including machines publishing an obsolete schema
 
 Consumers must use `eligible` rather than reproduce quiet-period, stale-WIP, or tier policy. Pending and recently active blocked repositories remain visible in the snapshot but are ineligible. Shared contract fixtures live in `fixtures/status/` and are decoded by both Go and Swift tests.
@@ -313,6 +310,8 @@ The Codex Run action uses the same build-and-run script. Development launches pa
 
 Opening the status item shows compact sections for local blocked repositories, stale local WIP, and eligible attention on other machines. Empty sections disappear. Each source reports failures independently, and the footer shows the latest successful sync time. `Sync now` runs `bb sync --quiet` outside the UI actor and refreshes status plus overview after completion, including non-zero sync outcomes. The app refreshes every five minutes and after macOS wake.
 
+The app is also the sole notification surface. It requests macOS notification permission explicitly, submits one fleet digest from the Go-computed eligible attention snapshot, persists whole-set fingerprint deduplication and throttling, and shows permission, persistence, or delivery failures in the menu. Clicking a digest opens its exact repository attention list. The distributed app registers itself with macOS launch-at-login; approval or registration failures remain visible rather than silently disabling background delivery.
+
 Install and update the signed, notarized app through Homebrew; its cask installs `bb` as a dependency:
 
 ```bash
@@ -331,7 +330,7 @@ In JSON, machines expose `id`, `here`, `published`, optional `updated_at`, and `
 
 ### `bb log [--repo <selector>] [--machine <id>] [--limit N] [--json]`
 
-Shows the merged newest-first fleet sync journal. It records sync summaries, convergence, clones, pushes, notifications, verified remote alignment or rollback, and applied fix actions. Per-machine JSONL journals live in the shared state directory and prune to `journal.max_entries`. Journal write failures are logged without changing sync or fix outcomes.
+Shows the merged newest-first fleet sync journal. It records sync summaries, convergence, clones, pushes, verified remote alignment or rollback, and applied fix actions. Per-machine JSONL journals live in the shared state directory and prune to `journal.max_entries`. Journal write failures are logged without changing sync or fix outcomes.
 
 ### `bb doctor [--include-catalog <name> ...]`
 
@@ -350,12 +349,11 @@ Alias for sync convergence (`bb sync` with include filters).
 
 Manage macOS launchd scheduling for periodic sync.
 
-- `bb scheduler install [--notify-backend <stdout|osascript>]`
-  - installs/replaces a LaunchAgent that runs `bb sync --notify --quiet`
+- `bb scheduler install`
+  - installs/replaces a LaunchAgent that runs `bb sync --quiet`
   - reads `scheduler.interval_minutes` from config
-  - defaults scheduled backend to `osascript` unless overridden by flag or `BB_NOTIFY_BACKEND`
 - `bb scheduler status`
-  - reports whether LaunchAgent is installed and current interval/backend
+  - reports whether LaunchAgent is installed and its current interval
 - `bb scheduler remove`
   - unloads and removes the LaunchAgent
 
@@ -552,8 +550,7 @@ sync:
   scan_freshness_seconds: 60
 scheduler:
   interval_minutes: 60
-notify:
-  enabled: true
+attention:
   throttle_minutes: 60
   quiet_hours: 2
   wip_stale_hours: 24
@@ -575,6 +572,8 @@ Important notes:
 - `github.preferred_remote_url_template` is optional; when set it overrides `github.remote_protocol` for GitHub URLs.
 - Template placeholders: `${org}` (alias `${owner}`) and `${repo}`.
 - `scheduler.interval_minutes` controls cadence used by `bb scheduler install`.
+- `attention.quiet_hours` and `attention.wip_stale_hours` control Go eligibility policy; `attention.throttle_minutes` is exported to the native app for delivery throttling.
+- The removed `notify:` section is rejected explicitly. Rename it to `attention:` and remove `enabled`; there is no legacy alias or automatic migration.
 - `move.post_hooks` run after a successful repository move (`bb repo move` and `bb fix ... move-to-catalog`) on each machine where the move executes.
 - set `integrations.lumen.show_install_tip: false` to hide Lumen install/config tips.
 - set `integrations.lumen.auto_generate_commit_message_when_empty: true` to run `lumen draft` automatically in commit-producing `bb fix` actions when commit message is empty/`auto`.
@@ -598,7 +597,6 @@ Local runtime state (not required to sync):
 
 - `~/.local/state/bb-project/machine-id`
 - `~/.local/state/bb-project/lock` (`pid`, `hostname`, `created_at`, `command`)
-- `~/.local/state/bb-project/notify-cache.yaml`
 
 Write ownership convention:
 
@@ -616,15 +614,14 @@ Precedence is `blocked` > `pending` > `wip` > `synced`. Unknown reasons fail exp
 
 ## Notification Behavior
 
-When `sync --notify` is used:
+The installed `BBMenuBar.app` owns native delivery through UserNotifications:
 
-- one digest covers blocked repos outside the quiet period and WIP older than the stale threshold
-- pending repositories never notify
-- unchanged whole attention sets never repeat; changed sets still respect the throttle
-- the body lists at most four repositories plus an overflow count
-- backend selection priority: `--notify-backend` > `BB_NOTIFY_BACKEND` > `stdout`
-- `stdout` backend writes one `notify` digest with up to four repository lines and an overflow count
-- `osascript` backend sends macOS desktop notifications
+- Go marks blocked repositories outside the quiet period and WIP older than the stale threshold as eligible; pending and recently active blocked repositories remain in the snapshot but do not alert.
+- One digest covers eligible repositories across the fleet and lists at most four repositories plus an overflow count.
+- An unchanged whole-attention fingerprint never repeats. A changed fingerprint waits for the Go-provided throttle interval, and an empty set resets deduplication.
+- Permission denial/unavailability, persistence errors, and delivery failures render explicitly in the menu.
+- Clicking a notification opens the digest's relevant repository list.
+- The app registers for launch at login so periodic/wake refresh can deliver while no terminal is open.
 
 ## Safety Guarantees
 

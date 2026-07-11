@@ -9,8 +9,7 @@ bb scheduler install [flags]
 ### Options
 
 ```
-  -h, --help                    help for install
-      --notify-backend string   Notification backend for scheduled runs (stdout|osascript).
+  -h, --help   help for install
 ```
 
 ### Options inherited from parent commands

@@ -245,14 +245,14 @@ func validateConfigForSave(cfg domain.ConfigFile) error {
 	if err := validateGitHubRemoteURLTemplate(cfg.GitHub.PreferredRemoteURLTemplate); err != nil {
 		return err
 	}
-	if cfg.Notify.ThrottleMinutes < 0 {
-		return fmt.Errorf("notify.throttle_minutes must be >= 0")
+	if cfg.Attention.ThrottleMinutes < 0 {
+		return fmt.Errorf("attention.throttle_minutes must be >= 0")
 	}
-	if cfg.Notify.QuietHours < 0 {
-		return fmt.Errorf("notify.quiet_hours must be >= 0")
+	if cfg.Attention.QuietHours < 0 {
+		return fmt.Errorf("attention.quiet_hours must be >= 0")
 	}
-	if cfg.Notify.WIPStaleHours < 0 {
-		return fmt.Errorf("notify.wip_stale_hours must be >= 0")
+	if cfg.Attention.WIPStaleHours < 0 {
+		return fmt.Errorf("attention.wip_stale_hours must be >= 0")
 	}
 	if cfg.Overview.MachineStaleDays < 1 {
 		return fmt.Errorf("overview.machine_stale_days must be >= 1")

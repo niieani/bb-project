@@ -58,15 +58,18 @@ func TestRunSchedulerInstallWritesLaunchAgent(t *testing.T) {
 	if !strings.Contains(text, "<integer>3600</integer>") {
 		t.Fatalf("expected StartInterval seconds in plist, got:\n%s", text)
 	}
-	if !strings.Contains(text, "<string>--notify-backend</string>\n    <string>osascript</string>") {
-		t.Fatalf("expected osascript notify backend in plist, got:\n%s", text)
+	if strings.Contains(text, "notify") {
+		t.Fatalf("scheduler must not contain notification arguments, got:\n%s", text)
+	}
+	if !strings.Contains(text, "<string>sync</string>\n    <string>--quiet</string>") {
+		t.Fatalf("scheduler must run plain bb sync --quiet, got:\n%s", text)
 	}
 	if len(calls) < 2 {
 		t.Fatalf("launchctl calls = %d, want at least 2", len(calls))
 	}
 }
 
-func TestRunSchedulerInstallRejectsInvalidBackend(t *testing.T) {
+func TestRunSchedulerInstallHasNoNotificationBackendOption(t *testing.T) {
 	t.Parallel()
 
 	paths := state.NewPaths(t.TempDir())
@@ -77,13 +80,7 @@ func TestRunSchedulerInstallRejectsInvalidBackend(t *testing.T) {
 	a := New(paths, &bytes.Buffer{}, &bytes.Buffer{})
 	a.GOOS = func() string { return "darwin" }
 
-	code, err := a.RunSchedulerInstall(SchedulerInstallOptions{NotifyBackend: "invalid"})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if code != 2 {
-		t.Fatalf("exit code = %d, want 2", code)
-	}
+	_ = SchedulerInstallOptions{}
 }
 
 func TestRunSchedulerStatusReportsInstalled(t *testing.T) {
@@ -94,7 +91,7 @@ func TestRunSchedulerStatusReportsInstalled(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(schedulerPlistPath(home)), 0o755); err != nil {
 		t.Fatalf("mkdir launch agents: %v", err)
 	}
-	if err := os.WriteFile(schedulerPlistPath(home), []byte(sampleSchedulerPlist("/tmp/bb", 3600, notifyBackendOSAScript, "/tmp/bb.log", "/tmp/bb.err.log")), 0o644); err != nil {
+	if err := os.WriteFile(schedulerPlistPath(home), []byte(sampleSchedulerPlist("/tmp/bb", 3600, "/tmp/bb.log", "/tmp/bb.err.log")), 0o644); err != nil {
 		t.Fatalf("write plist: %v", err)
 	}
 
@@ -119,8 +116,8 @@ func TestRunSchedulerStatusReportsInstalled(t *testing.T) {
 	if !strings.Contains(out, "interval_minutes=60") {
 		t.Fatalf("expected interval in output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "notify_backend=osascript") {
-		t.Fatalf("expected backend in output, got:\n%s", out)
+	if strings.Contains(out, "notify") {
+		t.Fatalf("scheduler status must not report a notification backend, got:\n%s", out)
 	}
 }
 

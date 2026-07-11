@@ -71,9 +71,8 @@ A catalog is a named local root directory that may contain git projects.
    - Policy is editable later.
 
 5. Scheduler
-   - `bb scheduler install` configures macOS `launchd` to run `bb sync --notify --quiet` periodically.
+   - `bb scheduler install` configures macOS `launchd` to run `bb sync --quiet` periodically.
    - `bb scheduler status` and `bb scheduler remove` manage lifecycle visibility and teardown.
-   - Notifications are deduplicated by fingerprint until state changes.
 
 6. Safe path handling
    - During `bb sync`/`bb ensure`, `bb` never writes into a non-empty folder unless it is the expected git repository.
@@ -144,7 +143,6 @@ Write ownership:
 
 - `/Users/<user>/.local/state/bb-project/machine-id`
 - `/Users/<user>/.local/state/bb-project/lock`
-- `/Users/<user>/.local/state/bb-project/notify-cache.yaml`
 
 ## Schema
 
@@ -168,8 +166,7 @@ sync:
   fetch_prune: true
   pull_ff_only: true
   scan_freshness_seconds: 60
-notify:
-  enabled: true
+attention:
   quiet_hours: 2
   wip_stale_hours: 24
   throttle_minutes: 60
@@ -225,17 +222,7 @@ repos:
     observed_at: "2026-02-13T20:31:00Z"
 ```
 
-### 4) `notify-cache.yaml` (local runtime state)
-
-```yaml
-version: 1
-last_sent:
-  "repo_key:software/bb-project":
-    fingerprint: "dirty+ahead"
-    sent_at: "2026-02-13T20:35:00Z"
-```
-
-### 5) `lock` (local runtime state)
+### 4) `lock` (local runtime state)
 
 ```text
 pid=12345
@@ -308,7 +295,7 @@ Winner represents the branch/head other machines should follow when safe.
 
 ## Sync Algorithm
 
-Pseudocode for `bb sync [--push] [--notify] [--include-catalog <name>...]`:
+Pseudocode for `bb sync [--push] [--include-catalog <name>...]`:
 
 ```text
 acquire_global_lock()
@@ -399,10 +386,6 @@ for each repo_key with shared metadata:
       adopt existing local repo at target_path
 
 refresh local observations and rewrite this machine file
-if --notify:
-  dedupe identical fingerprints (if dedupe enabled)
-  then enforce throttle window (if throttle_minutes > 0)
-  emit and update notify cache only when not deduped/throttled
 release lock
 ```
 
@@ -435,12 +418,12 @@ release lock
 ## Commands (v1)
 
 - `bb init [project] [--catalog <name>] [--public] [--push] [--https]`
-- `bb sync [--push] [--notify] [--notify-backend <stdout|osascript>] [--dry-run] [--include-catalog <name> ...]`
+- `bb sync [--push] [--dry-run] [--include-catalog <name> ...]`
 - `bb status [--json] [--include-catalog <name> ...]`
 - `bb doctor [--include-catalog <name> ...]`
 - `bb scan [--include-catalog <name> ...]`
 - `bb ensure [--include-catalog <name> ...]`
-- `bb scheduler install [--notify-backend <stdout|osascript>]`
+- `bb scheduler install`
 - `bb scheduler status`
 - `bb scheduler remove`
 - `bb repo policy <repo> --auto-push=<true|false>`
@@ -642,25 +625,6 @@ Suggested exit codes:
 - `0`: all processed repos syncable and converged
 - `1`: at least one processed repo unsyncable
 - `2`: runtime/config/lock error
-
-## Notifications
-
-`bb sync --notify` sends macOS notifications only when:
-
-1. The aggregate attention set changed since the last sent digest, and
-2. Repo is outside the throttle window (`notify.throttle_minutes > 0`), or throttling is disabled (`notify.throttle_minutes <= 0`).
-
-Throttle semantics:
-
-- At most one notification per repo per throttle window.
-- Fingerprint changes inside the throttle window are suppressed.
-- Suppressed events do not update cached `sent_at`.
-
-Notification payload:
-
-- repo name
-- unsyncable reasons (short)
-- suggested action
 
 ## Example Workflow
 

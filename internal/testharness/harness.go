@@ -162,8 +162,7 @@ sync:
   default_auto_push_public: false
   fetch_prune: true
   pull_ff_only: true
-notify:
-  enabled: true
+attention:
   quiet_hours: 2
   wip_stale_hours: 24
   throttle_minutes: 60

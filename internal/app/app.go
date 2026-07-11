@@ -39,7 +39,6 @@ type App struct {
 
 	IsInteractiveTerminal func() bool
 	RunConfigWizard       ConfigWizardRunner
-	NewNotifySender       func(backend string) (notifySender, error)
 
 	repoMetadataMu      sync.Mutex
 	observeRepoHook     func(cfg domain.ConfigFile, repo discoveredRepo, allowPush bool) (domain.MachineRepoRecord, error)
@@ -64,14 +63,10 @@ type ScanOptions struct {
 type SyncOptions struct {
 	IncludeCatalogs []string
 	Push            bool
-	Notify          bool
-	NotifyBackend   string
 	DryRun          bool
 }
 
-type SchedulerInstallOptions struct {
-	NotifyBackend string
-}
+type SchedulerInstallOptions struct{}
 
 type FixOptions struct {
 	IncludeCatalogs               []string
@@ -154,9 +149,6 @@ func New(paths state.Paths, stdout io.Writer, stderr io.Writer) *App {
 		ExecutablePath:        os.Executable,
 		IsInteractiveTerminal: defaultIsInteractiveTerminal,
 		RunConfigWizard:       runConfigWizardInteractive,
-	}
-	a.NewNotifySender = func(backend string) (notifySender, error) {
-		return newNotifySender(backend, a.Stdout, a.RunCommand)
 	}
 	return a
 }
@@ -1422,7 +1414,7 @@ func (a *App) RunStatus(jsonOut bool, include []string) (int, error) {
 			Repos:          buildStatusRepos(filtered),
 			Summary:        buildStatusSummary(filtered),
 			LastSync:       lastSync,
-			Attention:      buildFleetAttention(fleet, a.Now(), cfg.Notify),
+			Attention:      buildFleetAttention(fleet, a.Now(), cfg.Attention),
 			SourceWarnings: append([]string{}, sourceWarnings...),
 		}
 		enc := json.NewEncoder(a.Stdout)
@@ -1489,7 +1481,7 @@ func (a *App) RunDoctor(include []string) (int, error) {
 		case domain.RepoStateBlocked:
 			groups["blocked"] = append(groups["blocked"], r)
 		case domain.RepoStateWip:
-			if r.LastActivityAt.IsZero() || a.Now().Sub(r.LastActivityAt) >= time.Duration(cfg.Notify.WIPStaleHours)*time.Hour {
+			if r.LastActivityAt.IsZero() || a.Now().Sub(r.LastActivityAt) >= time.Duration(cfg.Attention.WIPStaleHours)*time.Hour {
 				groups["stale wip"] = append(groups["stale wip"], r)
 			}
 		case domain.RepoStatePending:
@@ -1516,11 +1508,7 @@ func (a *App) RunDoctor(include []string) (int, error) {
 		}
 	}
 
-	warningCount, err := a.reportNotifyDeliveryFailures()
-	if err != nil {
-		return 2, err
-	}
-	warningCount += a.reportGitHubCLIWarnings(cfg, machine.Repos, allowed)
+	warningCount := a.reportGitHubCLIWarnings(cfg, machine.Repos, allowed)
 	if warningCount > 0 {
 		a.logf("doctor: found %d warning(s)", warningCount)
 	}

@@ -4,7 +4,7 @@
 
 This plan addresses three concrete v1 gaps:
 
-1. `notify.throttle_minutes` is configured but not enforced.
+1. Attention delivery throttling was not enforced.
 2. Local lock handling has no stale lock recovery.
 3. Sync orchestration in `internal/app/sync.go` is too monolithic for safe iteration.
 
@@ -28,33 +28,22 @@ The goal is to improve reliability and maintainability without changing v1 core 
 
 ### Problem
 
-`notify.throttle_minutes` exists in config, but notification emission in `internal/app/sync.go` only deduplicates by fingerprint and never enforces time-based throttling.
+Native notification throttling is now owned by BBMenuBar using the Go-exported attention policy.
 
 ### Plan
 
-1. Define semantics:
-   - `dedupe=true`: identical fingerprint for a repo is suppressed (existing behavior).
-   - `throttle_minutes > 0`: allow at most one notification per repo per throttle window.
-   - If fingerprint changes inside throttle window, suppress until window expires; do not overwrite `sent_at` when suppressed.
-   - `throttle_minutes <= 0`: treated as no throttle.
-2. Implement throttle check in `notifyUnsyncable`.
-3. Keep existing dedupe behavior as first gate, then apply throttle gate.
-4. Preserve existing notify cache file format (`version: 1`, `last_sent` map).
+1. Go exports the eligible fleet fingerprint and throttle duration.
+2. The native app persists the last submitted fingerprint and timestamp.
+3. Changed fingerprints wait for the throttle boundary; unchanged fingerprints never repeat.
 
 ### Tests
 
-Add e2e coverage in `internal/e2e/notify_test.go`:
-
-- Emits first notification for unsyncable repo.
-- Suppresses second notification inside throttle window even when fingerprint changes.
-- Emits again after throttle window expires.
-- Verifies `throttle_minutes: 0` disables throttling.
+Swift external-behavior tests cover first delivery, deduplication, reset, changed-set throttling, persistence, and failure states.
 
 ### Acceptance Criteria
 
-- `sync --notify` enforces `throttle_minutes`.
-- Existing notify tests continue to pass.
-- New throttle tests pass deterministically with `BB_NOW`.
+- Native digest delivery enforces Go-provided `attention.throttle_minutes`.
+- Tests use an injected clock and persistence seam.
 
 ## Milestone 2: Stale Lock Recovery
 
@@ -108,8 +97,8 @@ Refactor with no intended behavior change by splitting into phase-oriented units
    - winner selection, target validation, ensure/adopt local copy.
 4. `sync_phase_publish.go`
    - machine record persistence helpers.
-5. `sync_phase_notify.go`
-   - notification emission and cache key/throttle logic.
+5. `status_contract.go`
+   - fleet attention eligibility, fingerprint, and exported throttle policy.
 
 Implementation notes:
 

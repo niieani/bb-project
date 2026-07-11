@@ -51,9 +51,10 @@ type StatusSummary struct {
 }
 
 type FleetAttention struct {
-	Items         []AttentionItem `json:"items"`
-	EligibleCount int             `json:"eligible_count"`
-	Fingerprint   string          `json:"fingerprint"`
+	ThrottleMinutes int             `json:"throttle_minutes"`
+	Items           []AttentionItem `json:"items"`
+	EligibleCount   int             `json:"eligible_count"`
+	Fingerprint     string          `json:"fingerprint"`
 }
 
 type AttentionItem struct {
@@ -117,14 +118,14 @@ func latestSyncRun(paths state.Paths, machineID string) (*StatusLastSync, error)
 	return nil, nil
 }
 
-func buildFleetAttention(records []domain.MachineRepoRecordWithMachine, now time.Time, cfg domain.NotifyConfig) FleetAttention {
+func buildFleetAttention(records []domain.MachineRepoRecordWithMachine, now time.Time, cfg domain.AttentionConfig) FleetAttention {
 	items := make([]AttentionItem, 0, len(records))
 	for _, record := range records {
 		repo := record.Record
 		if repo.State == domain.RepoStateSynced {
 			continue
 		}
-		eligible := isNotificationEligible(repo, now, cfg)
+		eligible := isAttentionEligible(repo, now, cfg)
 		reason, _ := dominantAttentionReason(repo.Reasons)
 		items = append(items, AttentionItem{
 			MachineID: record.MachineID, RepoKey: repo.RepoKey, Name: repo.Name,
@@ -155,5 +156,5 @@ func buildFleetAttention(records []domain.MachineRepoRecordWithMachine, now time
 		digest := sha256.Sum256([]byte(strings.Join(lines, "\n")))
 		fingerprint = hex.EncodeToString(digest[:])
 	}
-	return FleetAttention{Items: items, EligibleCount: eligibleCount, Fingerprint: fingerprint}
+	return FleetAttention{ThrottleMinutes: cfg.ThrottleMinutes, Items: items, EligibleCount: eligibleCount, Fingerprint: fingerprint}
 }

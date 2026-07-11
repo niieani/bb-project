@@ -89,7 +89,7 @@ type ConfigFile struct {
 	Sync           SyncConfig      `yaml:"sync"`
 	Move           MoveConfig      `yaml:"move"`
 	Scheduler      SchedulerConfig `yaml:"scheduler"`
-	Notify         NotifyConfig    `yaml:"notify"`
+	Attention      AttentionConfig `yaml:"attention"`
 	Overview       OverviewConfig  `yaml:"overview"`
 	Journal        JournalConfig   `yaml:"journal"`
 	Integrations   Integrations    `yaml:"integrations"`
@@ -143,11 +143,10 @@ type SchedulerConfig struct {
 	IntervalMinutes int `yaml:"interval_minutes"`
 }
 
-type NotifyConfig struct {
-	Enabled         bool `yaml:"enabled"`
-	ThrottleMinutes int  `yaml:"throttle_minutes"`
-	QuietHours      int  `yaml:"quiet_hours"`
-	WIPStaleHours   int  `yaml:"wip_stale_hours"`
+type AttentionConfig struct {
+	ThrottleMinutes int `yaml:"throttle_minutes"`
+	QuietHours      int `yaml:"quiet_hours"`
+	WIPStaleHours   int `yaml:"wip_stale_hours"`
 }
 type OverviewConfig struct {
 	MachineStaleDays int `yaml:"machine_stale_days"`
@@ -248,25 +247,4 @@ type ObservedRepoState struct {
 	HasUntracked         bool
 	OperationInProgress  Operation
 	IncludeUntrackedRule bool
-}
-
-type NotifyCacheFile struct {
-	Version          int                              `yaml:"version"`
-	LastSent         NotifyCacheEntry                 `yaml:"last_sent"`
-	DeliveryFailures map[string]NotifyDeliveryFailure `yaml:"delivery_failures,omitempty"`
-}
-
-type NotifyCacheEntry struct {
-	Fingerprint string    `yaml:"fingerprint"`
-	SentAt      time.Time `yaml:"sent_at"`
-}
-
-type NotifyDeliveryFailure struct {
-	Backend     string    `yaml:"backend"`
-	RepoKey     string    `yaml:"repo_key,omitempty"`
-	RepoName    string    `yaml:"repo_name,omitempty"`
-	RepoPath    string    `yaml:"repo_path,omitempty"`
-	Fingerprint string    `yaml:"fingerprint,omitempty"`
-	Error       string    `yaml:"error"`
-	FailedAt    time.Time `yaml:"failed_at"`
 }

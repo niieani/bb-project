@@ -135,6 +135,40 @@ struct MenuBarPresentationTests {
     #expect(calls.filter { $0 == "status" }.count == 2)
     #expect(calls.filter { $0 == "overview" }.count == 2)
   }
+
+  @Test("notification failures render while valid repository state remains visible")
+  @MainActor
+  func notificationFailure() async {
+    let client = MenuStubClient(
+      status: .success(try! fixtureData(area: "status", name: "mixed")),
+      overview: .success(try! fixtureData(area: "overview", name: "mixed")))
+    let notifications = NotificationCoordinator(
+      client: FailingMenuNotificationClient(), store: MenuNotificationStore())
+    let model = MenuBarModel(client: client, notifications: notifications)
+
+    await model.refresh()
+
+    #expect(model.title == .attention(count: 4))
+    #expect(model.presentation.errors.contains("Notification delivery failed: overview"))
+  }
+
+  @Test("launch-at-login approval state renders explicitly")
+  @MainActor
+  func loginApproval() async {
+    let model = MenuBarModel(
+      client: MenuStubClient(
+        status: .success(try! fixtureData(area: "status", name: "all-synced")),
+        overview: .success(
+          Data(#"{"machines":[],"repos":[],"synced_everywhere":0,"warnings":[]}"#.utf8))))
+    await model.refresh()
+
+    await model.configureLaunchAtLogin(
+      LaunchAtLoginCoordinator(service: ApprovalLoginService()))
+
+    #expect(
+      model.presentation.errors.contains(
+        "Launch at login requires approval in System Settings"))
+  }
 }
 
 private enum MenuTestFailure: String, Error, CustomStringConvertible {
@@ -204,4 +238,19 @@ private func eventually(_ condition: @escaping @Sendable () async -> Bool) async
     if await condition() { return }
     try? await Task.sleep(for: .milliseconds(5))
   }
+}
+
+private actor FailingMenuNotificationClient: NotificationClient {
+  func authorizationStatus() async -> NotificationAuthorization { .authorized }
+  func requestAuthorization() async throws -> Bool { true }
+  func submit(_: FleetNotificationRequest) async throws { throw MenuTestFailure.overview }
+}
+
+private actor MenuNotificationStore: NotificationStateStore {
+  func load() async throws -> NotificationDeliveryState? { nil }
+  func save(_: NotificationDeliveryState) async throws {}
+}
+
+private struct ApprovalLoginService: LaunchAtLoginService {
+  func ensureEnabled() async -> LaunchAtLoginState { .requiresApproval }
 }

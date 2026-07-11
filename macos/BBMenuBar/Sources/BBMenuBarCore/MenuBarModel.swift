@@ -20,11 +20,21 @@ public final class MenuBarModel {
   public private(set) var isSyncing = false
 
   private let client: any BBClient
+  private let notifications: NotificationCoordinator?
   private let now: @Sendable () -> Date
+  private var notificationState: NotificationState = .ready
+  private var launchAtLoginState: LaunchAtLoginState = .enabled
+  private var basePresentation = MenuPresentation(
+    sections: [], lastSync: "No successful sync yet", errors: [])
   private var eventTask: Task<Void, Never>?
 
-  public init(client: any BBClient, now: @escaping @Sendable () -> Date = Date.init) {
+  public init(
+    client: any BBClient,
+    notifications: NotificationCoordinator? = nil,
+    now: @escaping @Sendable () -> Date = Date.init
+  ) {
     self.client = client
+    self.notifications = notifications
     self.now = now
   }
 
@@ -49,6 +59,10 @@ public final class MenuBarModel {
       title = .error
     }
 
+    if let statusValue, let notifications {
+      notificationState = await notifications.process(attention: statusValue.attention)
+    }
+
     let overviewValue: OverviewContract?
     let overviewError: String?
     switch overview {
@@ -60,12 +74,13 @@ public final class MenuBarModel {
       overviewError = error
     }
 
-    presentation = .make(
+    basePresentation = .make(
       status: statusValue,
       overview: overviewValue,
       statusError: statusError,
       overviewError: overviewError,
       now: now())
+    applyPlatformState()
   }
 
   public func syncNow() async {
@@ -80,11 +95,17 @@ public final class MenuBarModel {
     }
     await refresh()
     if let syncError {
-      presentation = MenuPresentation(
-        sections: presentation.sections,
-        lastSync: presentation.lastSync,
-        errors: presentation.errors + ["Sync failed: \(syncError)"])
+      basePresentation = MenuPresentation(
+        sections: basePresentation.sections,
+        lastSync: basePresentation.lastSync,
+        errors: basePresentation.errors + ["Sync failed: \(syncError)"])
+      applyPlatformState()
     }
+  }
+
+  public func configureLaunchAtLogin(_ coordinator: LaunchAtLoginCoordinator) async {
+    launchAtLoginState = await coordinator.ensureEnabled()
+    applyPlatformState()
   }
 
   public func start(events: any RefreshEventSource) {
@@ -99,6 +120,16 @@ public final class MenuBarModel {
 
   isolated deinit {
     eventTask?.cancel()
+  }
+
+  private func applyPlatformState() {
+    let platformErrors = [notificationState.errorText, launchAtLoginState.errorText].compactMap {
+      $0
+    }
+    presentation = MenuPresentation(
+      sections: basePresentation.sections,
+      lastSync: basePresentation.lastSync,
+      errors: basePresentation.errors + platformErrors)
   }
 
   private nonisolated static func loadStatus(_ client: any BBClient) async -> LoadResult<

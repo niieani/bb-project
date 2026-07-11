@@ -17,10 +17,19 @@ struct BBMenuBarApp: App {
     } else {
       executableURL = nil
     }
-    let model = MenuBarModel(client: ProcessBBClient(executableURL: executableURL))
+    let attentionRouter = AttentionWindowRouter()
+    let notificationClient = SystemNotificationClient(router: attentionRouter)
+    let notifications = NotificationCoordinator(
+      client: notificationClient, store: UserDefaultsNotificationStateStore())
+    let model = MenuBarModel(
+      client: ProcessBBClient(executableURL: executableURL), notifications: notifications)
     _model = State(initialValue: model)
     model.start(events: SystemRefreshEventSource(interval: .seconds(300)))
     Task { await model.refresh() }
+    Task {
+      await model.configureLaunchAtLogin(
+        LaunchAtLoginCoordinator(service: SystemLaunchAtLoginService()))
+    }
   }
 
   var body: some Scene {

@@ -445,20 +445,28 @@ func TestRunScanAndSyncForwardOptions(t *testing.T) {
 
 	t.Run("sync flags", func(t *testing.T) {
 		fake := &fakeApp{}
-		code, _, stderr, _, _ := runCLI(t, fake, []string{"sync", "--include-catalog", "software", "--push", "--notify", "--dry-run", "--notify-backend", "osascript"})
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"sync", "--include-catalog", "software", "--push", "--dry-run"})
 		if code != 0 {
 			t.Fatalf("exit code = %d, want 0", code)
 		}
 		if stderr != "" {
 			t.Fatalf("stderr = %q, want empty", stderr)
 		}
-		if !fake.syncOpts.Push || !fake.syncOpts.Notify || !fake.syncOpts.DryRun {
+		if !fake.syncOpts.Push || !fake.syncOpts.DryRun {
 			t.Fatalf("sync flags not forwarded: %#v", fake.syncOpts)
 		}
-		if fake.syncOpts.NotifyBackend != "osascript" {
-			t.Fatalf("notify backend = %q, want %q", fake.syncOpts.NotifyBackend, "osascript")
-		}
 		mustEqualSlices(t, fake.syncOpts.IncludeCatalogs, []string{"software"})
+	})
+
+	t.Run("removed notification flags fail explicitly", func(t *testing.T) {
+		t.Parallel()
+		for _, flag := range []string{"--notify", "--notify-backend"} {
+			fake := &fakeApp{}
+			code, _, stderr, _, _ := runCLI(t, fake, []string{"sync", flag})
+			if code != 2 || !strings.Contains(stderr, "unknown flag") {
+				t.Fatalf("flag %s: code=%d stderr=%q", flag, code, stderr)
+			}
+		}
 	})
 }
 
@@ -888,9 +896,9 @@ func TestRunCatalogAndConfigCommands(t *testing.T) {
 		}
 	})
 
-	t.Run("scheduler install forwards backend", func(t *testing.T) {
+	t.Run("scheduler install", func(t *testing.T) {
 		fake := &fakeApp{}
-		code, _, stderr, _, _ := runCLI(t, fake, []string{"scheduler", "install", "--notify-backend", "osascript"})
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"scheduler", "install"})
 		if code != 0 {
 			t.Fatalf("exit code = %d, want 0", code)
 		}
@@ -900,8 +908,14 @@ func TestRunCatalogAndConfigCommands(t *testing.T) {
 		if fake.schedulerInstallCalls != 1 {
 			t.Fatalf("install calls = %d, want 1", fake.schedulerInstallCalls)
 		}
-		if fake.schedulerInstallOpts.NotifyBackend != "osascript" {
-			t.Fatalf("notify backend = %q, want %q", fake.schedulerInstallOpts.NotifyBackend, "osascript")
+	})
+
+	t.Run("scheduler install rejects removed notification backend", func(t *testing.T) {
+		t.Parallel()
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"scheduler", "install", "--notify-backend", "osascript"})
+		if code != 2 || !strings.Contains(stderr, "unknown flag") {
+			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 	})
 

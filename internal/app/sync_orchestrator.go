@@ -33,7 +33,7 @@ func (a *App) runSync(opts SyncOptions) (int, error) {
 		}
 		a.appendJournal("sync_run", "", fmt.Sprintf("synced=%d pending=%d wip=%d blocked=%d duration=%s", counts[domain.RepoStateSynced], counts[domain.RepoStatePending], counts[domain.RepoStateWip], counts[domain.RepoStateBlocked], a.Now().Sub(started)))
 	}()
-	a.logf("sync: start push=%t notify=%t dry-run=%t", opts.Push, opts.Notify, opts.DryRun)
+	a.logf("sync: start push=%t dry-run=%t", opts.Push, opts.DryRun)
 
 	selectedCatalogs, selectedCatalogMap, err := selectSyncCatalogs(a.Paths, machine, opts.IncludeCatalogs)
 	if err != nil {
@@ -69,13 +69,6 @@ func (a *App) runSync(opts SyncOptions) (int, error) {
 		return 2, err
 	}
 	a.logf("sync: published post-reconciliation observations")
-
-	if opts.Notify {
-		a.logf("sync: processing notifications")
-		if err := a.notifyUnsyncable(cfg, machine.Repos, opts.NotifyBackend); err != nil {
-			return 2, err
-		}
-	}
 
 	if anyUnsyncableInSelectedCatalogs(machine.Repos, selectedCatalogMap) {
 		a.logf("sync: completed with blocked repos")

@@ -15,20 +15,14 @@ const schedulerLaunchdLabel = "com.bb-project.sync"
 
 var (
 	reStartInterval = regexp.MustCompile(`(?s)<key>\s*StartInterval\s*</key>\s*<integer>\s*([0-9]+)\s*</integer>`)
-	reNotifyBackend = regexp.MustCompile(`(?s)<string>\s*--notify-backend\s*</string>\s*<string>\s*([^<]+)\s*</string>`)
 )
 
-func (a *App) RunSchedulerInstall(opts SchedulerInstallOptions) (int, error) {
+func (a *App) RunSchedulerInstall(_ SchedulerInstallOptions) (int, error) {
 	if !a.supportsScheduler() {
 		return 2, fmt.Errorf("scheduler is only supported on macOS")
 	}
 
 	cfg, err := state.LoadConfig(a.Paths)
-	if err != nil {
-		return 2, err
-	}
-
-	backend, err := a.resolveNotifyBackendWithDefault(opts.NotifyBackend, notifyBackendOSAScript)
 	if err != nil {
 		return 2, err
 	}
@@ -56,7 +50,7 @@ func (a *App) RunSchedulerInstall(opts SchedulerInstallOptions) (int, error) {
 	plistPath := schedulerPlistPath(a.Paths.Home)
 	stdoutPath := filepath.Join(a.Paths.LocalStateRoot(), "scheduler-sync.log")
 	stderrPath := filepath.Join(a.Paths.LocalStateRoot(), "scheduler-sync.err.log")
-	plist := sampleSchedulerPlist(executable, intervalMinutes*60, backend, stdoutPath, stderrPath)
+	plist := sampleSchedulerPlist(executable, intervalMinutes*60, stdoutPath, stderrPath)
 
 	if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
 		return 2, fmt.Errorf("create launch agents directory: %w", err)
@@ -79,7 +73,7 @@ func (a *App) RunSchedulerInstall(opts SchedulerInstallOptions) (int, error) {
 		return 2, fmt.Errorf("load launch agent: %w", err)
 	}
 
-	fmt.Fprintf(a.Stdout, "installed scheduler label=%s interval_minutes=%d notify_backend=%s\n", schedulerLaunchdLabel, intervalMinutes, backend)
+	fmt.Fprintf(a.Stdout, "installed scheduler label=%s interval_minutes=%d\n", schedulerLaunchdLabel, intervalMinutes)
 	return 0, nil
 }
 
@@ -99,11 +93,6 @@ func (a *App) RunSchedulerStatus() (int, error) {
 	}
 
 	intervalMinutes := extractSchedulerIntervalMinutes(string(raw))
-	backend := extractSchedulerNotifyBackend(string(raw))
-	if backend == "" {
-		backend = notifyBackendOSAScript
-	}
-
 	loaded := false
 	runCommand := a.RunCommand
 	if runCommand == nil {
@@ -113,7 +102,7 @@ func (a *App) RunSchedulerStatus() (int, error) {
 		loaded = true
 	}
 
-	fmt.Fprintf(a.Stdout, "installed=true loaded=%t label=%s interval_minutes=%d notify_backend=%s path=%s\n", loaded, schedulerLaunchdLabel, intervalMinutes, backend, plistPath)
+	fmt.Fprintf(a.Stdout, "installed=true loaded=%t label=%s interval_minutes=%d path=%s\n", loaded, schedulerLaunchdLabel, intervalMinutes, plistPath)
 	return 0, nil
 }
 
@@ -152,7 +141,7 @@ func schedulerPlistPath(home string) string {
 	return filepath.Join(home, "Library", "LaunchAgents", schedulerLaunchdLabel+".plist")
 }
 
-func sampleSchedulerPlist(executable string, intervalSeconds int, backend string, stdoutPath string, stderrPath string) string {
+func sampleSchedulerPlist(executable string, intervalSeconds int, stdoutPath string, stderrPath string) string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -163,10 +152,7 @@ func sampleSchedulerPlist(executable string, intervalSeconds int, backend string
     <array>
     <string>%s</string>
     <string>sync</string>
-    <string>--notify</string>
     <string>--quiet</string>
-    <string>--notify-backend</string>
-    <string>%s</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -178,7 +164,7 @@ func sampleSchedulerPlist(executable string, intervalSeconds int, backend string
     <string>%s</string>
 </dict>
 </plist>
-`, schedulerLaunchdLabel, executable, backend, intervalSeconds, stdoutPath, stderrPath)
+`, schedulerLaunchdLabel, executable, intervalSeconds, stdoutPath, stderrPath)
 }
 
 func extractSchedulerIntervalMinutes(plist string) int {
@@ -191,12 +177,4 @@ func extractSchedulerIntervalMinutes(plist string) int {
 		return 0
 	}
 	return seconds / 60
-}
-
-func extractSchedulerNotifyBackend(plist string) string {
-	matches := reNotifyBackend.FindStringSubmatch(plist)
-	if len(matches) != 2 {
-		return ""
-	}
-	return strings.TrimSpace(matches[1])
 }

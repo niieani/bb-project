@@ -99,13 +99,16 @@ func TestLatestSyncRunSelectsNewestLocalSync(t *testing.T) {
 func TestFleetAttentionFingerprintDeterministicAndEligibilityBoundaries(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	cfg := domain.NotifyConfig{QuietHours: 2, WIPStaleHours: 24}
+	cfg := domain.AttentionConfig{ThrottleMinutes: 17, QuietHours: 2, WIPStaleHours: 24}
 	records := []domain.MachineRepoRecordWithMachine{
 		{MachineID: "b", Record: statusContractRepo("software/stale", "stale", domain.RepoStateWip, []domain.UnsyncableReason{domain.ReasonDirtyTracked}, nil, now.Add(-24*time.Hour))},
 		{MachineID: "a", Record: statusContractRepo("software/recent", "recent", domain.RepoStateBlocked, []domain.UnsyncableReason{domain.ReasonDiverged}, nil, now.Add(-time.Hour))},
 		{MachineID: "a", Record: statusContractRepo("software/pending", "pending", domain.RepoStatePending, []domain.UnsyncableReason{domain.ReasonCloneRequired}, nil, time.Time{})},
 	}
 	first := buildFleetAttention(records, now, cfg)
+	if first.ThrottleMinutes != 17 {
+		t.Fatalf("throttle_minutes = %d, want 17", first.ThrottleMinutes)
+	}
 	reversed := []domain.MachineRepoRecordWithMachine{records[2], records[1], records[0]}
 	second := buildFleetAttention(reversed, now, cfg)
 	if first.Fingerprint == "" || first.Fingerprint != second.Fingerprint {
@@ -130,10 +133,10 @@ func TestFleetAttentionFingerprintDeterministicAndEligibilityBoundaries(t *testi
 	}
 }
 
-func TestNotificationEligibilityExactBoundaries(t *testing.T) {
+func TestAttentionEligibilityExactBoundaries(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	cfg := domain.NotifyConfig{QuietHours: 2, WIPStaleHours: 24}
+	cfg := domain.AttentionConfig{QuietHours: 2, WIPStaleHours: 24}
 	tests := []struct {
 		name     string
 		state    domain.RepoSyncState
@@ -152,7 +155,7 @@ func TestNotificationEligibilityExactBoundaries(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			repo := statusContractRepo("software/repo", "repo", tt.state, []domain.UnsyncableReason{domain.ReasonDirtyTracked}, nil, tt.activity)
-			if got := isNotificationEligible(repo, now, cfg); got != tt.want {
+			if got := isAttentionEligible(repo, now, cfg); got != tt.want {
 				t.Fatalf("eligible = %t, want %t", got, tt.want)
 			}
 		})
