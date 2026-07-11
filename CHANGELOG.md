@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.10.1](https://github.com/niieani/bb-project/compare/v0.10.0...v0.10.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **menubar:** prevent process executor starvation (BB-krezgwel) ([debf8b3](https://github.com/niieani/bb-project/commit/debf8b370b1a1ef7e3f7d43a0bb5c3a2daf27e47))
+* **menubar:** repair missing login registration (BB-gcpevkel) ([81731ad](https://github.com/niieani/bb-project/commit/81731ad5c94a007bcd9ada485ce068540b0c229c))
+* **release:** expose bounded menubar stages (BB-krezgwel) ([3a8e25b](https://github.com/niieani/bb-project/commit/3a8e25ba5cbc035a6d31f8f38a6c0122432ce483))
+* **release:** isolate menubar recovery (BB-krezgwel) ([3ee876a](https://github.com/niieani/bb-project/commit/3ee876a7d785662fcb8fa49202bf2e64d5f7b89e))
+
 ## [0.10.0](https://github.com/niieani/bb-project/compare/v0.9.0...v0.10.0) (2026-07-11)
 
 
