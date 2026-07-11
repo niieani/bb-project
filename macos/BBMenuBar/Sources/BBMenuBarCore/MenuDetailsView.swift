@@ -28,7 +28,19 @@ public struct MenuDetailsView: View {
       .fixedSize(horizontal: false, vertical: true)
     }
     .scrollIndicators(.visible)
-    .frame(maxHeight: 480)
+    .frame(height: MenuDetailsLayout.height(for: presentation))
+  }
+}
+
+enum MenuDetailsLayout {
+  static func height(for presentation: MenuPresentation) -> CGFloat {
+    let repositoryRows = presentation.sections.reduce(0) { $0 + $1.items.count }
+    let estimatedContentHeight =
+      CGFloat(
+        repositoryRows * 43 + presentation.sections.count * 38
+          + presentation.errors.count * 30)
+    guard estimatedContentHeight > 0 else { return 0 }
+    return min(480, max(44, estimatedContentHeight))
   }
 }
 

@@ -13,11 +13,15 @@ struct MenuDetailsViewTests {
       sections: [],
       lastSync: "Last sync 1m ago",
       errors: (1...100).map { "Attention item \($0)" })
+    #expect(MenuDetailsLayout.height(for: presentation) == 480)
     let host = NSHostingView(rootView: MenuDetailsView(presentation: presentation))
-    host.frame = NSRect(x: 0, y: 0, width: 320, height: 480)
+    let fittingSize = host.fittingSize
+    host.frame = NSRect(origin: .zero, size: fittingSize)
     host.layoutSubtreeIfNeeded()
 
-    #expect(descendants(of: host).contains { $0 is NSScrollView })
+    let scrollView = descendants(of: host).compactMap { $0 as? NSScrollView }.first
+    #expect(fittingSize.height == 480)
+    #expect(scrollView?.frame.height == 480)
   }
 }
 
