@@ -284,6 +284,7 @@ Empty states should never be blank. Include:
 ### Long Lists (Changed Files, Results, etc.)
 
 - Render as one item per row.
+- Constrain popup/menu list regions to the available screen height and make them vertically scrollable; keep status and primary actions outside the scroll region.
 - When showing file changes, include `+/-` counts when available (and use `Success`/`Danger` tones).
 - Cap long lists and say so explicitly: "showing first N of M".
 - Never let a long list push essential controls (like confirmations) off-screen.
