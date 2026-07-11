@@ -33,7 +33,7 @@ struct MenuBarTitleTests {
     let model = MenuBarModel(client: StubStatusClient(result: .failure(TestFailure())))
     await model.refresh()
     #expect(model.title == .error)
-    #expect(model.errorMessage == "TestFailure()")
+    #expect(model.presentation.errors == ["Status unavailable: TestFailure()"])
   }
 
   @Test("malformed client payload maps to the view-model error state")
@@ -42,7 +42,7 @@ struct MenuBarTitleTests {
     let model = MenuBarModel(client: StubStatusClient(result: .success(Data("not json".utf8))))
     await model.refresh()
     #expect(model.title == .error)
-    #expect(model.errorMessage != nil)
+    #expect(model.presentation.errors.first?.hasPrefix("Status unavailable:") == true)
   }
 
   private func fixture(named name: String) throws -> Data {
@@ -58,10 +58,16 @@ struct MenuBarTitleTests {
 
 private struct TestFailure: Error {}
 
-private struct StubStatusClient: StatusClient {
+private struct StubStatusClient: BBClient {
   let result: Result<Data, any Error>
 
   func statusJSON() async throws -> Data {
     try result.get()
   }
+
+  func overviewJSON() async throws -> Data {
+    Data(#"{"machines":[],"repos":[],"synced_everywhere":0,"warnings":[]}"#.utf8)
+  }
+
+  func sync() async throws {}
 }

@@ -1,10 +1,12 @@
 import Foundation
 
-public protocol StatusClient: Sendable {
+public protocol BBClient: Sendable {
   func statusJSON() async throws -> Data
+  func overviewJSON() async throws -> Data
+  func sync() async throws
 }
 
-public struct ProcessStatusClient: StatusClient {
+public struct ProcessBBClient: BBClient {
   private let executableURL: URL?
 
   public init(executableURL: URL? = nil) {
@@ -12,13 +14,25 @@ public struct ProcessStatusClient: StatusClient {
   }
 
   public func statusJSON() async throws -> Data {
+    try await run(arguments: ["status", "--json"])
+  }
+
+  public func overviewJSON() async throws -> Data {
+    try await run(arguments: ["overview", "--json"])
+  }
+
+  public func sync() async throws {
+    _ = try await run(arguments: ["sync", "--quiet"])
+  }
+
+  private func run(arguments: [String]) async throws -> Data {
     let executable = try executableURL ?? Self.resolveExecutable()
     return try await Task.detached {
       let process = Process()
       let stdout = Pipe()
       let stderr = Pipe()
       process.executableURL = executable
-      process.arguments = ["status", "--json"]
+      process.arguments = arguments
       process.standardOutput = stdout
       process.standardError = stderr
       try process.run()
@@ -28,7 +42,7 @@ public struct ProcessStatusClient: StatusClient {
       let (statusData, errorData) = try await (output, errorOutput)
       guard process.terminationStatus == 0 else {
         let detail = String(decoding: errorData, as: UTF8.self)
-        throw StatusClientError.commandFailed(code: process.terminationStatus, detail: detail)
+        throw BBClientError.commandFailed(code: process.terminationStatus, detail: detail)
       }
       return statusData
     }.value
@@ -49,13 +63,13 @@ public struct ProcessStatusClient: StatusClient {
         FileManager.default.isExecutableFile(atPath: $0.path)
       })
     else {
-      throw StatusClientError.binaryNotFound
+      throw BBClientError.binaryNotFound
     }
     return executable
   }
 }
 
-public enum StatusClientError: Error, Equatable {
+public enum BBClientError: Error, Equatable {
   case binaryNotFound
   case commandFailed(code: Int32, detail: String)
 }

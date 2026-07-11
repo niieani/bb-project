@@ -26,6 +26,15 @@ struct StatusContractTests {
     #expect(contract.lastSync?.event == "sync_run")
   }
 
+  @Test("decodes Go RFC 3339 nanosecond timestamps")
+  func fractionalTimestamp() throws {
+    struct Timestamp: Decodable { let at: Date }
+    let value = try JSONDecoder.bb.decode(
+      Timestamp.self,
+      from: Data(#"{"at":"2026-07-10T12:00:00.123456789-07:00"}"#.utf8))
+    #expect(value.at.timeIntervalSince1970 > 0)
+  }
+
   private func fixture(named name: String) throws -> Data {
     let repository = URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent()

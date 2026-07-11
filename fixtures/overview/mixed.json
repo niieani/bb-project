@@ -1,0 +1,26 @@
+{
+  "machines": [
+    {"id":"machine-a","here":true,"published":true,"updated_at":"2026-07-10T12:00:00Z","stale":false},
+    {"id":"machine-b","here":false,"published":true,"updated_at":"2026-07-10T11:00:00Z","stale":false}
+  ],
+  "repos": [
+    {
+      "repo_key":"references/remote-only",
+      "cells":[
+        {"machine_id":"machine-a","present":false,"reasons":[],"warnings":[],"last_activity_at":"0001-01-01T00:00:00Z"},
+        {"machine_id":"machine-b","present":true,"state":"blocked","reasons":["diverged"],"warnings":[],"last_activity_at":"2026-07-08T12:00:00Z"}
+      ],
+      "synced_everywhere":false
+    },
+    {
+      "repo_key":"software/remote",
+      "cells":[
+        {"machine_id":"machine-a","present":false,"reasons":[],"warnings":[],"last_activity_at":"0001-01-01T00:00:00Z"},
+        {"machine_id":"machine-b","present":true,"state":"wip","reasons":["dirty_untracked"],"warnings":[],"last_activity_at":"2026-07-08T12:00:00Z"}
+      ],
+      "synced_everywhere":false
+    }
+  ],
+  "synced_everywhere":0,
+  "warnings":[]
+}

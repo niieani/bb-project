@@ -311,6 +311,8 @@ swift test --package-path macos/BBMenuBar
 
 The Codex Run action uses the same build-and-run script. Development launches pass the just-built repository `bb` binary explicitly; installed builds resolve `bb` from `PATH`, Homebrew, or `~/bin`.
 
+Opening the status item shows compact sections for local blocked repositories, stale local WIP, and eligible attention on other machines. Empty sections disappear. Each source reports failures independently, and the footer shows the latest successful sync time. `Sync now` runs `bb sync --quiet` outside the UI actor and refreshes status plus overview after completion, including non-zero sync outcomes. The app refreshes every five minutes and after macOS wake.
+
 ### `bb overview [--all] [--json] [--include-catalog <name> ...]`
 
 Shows a read-only cross-machine matrix with the local machine first. Non-synced cells include the dominant reason and last-activity age; missing copies show as not cloned. Repositories synced everywhere collapse into one count unless `--all` is used. Stale machine publications are called out explicitly. `--json` is a stable full-matrix contract for tooling and always includes collapsed repositories, every machine, states, reasons, warnings, and timestamps. Overview always exits `0`, including when blocked repositories exist.
