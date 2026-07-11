@@ -1,0 +1,26 @@
+{
+  "machine_id": "machine-a",
+  "repos": [
+    {"repo_key":"software/synced","name":"synced","catalog":"software","path":"/repos/synced","state":"synced","reasons":[],"warnings":[],"last_activity_at":"2026-07-10T11:00:00Z"},
+    {"repo_key":"software/warning","name":"warning","catalog":"software","path":"/repos/warning","state":"synced","reasons":[],"warnings":["remote_format_mismatch"],"last_activity_at":"2026-07-10T10:00:00Z"},
+    {"repo_key":"software/blocked","name":"blocked","catalog":"software","path":"/repos/blocked","state":"blocked","reasons":["diverged"],"warnings":[],"last_activity_at":"2026-07-10T09:00:00Z"},
+    {"repo_key":"software/recent","name":"recent","catalog":"software","path":"/repos/recent","state":"blocked","reasons":["push_failed"],"warnings":[],"last_activity_at":"2026-07-10T11:00:00Z"},
+    {"repo_key":"software/stale","name":"stale","catalog":"software","path":"/repos/stale","state":"wip","reasons":["dirty_tracked"],"warnings":[],"last_activity_at":"2026-07-09T11:00:00Z"},
+    {"repo_key":"software/pending","name":"pending","catalog":"software","path":"/repos/pending","state":"pending","reasons":["clone_required"],"warnings":[],"last_activity_at":"0001-01-01T00:00:00Z"}
+  ],
+  "summary": {"total": 6, "synced": 2, "pending": 1, "wip": 1, "blocked": 2, "warnings": 1},
+  "last_sync": {"at": "2026-07-10T11:30:00Z", "machine": "machine-a", "event": "sync_run", "detail": "synced=2 pending=1 wip=1 blocked=1 duration=2s"},
+  "attention": {
+    "items": [
+      {"machine_id": "machine-a", "repo_key": "software/blocked", "name": "blocked", "state": "blocked", "dominant_reason": "diverged", "reasons":["diverged"], "last_activity_at": "2026-07-10T09:00:00Z", "eligible": true},
+      {"machine_id": "machine-a", "repo_key": "software/pending", "name": "pending", "state": "pending", "dominant_reason": "clone_required", "reasons":["clone_required"], "last_activity_at": "0001-01-01T00:00:00Z", "eligible": false},
+      {"machine_id": "machine-a", "repo_key": "software/recent", "name": "recent", "state": "blocked", "dominant_reason": "push_failed", "reasons":["push_failed"], "last_activity_at": "2026-07-10T11:00:00Z", "eligible": false},
+      {"machine_id": "machine-a", "repo_key": "software/stale", "name": "stale", "state": "wip", "dominant_reason": "dirty_tracked", "reasons":["dirty_tracked"], "last_activity_at": "2026-07-09T11:00:00Z", "eligible": true},
+      {"machine_id": "machine-b", "repo_key": "references/remote-only", "name": "remote-only", "state": "blocked", "dominant_reason": "diverged", "reasons":["diverged"], "last_activity_at": "2026-07-08T12:00:00Z", "eligible": true},
+      {"machine_id": "machine-b", "repo_key": "software/remote", "name": "remote", "state": "wip", "dominant_reason": "dirty_untracked", "reasons":["dirty_untracked"], "last_activity_at": "2026-07-08T12:00:00Z", "eligible": true}
+    ],
+    "eligible_count": 4,
+    "fingerprint": "ea0f05f70c88ad4ca5cd097ea4c34a6cafe087d8138ddf91f8a6e1cc784114bd"
+  },
+  "source_warnings": []
+}

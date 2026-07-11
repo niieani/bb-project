@@ -62,20 +62,22 @@ func (a *App) notifyUnsyncable(cfg domain.ConfigFile, repos []domain.MachineRepo
 
 func notificationAttentionSet(repos []domain.MachineRepoRecord, now time.Time, cfg domain.NotifyConfig) []domain.MachineRepoRecord {
 	out := make([]domain.MachineRepoRecord, 0)
-	quiet := time.Duration(cfg.QuietHours) * time.Hour
-	stale := time.Duration(cfg.WIPStaleHours) * time.Hour
 	for _, r := range repos {
-		age := now.Sub(r.LastActivityAt)
-		unknown := r.LastActivityAt.IsZero()
-		if r.State == domain.RepoStateBlocked && (unknown || age >= quiet) {
-			out = append(out, r)
-		}
-		if r.State == domain.RepoStateWip && (unknown || age >= stale) {
+		if isNotificationEligible(r, now, cfg) {
 			out = append(out, r)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return notifyIdentity(out[i]) < notifyIdentity(out[j]) })
 	return out
+}
+
+func isNotificationEligible(repo domain.MachineRepoRecord, now time.Time, cfg domain.NotifyConfig) bool {
+	age := now.Sub(repo.LastActivityAt)
+	unknown := repo.LastActivityAt.IsZero()
+	quiet := time.Duration(cfg.QuietHours) * time.Hour
+	stale := time.Duration(cfg.WIPStaleHours) * time.Hour
+	return repo.State == domain.RepoStateBlocked && (unknown || age >= quiet) ||
+		repo.State == domain.RepoStateWip && (unknown || age >= stale)
 }
 
 func notifyIdentity(r domain.MachineRepoRecord) string {

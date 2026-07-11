@@ -1376,7 +1376,7 @@ func (a *App) RunScan(opts ScanOptions) (int, error) {
 
 func (a *App) RunStatus(jsonOut bool, include []string) (int, error) {
 	a.logf("status: loading state")
-	_, machine, err := a.loadContext()
+	cfg, machine, err := a.loadContext()
 	if err != nil {
 		return 2, err
 	}
@@ -1398,10 +1398,33 @@ func (a *App) RunStatus(jsonOut bool, include []string) (int, error) {
 			}
 			filtered = append(filtered, r)
 		}
-		payload := struct {
-			MachineID string                     `json:"machine_id"`
-			Repos     []domain.MachineRepoRecord `json:"repos"`
-		}{machine.MachineID, filtered}
+		machines, sourceWarnings, err := state.LoadAllMachineFilesWithWarnings(a.Paths)
+		if err != nil {
+			return 2, err
+		}
+		fleet := make([]domain.MachineRepoRecordWithMachine, 0)
+		for _, fleetMachine := range machines {
+			for _, repo := range fleetMachine.Repos {
+				if len(include) > 0 {
+					if _, ok := allowed[repo.Catalog]; !ok {
+						continue
+					}
+				}
+				fleet = append(fleet, domain.MachineRepoRecordWithMachine{MachineID: fleetMachine.MachineID, Record: repo})
+			}
+		}
+		lastSync, err := latestSyncRun(a.Paths, machine.MachineID)
+		if err != nil {
+			return 2, err
+		}
+		payload := StatusContract{
+			MachineID:      machine.MachineID,
+			Repos:          buildStatusRepos(filtered),
+			Summary:        buildStatusSummary(filtered),
+			LastSync:       lastSync,
+			Attention:      buildFleetAttention(fleet, a.Now(), cfg.Notify),
+			SourceWarnings: append([]string{}, sourceWarnings...),
+		}
 		enc := json.NewEncoder(a.Stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(payload); err != nil {

@@ -284,7 +284,19 @@ Exit code is `1` only when selected catalogs still contain `blocked` repos after
 Shows last recorded machine repo state.
 
 - plain mode: one line per repo with tier/reasons, followed by a tier summary
-- `--json`: machine + schema-v2 repo observations, including state, reasons, warnings, and last activity
+- `--json`: stable programmatic contract for the menubar app and other tooling
+
+The JSON contract exposes:
+
+- `machine_id`
+- selected local `repos`, each with `repo_key`, `name`, `catalog`, `path`, `state`, `reasons`, `warnings`, and `last_activity_at`
+- `summary` counts for total/synced/pending/wip/blocked repositories and warnings
+- `last_sync`: the local machine's latest `sync_run` journal event, or explicit `null` before the first run
+- `attention.items`: fleet-wide non-synced repositories with machine/repository identity, state, reasons, dominant reason, activity time, and Go-computed notification `eligible` status
+- `attention.eligible_count` and a deterministic SHA-256 `attention.fingerprint` covering the eligible fleet attention set
+- `source_warnings`: explicit fleet-state loading warnings, including machines publishing an obsolete schema
+
+Consumers must use `eligible` rather than reproduce quiet-period, stale-WIP, or tier policy. Pending and recently active blocked repositories remain visible in the snapshot but are ineligible. Shared contract fixtures live in `fixtures/status/` and are decoded by both Go and Swift tests.
 
 ### `bb overview [--all] [--json] [--include-catalog <name> ...]`
 
