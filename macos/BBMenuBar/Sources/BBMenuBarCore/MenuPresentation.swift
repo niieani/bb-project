@@ -58,6 +58,7 @@ public struct MenuItem: Equatable, Identifiable, Sendable {
   public let id: String
   public let title: String
   public let detail: String
+  public let statusTone: RepoStatusTone
 
   init(attention: AttentionItem) {
     id = "\(attention.machineID)\u{0}\(attention.repoKey)"
@@ -66,6 +67,39 @@ public struct MenuItem: Equatable, Identifiable, Sendable {
       ? attention.name : String(attention.name.prefix(27)) + "..."
     let reason = attention.dominantReason.replacingOccurrences(of: "_", with: " ")
     detail = attention.machineID + " · " + reason
+    statusTone = RepoStatusTone(state: attention.state)
+  }
+}
+
+public enum RepoStatusTone: Equatable, Sendable {
+  case synced, pending, wip, blocked
+
+  init(state: RepoState) {
+    self =
+      switch state {
+      case .synced: .synced
+      case .pending: .pending
+      case .wip: .wip
+      case .blocked: .blocked
+      }
+  }
+
+  public var lightHex: String {
+    switch self {
+    case .synced: "#1A7F37"
+    case .pending: "#9A6700"
+    case .wip: "#FFAF00"
+    case .blocked: "#CF222E"
+    }
+  }
+
+  public var darkHex: String {
+    switch self {
+    case .synced: "#3FB950"
+    case .pending: "#D29922"
+    case .wip: "#FFAF00"
+    case .blocked: "#F85149"
+    }
   }
 }
 

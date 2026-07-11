@@ -42,6 +42,22 @@ struct MenuBarPresentationTests {
     #expect(item.title.count == 30)
   }
 
+  @Test("repository status tones match the CLI tier palette")
+  func statusTones() {
+    #expect(menuItem(state: .synced).statusTone == .synced)
+    #expect(menuItem(state: .pending).statusTone == .pending)
+    #expect(menuItem(state: .wip).statusTone == .wip)
+    #expect(menuItem(state: .blocked).statusTone == .blocked)
+    #expect(RepoStatusTone.synced.lightHex == "#1A7F37")
+    #expect(RepoStatusTone.synced.darkHex == "#3FB950")
+    #expect(RepoStatusTone.pending.lightHex == "#9A6700")
+    #expect(RepoStatusTone.pending.darkHex == "#D29922")
+    #expect(RepoStatusTone.wip.lightHex == "#FFAF00")
+    #expect(RepoStatusTone.wip.darkHex == "#FFAF00")
+    #expect(RepoStatusTone.blocked.lightHex == "#CF222E")
+    #expect(RepoStatusTone.blocked.darkHex == "#F85149")
+  }
+
   @Test("omits empty attention sections")
   @MainActor
   func emptySections() async {
@@ -169,6 +185,14 @@ struct MenuBarPresentationTests {
       model.presentation.errors.contains(
         "Launch at login requires approval in System Settings"))
   }
+}
+
+private func menuItem(state: RepoState) -> MenuItem {
+  MenuItem(
+    attention: AttentionItem(
+      machineID: "machine-a", repoKey: "software/repo", name: "repo", state: state,
+      dominantReason: "reason", reasons: ["reason"], lastActivityAt: .distantPast,
+      eligible: true))
 }
 
 private enum MenuTestFailure: String, Error, CustomStringConvertible {

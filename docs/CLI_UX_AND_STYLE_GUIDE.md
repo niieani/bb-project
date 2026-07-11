@@ -284,6 +284,7 @@ Empty states should never be blank. Include:
 ### Long Lists (Changed Files, Results, etc.)
 
 - Render as one item per row.
+- When rows represent tiered repository state, pair the repository name with a compact status marker using the same adaptive palette as the CLI; never rely on color alone, and expose the state to accessibility.
 - Constrain popup/menu list regions to the available screen height and make them vertically scrollable; keep status and primary actions outside the scroll region.
 - When showing file changes, include `+/-` counts when available (and use `Success`/`Danger` tones).
 - Cap long lists and say so explicitly: "showing first N of M".
