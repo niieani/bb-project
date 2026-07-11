@@ -168,9 +168,9 @@ func TestFixTUISummaryShowsCreatedCommitsWithMessages(t *testing.T) {
 	repos := []fixRepoState{
 		{
 			Record: domain.MachineRepoRecord{
-				Name:     "demo",
-				Path:     "/repos/demo",
-				Syncable: true,
+				Name:  "demo",
+				Path:  "/repos/demo",
+				State: domain.RepoStateSynced,
 			},
 			Meta: &domain.RepoMetadataFile{
 				RepoKey:   "software/demo",

@@ -36,13 +36,13 @@ func (a *App) notifyUnsyncable(cfg domain.ConfigFile, repos []domain.MachineRepo
 	now := a.Now()
 	throttleWindow := time.Duration(cfg.Notify.ThrottleMinutes) * time.Minute
 	for _, rec := range repos {
-		if rec.Syncable {
+		if rec.State == domain.RepoStateSynced {
 			continue
 		}
-		if len(rec.UnsyncableReasons) > 0 && !domain.HasBlockingUnsyncableReason(rec.UnsyncableReasons) {
+		if rec.State != domain.RepoStateBlocked {
 			continue
 		}
-		fingerprint := unsyncableFingerprint(rec.UnsyncableReasons)
+		fingerprint := unsyncableFingerprint(rec.Reasons)
 		cacheKey := notifyCacheKey(rec)
 		entry, ok := cache.LastSent[cacheKey]
 		if ok && entry.Fingerprint == fingerprint && cfg.Notify.Dedupe {

@@ -37,10 +37,10 @@ func TestNotifyUnsyncableUsesExplicitBackend(t *testing.T) {
 
 	cfg := state.DefaultConfig()
 	err := a.notifyUnsyncable(cfg, []domain.MachineRepoRecord{{
-		RepoKey:           "software/api",
-		Name:              "api",
-		Syncable:          false,
-		UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
+		RepoKey: "software/api",
+		Name:    "api",
+		State:   domain.RepoStateBlocked,
+		Reasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
 	}}, notifyBackendOSAScript)
 	if err != nil {
 		t.Fatalf("notifyUnsyncable failed: %v", err)
@@ -57,10 +57,10 @@ func TestNotifyUnsyncableInvalidBackend(t *testing.T) {
 	a := New(paths, &bytes.Buffer{}, &bytes.Buffer{})
 	cfg := state.DefaultConfig()
 	err := a.notifyUnsyncable(cfg, []domain.MachineRepoRecord{{
-		RepoKey:           "software/api",
-		Name:              "api",
-		Syncable:          false,
-		UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
+		RepoKey: "software/api",
+		Name:    "api",
+		State:   domain.RepoStateBlocked,
+		Reasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
 	}}, "invalid-backend")
 	if err == nil {
 		t.Fatal("expected error for invalid backend")
@@ -89,11 +89,11 @@ func TestNotifyUnsyncablePersistsAndClearsDeliveryFailures(t *testing.T) {
 	}
 
 	record := domain.MachineRepoRecord{
-		RepoKey:           "software/api",
-		Name:              "api",
-		Path:              "/tmp/software/api",
-		Syncable:          false,
-		UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
+		RepoKey: "software/api",
+		Name:    "api",
+		Path:    "/tmp/software/api",
+		State:   domain.RepoStateBlocked,
+		Reasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
 	}
 	cfg := state.DefaultConfig()
 	if err := a.notifyUnsyncable(cfg, []domain.MachineRepoRecord{record}, notifyBackendStdout); err != nil {

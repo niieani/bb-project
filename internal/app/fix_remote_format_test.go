@@ -41,8 +41,8 @@ func TestObserveRepoMarksRemoteFormatMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("observeRepo returned error: %v", err)
 	}
-	if !slices.Contains(rec.UnsyncableReasons, domain.ReasonRemoteFormatMismatch) {
-		t.Fatalf("unsyncable reasons = %v, want %q", rec.UnsyncableReasons, domain.ReasonRemoteFormatMismatch)
+	if !slices.Contains(rec.Warnings, domain.ReasonRemoteFormatMismatch) {
+		t.Fatalf("warnings = %v, want %q", rec.Warnings, domain.ReasonRemoteFormatMismatch)
 	}
 }
 
@@ -76,13 +76,13 @@ func TestApplyFixActionAlignRemoteFormatRewritesRemoteAndMetadata(t *testing.T) 
 	}
 
 	rec := domain.MachineRepoRecord{
-		RepoKey:           "software/demo",
-		Name:              "demo",
-		Catalog:           "software",
-		Path:              repoPath,
-		OriginURL:         "https://github.com/you/demo.git",
-		Syncable:          false,
-		UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonRemoteFormatMismatch},
+		RepoKey:   "software/demo",
+		Name:      "demo",
+		Catalog:   "software",
+		Path:      repoPath,
+		OriginURL: "https://github.com/you/demo.git",
+		State:     domain.RepoStateSynced,
+		Warnings:  []domain.UnsyncableReason{domain.ReasonRemoteFormatMismatch},
 	}
 	rec.StateHash = domain.ComputeStateHash(rec)
 

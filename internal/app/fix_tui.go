@@ -555,7 +555,7 @@ const (
 	fixRepoTierAutofixable fixRepoTier = iota
 	fixRepoTierUnsyncableBlocked
 	fixRepoTierNotCloned
-	fixRepoTierSyncable
+	fixRepoTierSynced
 )
 
 type fixRepoDelegate struct{}
@@ -597,7 +597,7 @@ func (d fixRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	repoStyle := fixRepoNameStyle.Copy().Bold(selected)
 	branchStyle := fixBranchStyle
 	reasonsStyle := fixReasonsStyle
-	stateStyle := fixStateSyncableStyle
+	stateStyle := fixStateSyncedStyle
 	switch row.Tier {
 	case fixRepoTierAutofixable:
 		stateStyle = fixStateAutofixableStyle
@@ -685,7 +685,7 @@ var (
 	fixRepoNameStyle               lipgloss.Style
 	fixBranchStyle                 lipgloss.Style
 	fixReasonsStyle                lipgloss.Style
-	fixStateSyncableStyle          lipgloss.Style
+	fixStateSyncedStyle            lipgloss.Style
 	fixStateAutofixableStyle       lipgloss.Style
 	fixStateUnsyncableStyle        lipgloss.Style
 	fixStateNotClonedStyle         lipgloss.Style
@@ -733,7 +733,7 @@ func applyFixTUITheme() {
 		Foreground(mutedTextColor)
 	fixReasonsStyle = lipgloss.NewStyle().
 		Foreground(mutedTextColor)
-	fixStateSyncableStyle = lipgloss.NewStyle().
+	fixStateSyncedStyle = lipgloss.NewStyle().
 		Foreground(successColor)
 	fixStateAutofixableStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("214"))
@@ -1773,9 +1773,9 @@ func (m *fixTUIModel) viewRepoDetails(repo fixRepoState) string {
 	ignored := m.ignored[repo.Record.Path]
 
 	reasonText := "none"
-	if len(repo.Record.UnsyncableReasons) > 0 {
-		parts := make([]string, 0, len(repo.Record.UnsyncableReasons))
-		for _, r := range repo.Record.UnsyncableReasons {
+	if len(repo.Record.Reasons) > 0 {
+		parts := make([]string, 0, len(repo.Record.Reasons))
+		for _, r := range repo.Record.Reasons {
 			parts = append(parts, string(r))
 		}
 		sortStrings(parts)
@@ -1783,7 +1783,7 @@ func (m *fixTUIModel) viewRepoDetails(repo fixRepoState) string {
 	}
 
 	state := "syncable"
-	stateStyle := fixStateSyncableStyle
+	stateStyle := fixStateSyncedStyle
 	if ignored {
 		state = "ignored"
 		stateStyle = fixStateIgnoredStyle
@@ -1870,7 +1870,7 @@ func (m *fixTUIModel) viewFixSummary() string {
 			blocked++
 		case fixRepoTierNotCloned:
 			notCloned++
-		case fixRepoTierSyncable:
+		case fixRepoTierSynced:
 			syncable++
 		}
 	}
@@ -2420,9 +2420,9 @@ func (m *fixTUIModel) rebuildList(preferredPath string) {
 			appendCatalogHeader(currentCatalog, repo.IsDefaultCatalog)
 		}
 		reasons := "none"
-		if len(repo.Record.UnsyncableReasons) > 0 {
-			parts := make([]string, 0, len(repo.Record.UnsyncableReasons))
-			for _, r := range repo.Record.UnsyncableReasons {
+		if len(repo.Record.Reasons) > 0 {
+			parts := make([]string, 0, len(repo.Record.Reasons))
+			for _, r := range repo.Record.Reasons {
 				parts = append(parts, string(r))
 			}
 			sortStrings(parts)
@@ -3322,13 +3322,13 @@ func repoMetaAllowsAutoPush(meta *domain.RepoMetadataFile) bool {
 }
 
 func classifyFixRepo(repo fixRepoState, actions []string) fixRepoTier {
-	if repo.Record.Syncable {
-		return fixRepoTierSyncable
+	if repo.Record.State == domain.RepoStateSynced {
+		return fixRepoTierSynced
 	}
-	if hasUnsyncableReason(repo.Record.UnsyncableReasons, domain.ReasonCloneRequired) {
+	if hasUnsyncableReason(repo.Record.Reasons, domain.ReasonCloneRequired) {
 		return fixRepoTierNotCloned
 	}
-	if unsyncableReasonsFullyCoverable(repo.Record.UnsyncableReasons, fixActionsForSelection(actions)) {
+	if unsyncableReasonsFullyCoverable(repo.Record.Reasons, fixActionsForSelection(actions)) {
 		return fixRepoTierAutofixable
 	}
 	return fixRepoTierUnsyncableBlocked
@@ -3356,7 +3356,7 @@ func unsyncableReasonsFullyCoverable(reasons []domain.UnsyncableReason, actions 
 	return true
 }
 
-func uncoveredUnsyncableReasons(reasons []domain.UnsyncableReason, actions []string) []domain.UnsyncableReason {
+func uncoveredReasons(reasons []domain.UnsyncableReason, actions []string) []domain.UnsyncableReason {
 	if len(reasons) == 0 {
 		return nil
 	}

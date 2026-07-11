@@ -35,6 +35,40 @@ func TestScanFreshnessWindow(t *testing.T) {
 	}
 }
 
+func TestRepoLastActivityUsesLatestAvailableProbe(t *testing.T) {
+	t.Parallel()
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	head := filepath.Join(repo, ".git", "HEAD")
+	dirty := filepath.Join(repo, "dirty.txt")
+	if err := os.WriteFile(head, []byte("ref"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dirty, []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	latest := old.Add(time.Hour)
+	if err := os.Chtimes(head, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(dirty, latest, latest); err != nil {
+		t.Fatal(err)
+	}
+	if got := repoLastActivity(repo, []string{"dirty.txt", "vanished.txt"}); !got.Equal(latest) {
+		t.Fatalf("got %s, want %s", got, latest)
+	}
+}
+
+func TestRepoLastActivityReturnsZeroWhenAllProbesFail(t *testing.T) {
+	t.Parallel()
+	if got := repoLastActivity(filepath.Join(t.TempDir(), "missing"), []string{"vanished"}); !got.IsZero() {
+		t.Fatalf("got %s", got)
+	}
+}
+
 func TestShouldRefreshScanSnapshot(t *testing.T) {
 	now := time.Date(2026, 2, 14, 10, 0, 0, 0, time.UTC)
 	selected := []domain.Catalog{{Name: "software"}}
@@ -174,7 +208,7 @@ func TestScanAndPublishObservesReposInParallel(t *testing.T) {
 			Name:      repo.Name,
 			Catalog:   repo.Catalog.Name,
 			Path:      repo.Path,
-			Syncable:  true,
+			State:     domain.RepoStateSynced,
 			StateHash: "ok",
 		}, nil
 	}

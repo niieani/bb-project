@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 
@@ -33,7 +34,7 @@ func (a *App) runSync(opts SyncOptions) (int, error) {
 	a.logf("sync: selected %d catalog(s)", len(selectedCatalogs))
 
 	previous := previousRepoRecords(machine.Repos)
-	localRecords, transitionedToSyncable, err := a.observePhase(cfg, selectedCatalogs, previous, opts)
+	localRecords, transitionedToSynced, err := a.observePhase(cfg, selectedCatalogs, previous, opts)
 	if err != nil {
 		return 2, err
 	}
@@ -48,7 +49,7 @@ func (a *App) runSync(opts SyncOptions) (int, error) {
 	if err != nil {
 		return 2, err
 	}
-	if err := a.ensureFromWinners(cfg, &machine, machines, repoMetas, selectedCatalogMap, transitionedToSyncable, opts); err != nil {
+	if err := a.ensureFromWinners(cfg, &machine, machines, repoMetas, selectedCatalogMap, transitionedToSynced, opts); err != nil {
 		return 2, err
 	}
 	a.logf("sync: winner reconciliation completed")
@@ -144,9 +145,12 @@ func previousRepoRecords(repos []domain.MachineRepoRecord) map[string]domain.Mac
 }
 
 func loadSyncReconcileInputs(paths state.Paths) ([]domain.MachineFile, []domain.RepoMetadataFile, error) {
-	machines, err := state.LoadAllMachineFiles(paths)
+	machines, warnings, err := state.LoadAllMachineFilesWithWarnings(paths)
 	if err != nil {
 		return nil, nil, err
+	}
+	for _, warning := range warnings {
+		log.Printf("bb: warning: %s", warning)
 	}
 
 	repoMetas, err := state.LoadAllRepoMetadata(paths)
@@ -162,10 +166,8 @@ func anyUnsyncableInSelectedCatalogs(repos []domain.MachineRepoRecord, selectedC
 		if _, ok := selectedCatalogMap[rec.Catalog]; !ok {
 			continue
 		}
-		if !rec.Syncable {
-			if len(rec.UnsyncableReasons) == 0 || domain.HasBlockingUnsyncableReason(rec.UnsyncableReasons) {
-				return true
-			}
+		if rec.State == domain.RepoStateBlocked {
+			return true
 		}
 	}
 	return false

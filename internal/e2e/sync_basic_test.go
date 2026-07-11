@@ -73,16 +73,19 @@ func TestSyncBasicCases(t *testing.T) {
 
 		mB.MustWriteFile(filepath.Join(repoB, "README.md"), "dirty tracked change\n")
 		h.ExternalSync("a-machine", "b-machine")
-		if _, err := mB.RunBB(now.Add(3*time.Minute), "sync"); err == nil {
-			t.Fatal("expected sync to return unsyncable")
+		if out, err := mB.RunBB(now.Add(3*time.Minute), "sync"); err != nil {
+			t.Fatalf("wip sync failed: %v\n%s", err, out)
 		}
 
 		if got := gitCurrentBranch(t, mB, repoB, now); got != "main" {
 			t.Fatalf("branch on B changed unexpectedly: %q", got)
 		}
 		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-		if !containsReason(rec.UnsyncableReasons, domain.ReasonDirtyTracked) {
-			t.Fatalf("expected dirty_tracked reason, got %v", rec.UnsyncableReasons)
+		if !containsReason(rec.Reasons, domain.ReasonDirtyTracked) {
+			t.Fatalf("expected dirty_tracked reason, got %v", rec.Reasons)
+		}
+		if rec.State != domain.RepoStateWip {
+			t.Fatalf("state = %q, want wip", rec.State)
 		}
 	})
 
@@ -101,16 +104,16 @@ func TestSyncBasicCases(t *testing.T) {
 
 		mB.MustWriteFile(filepath.Join(repoB, "scratch.txt"), "untracked\n")
 		h.ExternalSync("a-machine", "b-machine")
-		if _, err := mB.RunBB(now.Add(3*time.Minute), "sync"); err == nil {
-			t.Fatal("expected sync to return unsyncable")
+		if out, err := mB.RunBB(now.Add(3*time.Minute), "sync"); err != nil {
+			t.Fatalf("wip sync failed: %v\n%s", err, out)
 		}
 
 		if got := gitCurrentBranch(t, mB, repoB, now); got != "main" {
 			t.Fatalf("branch on B changed unexpectedly: %q", got)
 		}
 		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-		if !containsReason(rec.UnsyncableReasons, domain.ReasonDirtyUntracked) {
-			t.Fatalf("expected dirty_untracked reason, got %v", rec.UnsyncableReasons)
+		if !containsReason(rec.Reasons, domain.ReasonDirtyUntracked) {
+			t.Fatalf("expected dirty_untracked reason, got %v", rec.Reasons)
 		}
 	})
 
@@ -144,7 +147,7 @@ func TestSyncBasicCases(t *testing.T) {
 		}
 		if got := gitCurrentBranch(t, mB, repoB, now); got != "feature/clean" {
 			rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-			t.Fatalf("branch on B = %q, want feature/clean (reasons=%v syncable=%t)", got, rec.UnsyncableReasons, rec.Syncable)
+			t.Fatalf("branch on B = %q, want feature/clean (reasons=%v syncable=%t)", got, rec.Reasons, rec.State == domain.RepoStateSynced)
 		}
 	})
 
@@ -224,12 +227,12 @@ func TestSyncBasicCases(t *testing.T) {
 		mB.MustRunGit(now, repoB, "add", "ahead.txt")
 		mB.MustRunGit(now, repoB, "commit", "-m", "ahead")
 
-		if _, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err == nil {
-			t.Fatal("expected sync unsyncable on default branch when auto_push=true (non-default branch mode)")
+		if out, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err != nil {
+			t.Fatalf("push-policy wip sync failed: %v\n%s", err, out)
 		}
 		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-		if !containsReason(rec.UnsyncableReasons, domain.ReasonPushPolicyBlocked) {
-			t.Fatalf("expected push_policy_blocked reason, got %v", rec.UnsyncableReasons)
+		if !containsReason(rec.Reasons, domain.ReasonPushPolicyBlocked) {
+			t.Fatalf("expected push_policy_blocked reason, got %v", rec.Reasons)
 		}
 	})
 
@@ -241,8 +244,8 @@ func TestSyncBasicCases(t *testing.T) {
 		mB.MustRunGit(now, repoB, "add", "ahead.txt")
 		mB.MustRunGit(now, repoB, "commit", "-m", "ahead")
 
-		if _, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err == nil {
-			t.Fatal("expected sync unsyncable on default branch before include-default-branch mode is set")
+		if out, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err != nil {
+			t.Fatalf("push-policy wip sync failed: %v\n%s", err, out)
 		}
 		if out, err := mB.RunBB(now.Add(3*time.Minute), "repo", "policy", "api", "--auto-push=include-default-branch"); err != nil {
 			t.Fatalf("repo policy include-default-branch failed: %v\n%s", err, out)
@@ -272,8 +275,8 @@ func TestSyncBasicCases(t *testing.T) {
 			t.Fatalf("expected sync unsyncable for read-only remote, output=%s", out)
 		}
 		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-		if !containsReason(rec.UnsyncableReasons, domain.ReasonPushAccessBlocked) {
-			t.Fatalf("expected push_access_blocked reason, got %v", rec.UnsyncableReasons)
+		if !containsReason(rec.Reasons, domain.ReasonPushAccessBlocked) {
+			t.Fatalf("expected push_access_blocked reason, got %v", rec.Reasons)
 		}
 		if rec.Ahead == 0 {
 			t.Fatalf("expected ahead commits to remain when push access is read-only, got ahead=%d", rec.Ahead)
@@ -310,12 +313,12 @@ func TestSyncBasicCases(t *testing.T) {
 		mB.MustRunGit(now, repoB, "add", "public.txt")
 		mB.MustRunGit(now, repoB, "commit", "-m", "ahead public")
 
-		if _, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err == nil {
-			t.Fatal("expected sync unsyncable due push policy")
+		if out, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err != nil {
+			t.Fatalf("push-policy wip sync failed: %v\n%s", err, out)
 		}
 		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-		if !containsReason(rec.UnsyncableReasons, domain.ReasonPushPolicyBlocked) {
-			t.Fatalf("expected push_policy_blocked reason, got %v", rec.UnsyncableReasons)
+		if !containsReason(rec.Reasons, domain.ReasonPushPolicyBlocked) {
+			t.Fatalf("expected push_policy_blocked reason, got %v", rec.Reasons)
 		}
 	})
 

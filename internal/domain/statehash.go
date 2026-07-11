@@ -22,8 +22,9 @@ func ComputeStateHash(record MachineRepoRecord) string {
 		HasDirtyTracked     bool               `json:"has_dirty_tracked"`
 		HasUntracked        bool               `json:"has_untracked"`
 		OperationInProgress Operation          `json:"operation_in_progress"`
-		Syncable            bool               `json:"syncable"`
-		UnsyncableReasons   []UnsyncableReason `json:"unsyncable_reasons"`
+		State               RepoSyncState      `json:"state"`
+		Reasons             []UnsyncableReason `json:"reasons"`
+		Warnings            []UnsyncableReason `json:"warnings"`
 	}{
 		ExpectedRepoKey:     record.ExpectedRepoKey,
 		ExpectedCatalog:     record.ExpectedCatalog,
@@ -38,8 +39,9 @@ func ComputeStateHash(record MachineRepoRecord) string {
 		HasDirtyTracked:     record.HasDirtyTracked,
 		HasUntracked:        record.HasUntracked,
 		OperationInProgress: record.OperationInProgress,
-		Syncable:            record.Syncable,
-		UnsyncableReasons:   record.UnsyncableReasons,
+		State:               record.State,
+		Reasons:             record.Reasons,
+		Warnings:            record.Warnings,
 	}
 
 	buf, _ := json.Marshal(payload)

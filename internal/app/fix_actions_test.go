@@ -216,7 +216,7 @@ func TestEligibleFixActions(t *testing.T) {
 			rec: func() domain.MachineRepoRecord {
 				r := base
 				r.Ahead = 2
-				r.UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonPushPolicyBlocked}
+				r.Reasons = []domain.UnsyncableReason{domain.ReasonPushPolicyBlocked}
 				return r
 			}(),
 			meta: &domain.RepoMetadataFile{
@@ -231,8 +231,8 @@ func TestEligibleFixActions(t *testing.T) {
 			name: "catalog mismatch offers move to catalog action",
 			rec: func() domain.MachineRepoRecord {
 				r := base
-				r.Syncable = false
-				r.UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
+				r.State = domain.RepoStateBlocked
+				r.Reasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
 				r.ExpectedRepoKey = "references/api"
 				r.ExpectedCatalog = "references"
 				r.ExpectedPath = "/tmp/references/api"
@@ -245,8 +245,8 @@ func TestEligibleFixActions(t *testing.T) {
 			name: "remote format mismatch offers align remote format action",
 			rec: func() domain.MachineRepoRecord {
 				r := base
-				r.Syncable = false
-				r.UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonRemoteFormatMismatch}
+				r.State = domain.RepoStateSynced
+				r.Warnings = []domain.UnsyncableReason{domain.ReasonRemoteFormatMismatch}
 				return r
 			}(),
 			ctx:     fixEligibilityContext{},

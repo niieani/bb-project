@@ -343,24 +343,36 @@ func (r Runner) AheadBehind(path string) (ahead, behind int, diverged bool, err 
 }
 
 func (r Runner) Dirty(path string) (tracked bool, untracked bool, err error) {
-	out, err := r.RunGit(path, "status", "--porcelain")
+	tracked, untracked, _, err = r.DirtyWithPaths(path)
+	return tracked, untracked, err
+}
+
+func (r Runner) DirtyWithPaths(path string) (tracked bool, untracked bool, paths []string, err error) {
+	out, err := r.RunGit(path, "status", "--porcelain=v1", "-z")
 	if err != nil {
-		return false, false, err
+		return false, false, nil, err
 	}
 	if strings.TrimSpace(out) == "" {
-		return false, false, nil
+		return false, false, nil, nil
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for _, line := range strings.Split(out, "\x00") {
 		if line == "" {
 			continue
 		}
 		if strings.HasPrefix(line, "??") {
 			untracked = true
+		} else {
+			tracked = true
+		}
+		if len(line) < 4 {
 			continue
 		}
-		tracked = true
+		name := line[3:]
+		if name != "" {
+			paths = append(paths, name)
+		}
 	}
-	return tracked, untracked, nil
+	return tracked, untracked, paths, nil
 }
 
 func (r Runner) Operation(path string) domain.Operation {

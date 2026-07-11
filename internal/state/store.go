@@ -200,14 +200,14 @@ func LoadMachine(paths Paths, machineID string) (domain.MachineFile, error) {
 }
 
 func SaveMachine(paths Paths, m domain.MachineFile) error {
-	m.Version = 1
+	m.Version = domain.Version
 	m.UpdatedAt = m.UpdatedAt.UTC()
 	return SaveYAML(paths.MachinePath(m.MachineID), m)
 }
 
 func BootstrapMachine(machineID, hostname string, now time.Time) domain.MachineFile {
 	return domain.MachineFile{
-		Version:        1,
+		Version:        domain.Version,
 		MachineID:      machineID,
 		Hostname:       hostname,
 		DefaultCatalog: "",
@@ -274,29 +274,39 @@ func LoadAllRepoMetadata(paths Paths) ([]domain.RepoMetadataFile, error) {
 }
 
 func LoadAllMachineFiles(paths Paths) ([]domain.MachineFile, error) {
+	files, _, err := LoadAllMachineFilesWithWarnings(paths)
+	return files, err
+}
+
+func LoadAllMachineFilesWithWarnings(paths Paths) ([]domain.MachineFile, []string, error) {
 	dir := paths.MachineDir()
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]domain.MachineFile, 0, len(entries))
+	warnings := make([]string, 0)
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
 		}
 		var m domain.MachineFile
 		if err := LoadYAML(filepath.Join(dir, e.Name()), &m); err != nil {
-			return nil, fmt.Errorf("parse machine file %s: %w", e.Name(), err)
+			return nil, nil, fmt.Errorf("parse machine file %s: %w", e.Name(), err)
 		}
 		if m.MachineID == "" {
 			continue
 		}
+		if m.Version != domain.Version {
+			warnings = append(warnings, fmt.Sprintf("machine %s publishes old-format state version %d; update bb there", m.MachineID, m.Version))
+			continue
+		}
 		out = append(out, m)
 	}
-	return out, nil
+	return out, warnings, nil
 }
 
 func LoadNotifyCache(paths Paths) (domain.NotifyCacheFile, error) {

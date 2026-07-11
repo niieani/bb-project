@@ -974,7 +974,7 @@ func TestFixTUIRevalidateCommandUsesFullRefreshAndCompletionClearsBusyState(t *t
 				Path:      "/repos/api",
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
-				Syncable:  true,
+				State:     domain.RepoStateSynced,
 			},
 			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
@@ -1003,7 +1003,7 @@ func TestFixTUIRevalidateCommandUsesFullRefreshAndCompletionClearsBusyState(t *t
 	if got := m.mainContentPanelStyle().GetBorderTopForeground(); reflect.DeepEqual(got, accentColor) {
 		t.Fatalf("idle border color should not use accent, got %#v", got)
 	}
-	if !m.visible[0].Record.Syncable {
+	if m.visible[0].Record.State != domain.RepoStateSynced {
 		t.Fatal("expected revalidated repo data to replace list state")
 	}
 }
@@ -1172,9 +1172,9 @@ func TestFixTUISettingToggleKeyUpdatesAutoPush(t *testing.T) {
 				Path:      "/repos/api",
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
-				Syncable:  false,
+				State:     domain.RepoStateBlocked,
 				Ahead:     1,
-				UnsyncableReasons: []domain.UnsyncableReason{
+				Reasons: []domain.UnsyncableReason{
 					domain.ReasonPushPolicyBlocked,
 				},
 			},
@@ -1216,9 +1216,9 @@ func TestFixTUISettingToggleKeyCyclesAutoPushModes(t *testing.T) {
 				Path:      "/repos/api",
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
-				Syncable:  false,
+				State:     domain.RepoStateBlocked,
 				Ahead:     1,
-				UnsyncableReasons: []domain.UnsyncableReason{
+				Reasons: []domain.UnsyncableReason{
 					domain.ReasonPushPolicyBlocked,
 				},
 			},
@@ -1283,9 +1283,9 @@ func TestFixTUISettingToggleKeyPersistsAutoPushModeViaRepoPolicy(t *testing.T) {
 				OriginURL: "git@github.com:you/api.git",
 				Branch:    "main",
 				Upstream:  "origin/main",
-				Syncable:  false,
+				State:     domain.RepoStateBlocked,
 				Ahead:     1,
-				UnsyncableReasons: []domain.UnsyncableReason{
+				Reasons: []domain.UnsyncableReason{
 					domain.ReasonPushPolicyBlocked,
 				},
 			},
@@ -1325,9 +1325,9 @@ func TestFixTUISettingToggleKeyBlockedForReadOnlyRemote(t *testing.T) {
 				Path:      "/repos/api",
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
-				Syncable:  false,
+				State:     domain.RepoStateBlocked,
 				Ahead:     1,
-				UnsyncableReasons: []domain.UnsyncableReason{
+				Reasons: []domain.UnsyncableReason{
 					domain.ReasonPushAccessBlocked,
 				},
 			},
@@ -1574,7 +1574,7 @@ func TestFixTUIWizardSummaryViewShowsSinglePreciseHeadingAndTotals(t *testing.T)
 				Path:      "/repos/api",
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
-				Syncable:  true,
+				State:     domain.RepoStateSynced,
 			},
 			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
@@ -1631,7 +1631,7 @@ func TestFixTUIWizardSummaryGroupsMultipleActionsPerRepoIntoSingleRepoBlock(t *t
 				Path:      repoPath,
 				OriginURL: "git@github.com:you/ultrasound-extractor.git",
 				Upstream:  "origin/main",
-				Syncable:  true,
+				State:     domain.RepoStateSynced,
 			},
 			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/ultrasound-extractor.git", AutoPush: domain.AutoPushModeEnabled},
 		},
@@ -1679,8 +1679,8 @@ func TestFixTUIWizardSummaryViewReportsWhenMoreFixesAreStillNeeded(t *testing.T)
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 				Diverged:  true,
-				Syncable:  false,
-				UnsyncableReasons: []domain.UnsyncableReason{
+				State:     domain.RepoStateBlocked,
+				Reasons: []domain.UnsyncableReason{
 					domain.ReasonDiverged,
 				},
 			},
@@ -1726,8 +1726,8 @@ func TestFixTUIWizardSummaryViewFlagsManualInterventionWhenNoAutomatedFixesRemai
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 				Diverged:  true,
-				Syncable:  false,
-				UnsyncableReasons: []domain.UnsyncableReason{
+				State:     domain.RepoStateBlocked,
+				Reasons: []domain.UnsyncableReason{
 					domain.ReasonSyncConflict,
 				},
 			},
@@ -1768,13 +1768,13 @@ func TestFixTUISummaryFollowUpSelectionCanQueueAndRunFixes(t *testing.T) {
 	repos := []fixRepoState{
 		{
 			Record: domain.MachineRepoRecord{
-				Name:              "api",
-				Path:              "/repos/api",
-				OriginURL:         "git@github.com:you/api.git",
-				Upstream:          "origin/main",
-				HasDirtyTracked:   true,
-				Syncable:          false,
-				UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
+				Name:            "api",
+				Path:            "/repos/api",
+				OriginURL:       "git@github.com:you/api.git",
+				Upstream:        "origin/main",
+				HasDirtyTracked: true,
+				State:           domain.RepoStateBlocked,
+				Reasons:         []domain.UnsyncableReason{domain.ReasonDirtyTracked},
 			},
 			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
@@ -1835,13 +1835,13 @@ func TestFixTUISummaryActiveFollowUpUsesFocusedStyling(t *testing.T) {
 	repos := []fixRepoState{
 		{
 			Record: domain.MachineRepoRecord{
-				Name:              "api",
-				Path:              "/repos/api",
-				OriginURL:         "git@github.com:you/api.git",
-				Upstream:          "origin/main",
-				HasDirtyTracked:   true,
-				Syncable:          false,
-				UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
+				Name:            "api",
+				Path:            "/repos/api",
+				OriginURL:       "git@github.com:you/api.git",
+				Upstream:        "origin/main",
+				HasDirtyTracked: true,
+				State:           domain.RepoStateBlocked,
+				Reasons:         []domain.UnsyncableReason{domain.ReasonDirtyTracked},
 			},
 			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
@@ -1881,13 +1881,13 @@ func TestFixTUISummaryUsesViewportOnShortWindowsAndScrollsWithSelection(t *testi
 		repoName := fmt.Sprintf("api-%02d", i)
 		repos = append(repos, fixRepoState{
 			Record: domain.MachineRepoRecord{
-				Name:              repoName,
-				Path:              repoPath,
-				OriginURL:         "git@github.com:you/" + repoName + ".git",
-				Upstream:          "origin/main",
-				HasDirtyTracked:   true,
-				Syncable:          false,
-				UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
+				Name:            repoName,
+				Path:            repoPath,
+				OriginURL:       "git@github.com:you/" + repoName + ".git",
+				Upstream:        "origin/main",
+				HasDirtyTracked: true,
+				State:           domain.RepoStateBlocked,
+				Reasons:         []domain.UnsyncableReason{domain.ReasonDirtyTracked},
 			},
 			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/" + repoName + ".git", AutoPush: domain.AutoPushModeEnabled},
 		})
@@ -2328,7 +2328,7 @@ func TestFixTUIWizardApplyCompletionUpdatesCurrentRepoState(t *testing.T) {
 				Path:      "/repos/api",
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
-				Syncable:  false,
+				State:     domain.RepoStateBlocked,
 			},
 			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 		},
@@ -2343,14 +2343,14 @@ func TestFixTUIWizardApplyCompletionUpdatesCurrentRepoState(t *testing.T) {
 			Path:      "/repos/api",
 			OriginURL: "git@github.com:you/api.git",
 			Upstream:  "origin/main",
-			Syncable:  true,
+			State:     domain.RepoStateSynced,
 		},
 		Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeEnabled},
 	}
 
 	m.handleWizardApplyCompleted(fixWizardApplyCompletedMsg{Updated: updated})
 
-	if !m.repos[0].Record.Syncable {
+	if m.repos[0].Record.State != domain.RepoStateSynced {
 		t.Fatal("expected in-memory repo state to be updated after successful apply completion")
 	}
 	if m.viewMode != fixViewSummary {
@@ -3973,13 +3973,13 @@ func TestFixTUIRowsRenderWithoutReplacementRuneAndWithoutDoubleSpacing(t *testin
 	repos := []fixRepoState{
 		{
 			Record: domain.MachineRepoRecord{
-				Name:              "api",
-				Path:              "/repos/api",
-				OriginURL:         "git@github.com:you/api.git",
-				Upstream:          "origin/main",
-				Syncable:          false,
-				UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked, domain.ReasonMissingOrigin},
-				Ahead:             1,
+				Name:      "api",
+				Path:      "/repos/api",
+				OriginURL: "git@github.com:you/api.git",
+				Upstream:  "origin/main",
+				State:     domain.RepoStateBlocked,
+				Reasons:   []domain.UnsyncableReason{domain.ReasonDirtyTracked, domain.ReasonMissingOrigin},
+				Ahead:     1,
 			},
 			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/api.git", AutoPush: domain.AutoPushModeDisabled},
 		},
@@ -4077,7 +4077,7 @@ func TestFixTUIOrdersReposByTier(t *testing.T) {
 				Path:      "/repos/zzz-sync",
 				OriginURL: "git@github.com:you/zzz-sync.git",
 				Upstream:  "origin/main",
-				Syncable:  true,
+				State:     domain.RepoStateSynced,
 				Ahead:     1,
 			},
 			Meta: &domain.RepoMetadataFile{OriginURL: "https://github.com/you/zzz-sync.git", AutoPush: domain.AutoPushModeDisabled},
@@ -4088,9 +4088,9 @@ func TestFixTUIOrdersReposByTier(t *testing.T) {
 				Path:      "/repos/aaa-blocked",
 				OriginURL: "git@github.com:you/aaa-blocked.git",
 				Upstream:  "origin/main",
-				Syncable:  false,
+				State:     domain.RepoStateBlocked,
 				Diverged:  true,
-				UnsyncableReasons: []domain.UnsyncableReason{
+				Reasons: []domain.UnsyncableReason{
 					domain.ReasonDiverged,
 				},
 			},
@@ -4102,8 +4102,8 @@ func TestFixTUIOrdersReposByTier(t *testing.T) {
 				Path:      "/repos/nnn-clone",
 				OriginURL: "git@github.com:you/nnn-clone.git",
 				Upstream:  "origin/main",
-				Syncable:  false,
-				UnsyncableReasons: []domain.UnsyncableReason{
+				State:     domain.RepoStateBlocked,
+				Reasons: []domain.UnsyncableReason{
 					domain.ReasonCloneRequired,
 				},
 			},
@@ -4115,9 +4115,9 @@ func TestFixTUIOrdersReposByTier(t *testing.T) {
 				Path:      "/repos/mmm-auto",
 				OriginURL: "git@github.com:you/mmm-auto.git",
 				Upstream:  "origin/main",
-				Syncable:  false,
+				State:     domain.RepoStateBlocked,
 				Ahead:     1,
-				UnsyncableReasons: []domain.UnsyncableReason{
+				Reasons: []domain.UnsyncableReason{
 					domain.ReasonPushPolicyBlocked,
 				},
 			},
@@ -4666,9 +4666,9 @@ func TestFixTUIResizeShrinksListHeightWhenSelectedDetailsWrap(t *testing.T) {
 				Path:      path,
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
-				Syncable:  false,
+				State:     domain.RepoStateBlocked,
 				Ahead:     1,
-				UnsyncableReasons: []domain.UnsyncableReason{
+				Reasons: []domain.UnsyncableReason{
 					domain.ReasonPushAccessBlocked,
 				},
 			},
@@ -4718,9 +4718,9 @@ func TestFixTUIViewStaysWithinWindowHeightWhenSelectedDetailsWrap(t *testing.T) 
 				Path:      "/Volumes/Projects/Software/" + strings.Repeat("codegen-typescript-graphql-module-declarations-plugin-", 2) + "repo",
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
-				Syncable:  false,
+				State:     domain.RepoStateBlocked,
 				Ahead:     1,
-				UnsyncableReasons: []domain.UnsyncableReason{
+				Reasons: []domain.UnsyncableReason{
 					domain.ReasonPushAccessBlocked,
 				},
 			},
@@ -4928,7 +4928,7 @@ func TestFixTUISelectedDetailsUsesCompactMetaLineWithDotSeparators(t *testing.T)
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 				Ahead:     1,
-				UnsyncableReasons: []domain.UnsyncableReason{
+				Reasons: []domain.UnsyncableReason{
 					domain.ReasonPushPolicyBlocked,
 				},
 			},
@@ -4960,7 +4960,7 @@ func TestFixTUISelectedDetailsWrapAvoidsOrphanSelectedFixValueLine(t *testing.T)
 				OriginURL: "git@github.com:you/api.git",
 				Upstream:  "origin/main",
 				Ahead:     1,
-				UnsyncableReasons: []domain.UnsyncableReason{
+				Reasons: []domain.UnsyncableReason{
 					domain.ReasonDirtyTracked,
 					domain.ReasonDirtyUntracked,
 					domain.ReasonMissingUpstream,
@@ -5066,8 +5066,8 @@ func TestClassifyFixRepoMarksUnsyncableRepoAsFixableWhenReasonsAreCoverable(t *t
 			Path:      "/repos/api",
 			OriginURL: "",
 			Upstream:  "",
-			Syncable:  false,
-			UnsyncableReasons: []domain.UnsyncableReason{
+			State:     domain.RepoStateBlocked,
+			Reasons: []domain.UnsyncableReason{
 				domain.ReasonMissingOrigin,
 			},
 		},
@@ -5093,11 +5093,11 @@ func TestClassifyFixRepoMarksUnsyncableWhenReasonsAreNotCoverable(t *testing.T) 
 			Path:         "/repos/api",
 			OriginURL:    "git@github.com:you/api.git",
 			Upstream:     "origin/main",
-			Syncable:     false,
+			State:        domain.RepoStateBlocked,
 			Diverged:     true,
 			Ahead:        1,
 			HasUntracked: true,
-			UnsyncableReasons: []domain.UnsyncableReason{
+			Reasons: []domain.UnsyncableReason{
 				domain.ReasonDirtyUntracked,
 				domain.ReasonDiverged,
 				domain.ReasonPushPolicyBlocked,
@@ -5128,9 +5128,9 @@ func TestClassifyFixRepoMarksCreateProjectDirtyMissingOriginAsFixable(t *testing
 			Path:         "/repos/api",
 			OriginURL:    "",
 			Upstream:     "",
-			Syncable:     false,
+			State:        domain.RepoStateBlocked,
 			HasUntracked: true,
-			UnsyncableReasons: []domain.UnsyncableReason{
+			Reasons: []domain.UnsyncableReason{
 				domain.ReasonDirtyUntracked,
 				domain.ReasonMissingOrigin,
 				domain.ReasonMissingUpstream,
@@ -5161,9 +5161,9 @@ func TestClassifyFixRepoMarksReadOnlyPushAccessAsFixableWithForkAction(t *testin
 			Path:      "/repos/api",
 			OriginURL: "git@github.com:you/api.git",
 			Upstream:  "origin/main",
-			Syncable:  false,
+			State:     domain.RepoStateBlocked,
 			Ahead:     1,
-			UnsyncableReasons: []domain.UnsyncableReason{
+			Reasons: []domain.UnsyncableReason{
 				domain.ReasonPushAccessBlocked,
 			},
 		},
@@ -5196,11 +5196,11 @@ func TestClassifyFixRepoMarksSyncProbeFailedAsBlocked(t *testing.T) {
 			Path:      "/repos/api",
 			OriginURL: "git@github.com:you/api.git",
 			Upstream:  "origin/main",
-			Syncable:  false,
+			State:     domain.RepoStateBlocked,
 			Diverged:  true,
 			Ahead:     1,
 			Behind:    1,
-			UnsyncableReasons: []domain.UnsyncableReason{
+			Reasons: []domain.UnsyncableReason{
 				domain.ReasonDiverged,
 				domain.ReasonSyncProbeFailed,
 			},
@@ -5222,8 +5222,8 @@ func TestClassifyFixRepoMarksCloneRequiredAsNotCloned(t *testing.T) {
 			Path:      "/repos/api",
 			OriginURL: "git@github.com:you/api.git",
 			Upstream:  "origin/main",
-			Syncable:  false,
-			UnsyncableReasons: []domain.UnsyncableReason{
+			State:     domain.RepoStateBlocked,
+			Reasons: []domain.UnsyncableReason{
 				domain.ReasonCloneRequired,
 			},
 		},

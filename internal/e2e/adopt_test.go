@@ -111,8 +111,8 @@ func TestAdoptCases(t *testing.T) {
 			t.Fatal("expected path conflict unsyncable")
 		}
 		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-		if !containsReason(rec.UnsyncableReasons, domain.ReasonTargetPathNonRepo) {
-			t.Fatalf("expected target_path_nonempty_not_repo, got %v", rec.UnsyncableReasons)
+		if !containsReason(rec.Reasons, domain.ReasonTargetPathNonRepo) {
+			t.Fatalf("expected target_path_nonempty_not_repo, got %v", rec.Reasons)
 		}
 		if _, err := os.Stat(marker); err != nil {
 			t.Fatalf("expected existing marker to remain: %v", err)

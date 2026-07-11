@@ -45,8 +45,11 @@ func TestPathCases(t *testing.T) {
 			t.Fatal("did not expect auto-clone into empty target by default")
 		}
 		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-		if !containsReason(rec.UnsyncableReasons, domain.ReasonCloneRequired) {
-			t.Fatalf("expected clone_required reason, got %v", rec.UnsyncableReasons)
+		if !containsReason(rec.Reasons, domain.ReasonCloneRequired) {
+			t.Fatalf("expected clone_required reason, got %v", rec.Reasons)
+		}
+		if rec.State != domain.RepoStatePending {
+			t.Fatalf("state = %q, want pending", rec.State)
 		}
 	})
 
@@ -64,8 +67,8 @@ func TestPathCases(t *testing.T) {
 			t.Fatal("expected path conflict failure")
 		}
 		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-		if !containsReason(rec.UnsyncableReasons, domain.ReasonTargetPathNonRepo) {
-			t.Fatalf("expected target_path_nonempty_not_repo, got %v", rec.UnsyncableReasons)
+		if !containsReason(rec.Reasons, domain.ReasonTargetPathNonRepo) {
+			t.Fatalf("expected target_path_nonempty_not_repo, got %v", rec.Reasons)
 		}
 	})
 
@@ -84,7 +87,7 @@ func TestPathCases(t *testing.T) {
 		mf := loadMachineFile(t, mB)
 		found := false
 		for _, rec := range mf.Repos {
-			if containsReason(rec.UnsyncableReasons, domain.ReasonTargetPathRepoMismatch) {
+			if containsReason(rec.Reasons, domain.ReasonTargetPathRepoMismatch) {
 				found = true
 				break
 			}
@@ -134,8 +137,8 @@ func TestPathCases(t *testing.T) {
 		if _, ok := repoByPath[repo2]; !ok {
 			t.Fatalf("missing repo record for %s", repo2)
 		}
-		if !repoByPath[onePath].Syncable || !repoByPath[repo2].Syncable {
-			t.Fatalf("expected both repos to remain syncable, got one=%t two=%t", repoByPath[onePath].Syncable, repoByPath[repo2].Syncable)
+		if repoByPath[onePath].State != domain.RepoStateSynced || repoByPath[repo2].State != domain.RepoStateSynced {
+			t.Fatalf("expected both repos to remain syncable, got one=%t two=%t", repoByPath[onePath].State == domain.RepoStateSynced, repoByPath[repo2].State == domain.RepoStateSynced)
 		}
 	})
 

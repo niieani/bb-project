@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"bb-project/internal/domain"
 	"bb-project/internal/testharness"
 )
 
@@ -27,6 +28,9 @@ func TestScanCases(t *testing.T) {
 		rec := findRepoRecordByName(t, mf, "demo")
 		if rec.RepoKey == "" {
 			t.Fatal("expected discovered repo to have repo_key")
+		}
+		if rec.State != domain.RepoStateSynced {
+			t.Fatalf("state = %q, want synced; reasons=%v", rec.State, rec.Reasons)
 		}
 	})
 
@@ -107,8 +111,8 @@ func TestScanCases(t *testing.T) {
 		if rec.OriginURL == "" {
 			t.Fatal("expected non-origin remote to be treated as repository origin")
 		}
-		if !rec.Syncable {
-			t.Fatalf("expected repo with upstream remote name to remain syncable, reasons=%v", rec.UnsyncableReasons)
+		if rec.State != domain.RepoStateSynced {
+			t.Fatalf("expected repo with upstream remote name to remain syncable, reasons=%v", rec.Reasons)
 		}
 	})
 

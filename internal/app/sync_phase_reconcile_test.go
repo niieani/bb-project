@@ -36,7 +36,7 @@ func TestEnsureFromWinnersMarksCatalogMismatchForPreviousRepoKey(t *testing.T) {
 			Catalog:   "software",
 			Path:      filepath.Join(softwareRoot, "api"),
 			OriginURL: "https://github.com/you/api.git",
-			Syncable:  true,
+			State:     domain.RepoStateSynced,
 		},
 	}
 
@@ -56,7 +56,7 @@ func TestEnsureFromWinnersMarksCatalogMismatchForPreviousRepoKey(t *testing.T) {
 				Path:      "/remote/references/api",
 				OriginURL: "https://github.com/you/api.git",
 				Branch:    "main",
-				Syncable:  true,
+				State:     domain.RepoStateSynced,
 			}},
 		},
 	}
@@ -80,11 +80,11 @@ func TestEnsureFromWinnersMarksCatalogMismatchForPreviousRepoKey(t *testing.T) {
 	}
 
 	rec := machine.Repos[0]
-	if rec.Syncable {
+	if rec.State == domain.RepoStateSynced {
 		t.Fatal("expected mismatch repo to be unsyncable")
 	}
-	if !slices.Contains(rec.UnsyncableReasons, domain.ReasonCatalogMismatch) {
-		t.Fatalf("unsyncable reasons = %v, want catalog_mismatch", rec.UnsyncableReasons)
+	if !slices.Contains(rec.Reasons, domain.ReasonCatalogMismatch) {
+		t.Fatalf("unsyncable reasons = %v, want catalog_mismatch", rec.Reasons)
 	}
 	if rec.ExpectedRepoKey != "references/api" {
 		t.Fatalf("expected_repo_key = %q, want references/api", rec.ExpectedRepoKey)
@@ -128,7 +128,7 @@ func TestEnsureFromWinnersSkipsCloneRequiredForMovedRepoWhenNeverCloned(t *testi
 			Path:      "/remote/references/api",
 			OriginURL: "https://github.com/you/api.git",
 			Branch:    "main",
-			Syncable:  true,
+			State:     domain.RepoStateSynced,
 		}},
 	}}
 
@@ -171,7 +171,7 @@ func TestEnsureFromWinnersMarksCatalogNotMappedWhenMoveTargetCatalogMissing(t *t
 		Catalog:   "software",
 		Path:      filepath.Join(softwareRoot, "api"),
 		OriginURL: "https://github.com/you/api.git",
-		Syncable:  true,
+		State:     domain.RepoStateSynced,
 	}}
 
 	meta := domain.RepoMetadataFile{
@@ -189,7 +189,7 @@ func TestEnsureFromWinnersMarksCatalogNotMappedWhenMoveTargetCatalogMissing(t *t
 			Path:      "/remote/references/api",
 			OriginURL: "https://github.com/you/api.git",
 			Branch:    "main",
-			Syncable:  true,
+			State:     domain.RepoStateSynced,
 		}},
 	}}
 
@@ -207,11 +207,11 @@ func TestEnsureFromWinnersMarksCatalogNotMappedWhenMoveTargetCatalogMissing(t *t
 	}
 
 	rec := machine.Repos[0]
-	if !slices.Contains(rec.UnsyncableReasons, domain.ReasonCatalogMismatch) {
-		t.Fatalf("unsyncable reasons = %v, want catalog_mismatch", rec.UnsyncableReasons)
+	if !slices.Contains(rec.Reasons, domain.ReasonCatalogMismatch) {
+		t.Fatalf("unsyncable reasons = %v, want catalog_mismatch", rec.Reasons)
 	}
-	if !slices.Contains(rec.UnsyncableReasons, domain.ReasonCatalogNotMapped) {
-		t.Fatalf("unsyncable reasons = %v, want catalog_not_mapped", rec.UnsyncableReasons)
+	if !slices.Contains(rec.Reasons, domain.ReasonCatalogNotMapped) {
+		t.Fatalf("unsyncable reasons = %v, want catalog_not_mapped", rec.Reasons)
 	}
 	if rec.ExpectedRepoKey != "references/api" {
 		t.Fatalf("expected_repo_key = %q, want references/api", rec.ExpectedRepoKey)

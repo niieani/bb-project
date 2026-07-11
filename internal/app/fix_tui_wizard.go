@@ -2235,8 +2235,8 @@ func (m *fixTUIModel) renderSummaryResultValue(item fixSummaryResult, candidates
 	if outcome := m.summaryOutcomeLine(item, repo, hasRepo); outcome != "" {
 		lines = append(lines, outcome)
 	}
-	if hasRepo && !repo.Record.Syncable {
-		blockers := append([]domain.UnsyncableReason(nil), repo.Record.UnsyncableReasons...)
+	if hasRepo && repo.Record.State != domain.RepoStateSynced {
+		blockers := append([]domain.UnsyncableReason(nil), repo.Record.Reasons...)
 		if len(blockers) > 0 {
 			lines = append(lines, "", "Remaining blockers")
 			for _, reason := range blockers {
@@ -2256,7 +2256,7 @@ func (m *fixTUIModel) renderSummaryResultValue(item fixSummaryResult, candidates
 		for _, followUp := range followUps {
 			actionKeys = append(actionKeys, followUp.Action)
 		}
-		uncovered := uncoveredUnsyncableReasons(repo.Record.UnsyncableReasons, actionKeys)
+		uncovered := uncoveredReasons(repo.Record.Reasons, actionKeys)
 		if len(uncovered) > 0 || len(followUps) == 0 {
 			lines = append(lines, "", "Manual intervention required - bb has no additional safe automated fixes for this repo.")
 			for _, guidance := range summaryManualInterventionGuidance(uncovered) {
@@ -2313,8 +2313,8 @@ func (m *fixTUIModel) renderSummaryRepoGroupValueAndOffsets(group fixSummaryRepo
 	if outcome := m.summaryOutcomeLine(fixSummaryResult{Status: summaryRepoGroupOutcomeStatus(group.Items)}, repo, hasRepo); outcome != "" {
 		lines = append(lines, outcome)
 	}
-	if hasRepo && !repo.Record.Syncable {
-		blockers := append([]domain.UnsyncableReason(nil), repo.Record.UnsyncableReasons...)
+	if hasRepo && repo.Record.State != domain.RepoStateSynced {
+		blockers := append([]domain.UnsyncableReason(nil), repo.Record.Reasons...)
 		if len(blockers) > 0 {
 			lines = append(lines, "", "Remaining blockers")
 			for _, reason := range blockers {
@@ -2335,7 +2335,7 @@ func (m *fixTUIModel) renderSummaryRepoGroupValueAndOffsets(group fixSummaryRepo
 		for _, followUp := range followUps {
 			actionKeys = append(actionKeys, followUp.Action)
 		}
-		uncovered := uncoveredUnsyncableReasons(repo.Record.UnsyncableReasons, actionKeys)
+		uncovered := uncoveredReasons(repo.Record.Reasons, actionKeys)
 		if len(uncovered) > 0 || len(followUps) == 0 {
 			lines = append(lines, "", "Manual intervention required - bb has no additional safe automated fixes for this repo.")
 			for _, guidance := range summaryManualInterventionGuidance(uncovered) {
@@ -2398,10 +2398,10 @@ func (m *fixTUIModel) summaryOutcomeLine(item fixSummaryResult, repo fixRepoStat
 		if !hasRepo {
 			return "Result: applied; revalidated state unavailable."
 		}
-		if repo.Record.Syncable {
+		if repo.Record.State == domain.RepoStateSynced {
 			return "Revalidation: syncable now."
 		}
-		blockers := len(repo.Record.UnsyncableReasons)
+		blockers := len(repo.Record.Reasons)
 		if blockers <= 0 {
 			return "Revalidation: unsyncable."
 		}
@@ -2416,7 +2416,7 @@ func (m *fixTUIModel) summaryOutcomeLine(item fixSummaryResult, repo fixRepoStat
 		if !hasRepo {
 			return "Result: action failed before completion."
 		}
-		if repo.Record.Syncable {
+		if repo.Record.State == domain.RepoStateSynced {
 			return "Result: action failed, but repository is syncable."
 		}
 		return "Result: action failed; repository still needs fixes."
@@ -2465,13 +2465,13 @@ func (m *fixTUIModel) summaryRevalidationCounts() (syncableNow int, stillUnsynca
 		if !ok {
 			continue
 		}
-		if repo.Record.Syncable {
+		if repo.Record.State == domain.RepoStateSynced {
 			syncableNow++
 			continue
 		}
 		stillUnsyncable++
 		followUps := m.summaryEligibleFollowUpActions(repo)
-		uncovered := uncoveredUnsyncableReasons(repo.Record.UnsyncableReasons, followUps)
+		uncovered := uncoveredReasons(repo.Record.Reasons, followUps)
 		if len(followUps) == 0 || len(uncovered) > 0 {
 			manualRequired++
 		}
@@ -2502,7 +2502,7 @@ func (m *fixTUIModel) summaryFollowUpCandidates() []fixSummaryFollowUpCandidate 
 	out := make([]fixSummaryFollowUpCandidate, 0, 8)
 	for _, item := range m.summaryResults {
 		repo, ok := m.summaryRepoState(item.RepoPath)
-		if !ok || repo.Record.Syncable {
+		if !ok || repo.Record.State == domain.RepoStateSynced {
 			continue
 		}
 		for _, action := range m.summaryEligibleFollowUpActions(repo) {

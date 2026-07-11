@@ -163,8 +163,8 @@ func TestApplyFixActionMoveToCatalog(t *testing.T) {
 	}
 
 	rec := fixApplyTestRepoRecord("software/api", "api", "software", oldPath, "https://github.com/you/api.git")
-	rec.Syncable = false
-	rec.UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
+	rec.State = domain.RepoStateBlocked
+	rec.Reasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
 	rec.ExpectedRepoKey = "references/api"
 	rec.ExpectedCatalog = "references"
 	rec.ExpectedPath = newPath
@@ -225,8 +225,8 @@ func TestApplyFixActionMoveToCatalogRequiresExpectedTarget(t *testing.T) {
 	}
 
 	rec := fixApplyTestRepoRecord("software/api", "api", "software", repoPath, "https://github.com/you/api.git")
-	rec.Syncable = false
-	rec.UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
+	rec.State = domain.RepoStateBlocked
+	rec.Reasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
 	rec.StateHash = domain.ComputeStateHash(rec)
 	writeFixApplyTestMachine(t, paths, now, catalogRoot, rec)
 	writeFixApplyTestMetadata(t, paths, rec.RepoKey, rec.Name, rec.OriginURL)
@@ -265,7 +265,7 @@ func fixApplyTestRepoRecord(repoKey string, name string, catalog string, path st
 		Path:      path,
 		OriginURL: origin,
 		Branch:    "main",
-		Syncable:  true,
+		State:     domain.RepoStateSynced,
 	}
 	rec.StateHash = domain.ComputeStateHash(rec)
 	return rec

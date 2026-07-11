@@ -19,9 +19,9 @@ func TestAnyUnsyncableInSelectedCatalogsIgnoresNonBlockingReasons(t *testing.T) 
 	}
 	repos := []domain.MachineRepoRecord{
 		{
-			Catalog:           "software",
-			Syncable:          false,
-			UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonCloneRequired, domain.ReasonCatalogMismatch},
+			Catalog: "software",
+			State:   domain.RepoStatePending,
+			Reasons: []domain.UnsyncableReason{domain.ReasonCloneRequired, domain.ReasonCatalogMismatch},
 		},
 	}
 
@@ -30,7 +30,29 @@ func TestAnyUnsyncableInSelectedCatalogsIgnoresNonBlockingReasons(t *testing.T) 
 	}
 }
 
-func TestAnyUnsyncableInSelectedCatalogsBlocksOnTraditionalReasons(t *testing.T) {
+func TestLoadSyncReconcileInputsSkipsV1Publisher(t *testing.T) {
+	t.Parallel()
+	paths := state.NewPaths(t.TempDir())
+	now := time.Now()
+	old := state.BootstrapMachine("old-mac", "old-mac", now)
+	old.Version = 1
+	if err := state.SaveYAML(paths.MachinePath(old.MachineID), old); err != nil {
+		t.Fatal(err)
+	}
+	current := state.BootstrapMachine("new-mac", "new-mac", now)
+	if err := state.SaveMachine(paths, current); err != nil {
+		t.Fatal(err)
+	}
+	machines, _, err := loadSyncReconcileInputs(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(machines) != 1 || machines[0].MachineID != "new-mac" {
+		t.Fatalf("machines = %+v", machines)
+	}
+}
+
+func TestAnyUnsyncableInSelectedCatalogsIgnoresWipReasons(t *testing.T) {
 	t.Parallel()
 
 	selected := map[string]domain.Catalog{
@@ -38,14 +60,14 @@ func TestAnyUnsyncableInSelectedCatalogsBlocksOnTraditionalReasons(t *testing.T)
 	}
 	repos := []domain.MachineRepoRecord{
 		{
-			Catalog:           "software",
-			Syncable:          false,
-			UnsyncableReasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
+			Catalog: "software",
+			State:   domain.RepoStateWip,
+			Reasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked},
 		},
 	}
 
-	if !anyUnsyncableInSelectedCatalogs(repos, selected) {
-		t.Fatal("expected dirty_tracked to remain blocking")
+	if anyUnsyncableInSelectedCatalogs(repos, selected) {
+		t.Fatal("expected dirty_tracked wip not to block")
 	}
 }
 

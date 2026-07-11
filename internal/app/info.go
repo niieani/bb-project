@@ -43,7 +43,7 @@ func printProjectInfo(stdout anyWriter, paths state.Paths, rec domain.MachineRep
 	fmt.Fprintf(stdout, "Upstream: %s\n", valueOrDash(rec.Upstream))
 	fmt.Fprintf(stdout, "Ahead/Behind: %d/%d\n", rec.Ahead, rec.Behind)
 	fmt.Fprintf(stdout, "Dirty: tracked=%s untracked=%s\n", onOffLabel(rec.HasDirtyTracked), onOffLabel(rec.HasUntracked))
-	fmt.Fprintf(stdout, "Syncable: %s\n", yesNo(rec.Syncable))
+	fmt.Fprintf(stdout, "State: %s\n", yesNo(rec.State == domain.RepoStateSynced))
 
 	if strings.TrimSpace(rec.RepoKey) == "" {
 		return

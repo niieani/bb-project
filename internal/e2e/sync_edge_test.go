@@ -71,8 +71,8 @@ func TestSyncEdgeCases(t *testing.T) {
 		_, _ = mB.RunBB(now.Add(3*time.Minute), "sync")
 		h.ExternalSync("a-machine", "b-machine")
 
-		if _, err := mB.RunBB(now.Add(4*time.Minute), "sync"); err == nil {
-			t.Fatal("expected unsyncable state with no winner")
+		if out, err := mB.RunBB(now.Add(4*time.Minute), "sync"); err != nil {
+			t.Fatalf("wip sync failed: %v\n%s", err, out)
 		}
 		if got := gitCurrentBranch(t, mB, repoB, now); got != "local-b" {
 			t.Fatalf("expected branch unchanged with no winner, got %q", got)
@@ -96,8 +96,11 @@ func TestSyncEdgeCases(t *testing.T) {
 			t.Fatal("expected sync to fail due divergence")
 		}
 		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-		if !containsReason(rec.UnsyncableReasons, domain.ReasonDiverged) {
-			t.Fatalf("expected diverged reason, got %v", rec.UnsyncableReasons)
+		if !containsReason(rec.Reasons, domain.ReasonDiverged) {
+			t.Fatalf("expected diverged reason, got %v", rec.Reasons)
+		}
+		if rec.State != domain.RepoStateBlocked {
+			t.Fatalf("state = %q, want blocked", rec.State)
 		}
 	})
 
@@ -129,12 +132,12 @@ func TestSyncEdgeCases(t *testing.T) {
 						t.Fatalf("write marker: %v", err)
 					}
 				}
-				if _, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err == nil {
-					t.Fatal("expected unsyncable due operation in progress")
+				if out, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err != nil {
+					t.Fatalf("operation wip sync failed: %v\n%s", err, out)
 				}
 				rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-				if !containsReason(rec.UnsyncableReasons, domain.ReasonOperationInProgress) {
-					t.Fatalf("expected operation_in_progress, got %v", rec.UnsyncableReasons)
+				if !containsReason(rec.Reasons, domain.ReasonOperationInProgress) {
+					t.Fatalf("expected operation_in_progress, got %v", rec.Reasons)
 				}
 			})
 		}
@@ -144,12 +147,12 @@ func TestSyncEdgeCases(t *testing.T) {
 		t.Parallel()
 		_, _, mB, _, repoB, now := bootstrapRepoAcrossTwoMachines(t)
 		mB.MustRunGit(now, repoB, "checkout", "-b", "missing-upstream")
-		if _, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err == nil {
-			t.Fatal("expected unsyncable due missing upstream")
+		if out, err := mB.RunBB(now.Add(2*time.Minute), "sync"); err != nil {
+			t.Fatalf("missing-upstream wip sync failed: %v\n%s", err, out)
 		}
 		rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-		if !containsReason(rec.UnsyncableReasons, domain.ReasonMissingUpstream) {
-			t.Fatalf("expected missing_upstream, got %v", rec.UnsyncableReasons)
+		if !containsReason(rec.Reasons, domain.ReasonMissingUpstream) {
+			t.Fatalf("expected missing_upstream, got %v", rec.Reasons)
 		}
 	})
 
@@ -163,8 +166,8 @@ func TestSyncEdgeCases(t *testing.T) {
 				t.Fatal("expected sync failure")
 			}
 			rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-			if !containsReason(rec.UnsyncableReasons, domain.ReasonTargetPathRepoMismatch) {
-				t.Fatalf("expected target_path_repo_mismatch, got %v", rec.UnsyncableReasons)
+			if !containsReason(rec.Reasons, domain.ReasonTargetPathRepoMismatch) {
+				t.Fatalf("expected target_path_repo_mismatch, got %v", rec.Reasons)
 			}
 		})
 
@@ -188,8 +191,8 @@ func TestSyncEdgeCases(t *testing.T) {
 				t.Fatal("expected sync failure")
 			}
 			rec := findRepoRecordByName(t, loadMachineFile(t, mB), "api")
-			if !containsReason(rec.UnsyncableReasons, domain.ReasonPushFailed) {
-				t.Fatalf("expected push_failed, got %v", rec.UnsyncableReasons)
+			if !containsReason(rec.Reasons, domain.ReasonPushFailed) {
+				t.Fatalf("expected push_failed, got %v", rec.Reasons)
 			}
 		})
 	})

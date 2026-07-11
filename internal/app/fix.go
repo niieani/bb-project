@@ -137,7 +137,7 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 	eligible := eligibleFixActions(target.Record, target.Meta, eligibility)
 	if strings.TrimSpace(opts.Action) == "" {
 		a.renderFixStatus(target.Record, eligible)
-		if target.Record.Syncable {
+		if target.Record.State == domain.RepoStateSynced {
 			return 0, nil
 		}
 		return 1, nil
@@ -195,7 +195,7 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 		SyncStrategy:    strategy,
 		SyncFeasibility: updated.SyncFeasibility,
 	}))
-	if updated.Record.Syncable {
+	if updated.Record.State == domain.RepoStateSynced {
 		return 0, nil
 	}
 	return 1, nil
@@ -239,12 +239,12 @@ func (a *App) renderFixStatus(rec domain.MachineRepoRecord, actions []string) {
 	fmt.Fprintf(a.Stdout, "repo: %s\n", rec.Name)
 	fmt.Fprintf(a.Stdout, "path: %s\n", rec.Path)
 	fmt.Fprintf(a.Stdout, "catalog: %s\n", rec.Catalog)
-	fmt.Fprintf(a.Stdout, "syncable: %t\n", rec.Syncable)
-	if len(rec.UnsyncableReasons) == 0 {
+	fmt.Fprintf(a.Stdout, "syncable: %t\n", rec.State == domain.RepoStateSynced)
+	if len(rec.Reasons) == 0 {
 		fmt.Fprintln(a.Stdout, "reasons: none")
 	} else {
-		parts := make([]string, 0, len(rec.UnsyncableReasons))
-		for _, r := range rec.UnsyncableReasons {
+		parts := make([]string, 0, len(rec.Reasons))
+		for _, r := range rec.Reasons {
 			parts = append(parts, string(r))
 		}
 		sort.Strings(parts)
@@ -292,16 +292,16 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	if rec.OriginURL == "" {
 		actions = append(actions, FixActionCreateProject)
 	}
-	if containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonCloneRequired) {
+	if containsUnsyncableReason(rec.Reasons, domain.ReasonCloneRequired) {
 		actions = append(actions, FixActionClone)
 	}
-	if containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonCatalogMismatch) &&
+	if containsUnsyncableReason(rec.Reasons, domain.ReasonCatalogMismatch) &&
 		strings.TrimSpace(rec.ExpectedRepoKey) != "" &&
 		strings.TrimSpace(rec.ExpectedCatalog) != "" &&
 		strings.TrimSpace(rec.ExpectedPath) != "" {
 		actions = append(actions, FixActionMoveToCatalog)
 	}
-	if containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonRemoteFormatMismatch) &&
+	if containsUnsyncableReason(rec.Warnings, domain.ReasonRemoteFormatMismatch) &&
 		strings.TrimSpace(rec.OriginURL) != "" {
 		actions = append(actions, FixActionAlignRemoteFormat)
 	}
@@ -357,7 +357,7 @@ func eligibleFixActions(rec domain.MachineRepoRecord, meta *domain.RepoMetadataF
 	}
 	if meta != nil && strings.TrimSpace(rec.RepoKey) != "" && pushAccess == domain.PushAccessReadWrite {
 		mode := domain.NormalizeAutoPushMode(meta.AutoPush)
-		if mode == domain.AutoPushModeDisabled || (mode == domain.AutoPushModeEnabled && containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonPushPolicyBlocked)) {
+		if mode == domain.AutoPushModeDisabled || (mode == domain.AutoPushModeEnabled && containsUnsyncableReason(rec.Reasons, domain.ReasonPushPolicyBlocked)) {
 			actions = append(actions, FixActionEnableAutoPush)
 		}
 	}
@@ -372,7 +372,7 @@ func ineligibleFixReason(action string, rec domain.MachineRepoRecord, ctx fixEli
 		if strings.TrimSpace(rec.OriginURL) == "" {
 			return "publish-new-branch is blocked: origin remote is required"
 		}
-		if containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonPushAccessBlocked) {
+		if containsUnsyncableReason(rec.Reasons, domain.ReasonPushAccessBlocked) {
 			return "publish-new-branch is blocked: push access is read-only; run fork-and-retarget first"
 		}
 		if strings.TrimSpace(rec.Branch) == "" {
@@ -470,7 +470,7 @@ func ineligibleFixReason(action string, rec domain.MachineRepoRecord, ctx fixEli
 		return ""
 	}
 	if action == FixActionMoveToCatalog {
-		if !containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonCatalogMismatch) {
+		if !containsUnsyncableReason(rec.Reasons, domain.ReasonCatalogMismatch) {
 			return "move-to-catalog is blocked: catalog mismatch was not detected"
 		}
 		if strings.TrimSpace(rec.ExpectedRepoKey) == "" || strings.TrimSpace(rec.ExpectedCatalog) == "" || strings.TrimSpace(rec.ExpectedPath) == "" {
@@ -479,7 +479,7 @@ func ineligibleFixReason(action string, rec domain.MachineRepoRecord, ctx fixEli
 		return ""
 	}
 	if action == FixActionAlignRemoteFormat {
-		if !containsUnsyncableReason(rec.UnsyncableReasons, domain.ReasonRemoteFormatMismatch) {
+		if !containsUnsyncableReason(rec.Warnings, domain.ReasonRemoteFormatMismatch) {
 			return "align-remote-format is blocked: remote_format_mismatch was not detected"
 		}
 		if strings.TrimSpace(rec.OriginURL) == "" {
@@ -598,8 +598,8 @@ func (a *App) loadFixRepos(includeCatalogs []string, refreshMode scanRefreshMode
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Record.Syncable != out[j].Record.Syncable {
-			return !out[i].Record.Syncable
+		if (out[i].Record.State == domain.RepoStateSynced) != (out[j].Record.State == domain.RepoStateSynced) {
+			return out[i].Record.State != domain.RepoStateSynced
 		}
 		if out[i].Record.Name != out[j].Record.Name {
 			return out[i].Record.Name < out[j].Record.Name
@@ -833,15 +833,15 @@ func (a *App) enrichFixSyncFeasibility(rec domain.MachineRepoRecord) (domain.Mac
 	}
 
 	if feasibility.defaultStrategyConflictWithoutCleanFallback() {
-		rec.UnsyncableReasons = appendUniqueUnsyncableReason(rec.UnsyncableReasons, domain.ReasonSyncConflict)
-		rec.Syncable = false
+		rec.Reasons = appendUniqueUnsyncableReason(rec.Reasons, domain.ReasonSyncConflict)
+		rec.State = domain.RepoStateBlocked
 		rec.StateHash = domain.ComputeStateHash(rec)
 	}
 	if !feasibility.cleanFor(FixSyncStrategyRebase) &&
 		!feasibility.cleanFor(FixSyncStrategyMerge) &&
 		feasibility.anyProbeFailed() {
-		rec.UnsyncableReasons = appendUniqueUnsyncableReason(rec.UnsyncableReasons, domain.ReasonSyncProbeFailed)
-		rec.Syncable = false
+		rec.Reasons = appendUniqueUnsyncableReason(rec.Reasons, domain.ReasonSyncProbeFailed)
+		rec.State = domain.RepoStateBlocked
 		rec.StateHash = domain.ComputeStateHash(rec)
 	}
 	return rec, feasibility
@@ -1191,8 +1191,8 @@ func (a *App) augmentFixMachineWithKnownRepos(
 		staleMatches := findLocalMatchesByRepoKeys(machine.Repos, meta.PreviousRepoKeys, selectedCatalogMap)
 		if len(staleMatches) > 0 {
 			for _, idx := range staleMatches {
-				machine.Repos[idx].Syncable = false
-				machine.Repos[idx].UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
+				machine.Repos[idx].State = domain.RepoStateBlocked
+				machine.Repos[idx].Reasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
 				machine.Repos[idx].ExpectedRepoKey = meta.RepoKey
 				machine.Repos[idx].ExpectedCatalog = keyCatalog
 				machine.Repos[idx].ExpectedPath = targetPath
@@ -1274,10 +1274,10 @@ func (a *App) refreshFixRepoSnapshotLocked(cfg domain.ConfigFile, machine *domai
 	if strings.TrimSpace(previous.Path) == "" {
 		return nil
 	}
-	if containsUnsyncableReason(previous.UnsyncableReasons, domain.ReasonCatalogMismatch) {
+	if containsUnsyncableReason(previous.Reasons, domain.ReasonCatalogMismatch) {
 		return nil
 	}
-	if containsUnsyncableReason(previous.UnsyncableReasons, domain.ReasonCloneRequired) && !a.Git.IsGitRepo(previous.Path) {
+	if containsUnsyncableReason(previous.Reasons, domain.ReasonCloneRequired) && !a.Git.IsGitRepo(previous.Path) {
 		return nil
 	}
 

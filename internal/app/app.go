@@ -983,7 +983,7 @@ func (a *App) scanAndPublish(cfg domain.ConfigFile, machine *domain.MachineFile,
 		}
 		old := prev[repoRecordIdentityKey(result.Record)]
 		result.Record = domain.UpdateObservedAt(old, result.Record, observationTime)
-		if !result.Record.Syncable {
+		if result.Record.State != domain.RepoStateSynced {
 			unsyncable = true
 		}
 		records[result.Index] = result.Record
@@ -1142,7 +1142,7 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	upstream, _ := a.Git.Upstream(repo.Path)
 	remoteHead, _ := a.Git.RemoteHeadSHA(repo.Path)
 	ahead, behind, diverged, _ := a.Git.AheadBehind(repo.Path)
-	dirtyTracked, dirtyUntracked, _ := a.Git.Dirty(repo.Path)
+	dirtyTracked, dirtyUntracked, dirtyPaths, _ := a.Git.DirtyWithPaths(repo.Path)
 	op := a.Git.Operation(repo.Path)
 
 	autoPush := domain.AutoPushModeDisabled
@@ -1164,7 +1164,7 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 	defaultBranch, _ := a.Git.DefaultBranch(repo.Path, preferredRemote)
 	autoPushAllowed := effectiveAutoPushForObservedBranch(autoPush, branch, defaultBranch)
 
-	syncable, reasons := domain.EvaluateSyncability(domain.ObservedRepoState{
+	result := domain.EvaluateRepoState(domain.ObservedRepoState{
 		OriginURL:            origin,
 		PushAccess:           pushAccess,
 		Branch:               branch,
@@ -1196,26 +1196,40 @@ func (a *App) observeRepo(cfg domain.ConfigFile, repo discoveredRepo, allowPush 
 		HasDirtyTracked:     dirtyTracked,
 		HasUntracked:        dirtyUntracked,
 		OperationInProgress: op,
-		Syncable:            syncable,
-		UnsyncableReasons:   reasons,
+		LastActivityAt:      repoLastActivity(repo.Path, dirtyPaths),
+		State:               result.State,
+		Reasons:             result.Reasons,
 	}
 	if expectedOriginURL, isGitHubOrigin, expectedErr := preferredGitHubRemoteURLForOrigin(cfg.GitHub, origin); expectedErr != nil {
 		return domain.MachineRepoRecord{}, expectedErr
 	} else if isGitHubOrigin && strings.TrimSpace(expectedOriginURL) != "" && strings.TrimSpace(origin) != strings.TrimSpace(expectedOriginURL) {
-		rec.Syncable = false
-		rec.UnsyncableReasons = appendUniqueUnsyncableReason(rec.UnsyncableReasons, domain.ReasonRemoteFormatMismatch)
+		rec.Warnings = appendUniqueUnsyncableReason(rec.Warnings, domain.ReasonRemoteFormatMismatch)
 	}
 	if movedToRepoKey != "" {
-		rec.Syncable = false
-		rec.UnsyncableReasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
+		rec.Reasons = []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
+		rec.State = domain.DeriveRepoState(rec.Reasons)
 		rec.ExpectedRepoKey = movedToRepoKey
 		if expectedCatalog, _, _, parseErr := domain.ParseRepoKey(movedToRepoKey); parseErr == nil {
 			rec.ExpectedCatalog = expectedCatalog
 		}
 	}
 	rec.StateHash = domain.ComputeStateHash(rec)
-	a.logf("scan: repo=%s branch=%s syncable=%t ahead=%d behind=%d", repo.Path, rec.Branch, rec.Syncable, rec.Ahead, rec.Behind)
+	a.logf("scan: repo=%s branch=%s syncable=%t ahead=%d behind=%d", repo.Path, rec.Branch, rec.State == domain.RepoStateSynced, rec.Ahead, rec.Behind)
 	return rec, nil
+}
+
+func repoLastActivity(repoPath string, dirtyPaths []string) time.Time {
+	probes := []string{filepath.Join(repoPath, ".git", "HEAD"), filepath.Join(repoPath, ".git", "index")}
+	for _, path := range dirtyPaths {
+		probes = append(probes, filepath.Join(repoPath, filepath.FromSlash(path)))
+	}
+	var latest time.Time
+	for _, path := range probes {
+		if info, err := os.Stat(path); err == nil && info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
+	}
+	return latest
 }
 
 func (a *App) resolveMovedRepoKey(repoKey string) (string, bool, error) {
@@ -1377,32 +1391,40 @@ func (a *App) RunStatus(jsonOut bool, include []string) (int, error) {
 	}
 
 	if jsonOut {
-		fmt.Fprintln(a.Stdout, "{")
-		fmt.Fprintf(a.Stdout, "  \"machine_id\": %q,\n", machine.MachineID)
-		fmt.Fprintln(a.Stdout, "  \"repos\": [")
-		first := true
+		filtered := make([]domain.MachineRepoRecord, 0, len(machine.Repos))
 		for _, r := range machine.Repos {
 			if _, ok := allowed[r.Catalog]; !ok {
 				continue
 			}
-			if !first {
-				fmt.Fprintln(a.Stdout, ",")
-			}
-			first = false
-			fmt.Fprintf(a.Stdout, "    {\"repo_key\":%q,\"catalog\":%q,\"path\":%q,\"branch\":%q,\"syncable\":%t}", r.RepoKey, r.Catalog, r.Path, r.Branch, r.Syncable)
+			filtered = append(filtered, r)
 		}
-		fmt.Fprintln(a.Stdout)
-		fmt.Fprintln(a.Stdout, "  ]")
-		fmt.Fprintln(a.Stdout, "}")
+		payload := struct {
+			MachineID string                     `json:"machine_id"`
+			Repos     []domain.MachineRepoRecord `json:"repos"`
+		}{machine.MachineID, filtered}
+		enc := json.NewEncoder(a.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(payload); err != nil {
+			return 2, err
+		}
 		return 0, nil
 	}
 
+	counts := map[domain.RepoSyncState]int{}
+	warnings := 0
 	for _, r := range machine.Repos {
 		if _, ok := allowed[r.Catalog]; !ok {
 			continue
 		}
-		fmt.Fprintf(a.Stdout, "%s %s %s syncable=%t\n", r.Name, r.Branch, r.Path, r.Syncable)
+		fmt.Fprintf(a.Stdout, "%s %s %s state=%s", r.Name, r.Branch, r.Path, r.State)
+		if len(r.Reasons) > 0 {
+			fmt.Fprintf(a.Stdout, " reasons=%v", r.Reasons)
+		}
+		fmt.Fprintln(a.Stdout)
+		counts[r.State]++
+		warnings += len(r.Warnings)
 	}
+	fmt.Fprintf(a.Stdout, "%d repos: %d synced · %d pending · %d wip · %d blocked · %d warnings\n", counts[domain.RepoStateSynced]+counts[domain.RepoStatePending]+counts[domain.RepoStateWip]+counts[domain.RepoStateBlocked], counts[domain.RepoStateSynced], counts[domain.RepoStatePending], counts[domain.RepoStateWip], counts[domain.RepoStateBlocked], warnings)
 	a.logf("status: reported %d repo(s)", len(machine.Repos))
 	return 0, nil
 }
@@ -1434,14 +1456,20 @@ func (a *App) RunDoctor(include []string) (int, error) {
 	for _, c := range selected {
 		allowed[c.Name] = struct{}{}
 	}
-	unsyncable := false
+	blocked := false
 	for _, r := range machine.Repos {
 		if _, ok := allowed[r.Catalog]; !ok {
 			continue
 		}
-		if !r.Syncable {
-			unsyncable = true
-			fmt.Fprintf(a.Stdout, "%s: %v\n", r.Name, r.UnsyncableReasons)
+		if r.State != domain.RepoStateSynced || len(r.Warnings) > 0 {
+			fmt.Fprintf(a.Stdout, "%s: %s %v", r.Name, r.State, r.Reasons)
+			if len(r.Warnings) > 0 {
+				fmt.Fprintf(a.Stdout, " warnings=%v", r.Warnings)
+			}
+			fmt.Fprintln(a.Stdout)
+		}
+		if r.State == domain.RepoStateBlocked {
+			blocked = true
 		}
 	}
 
@@ -1453,11 +1481,11 @@ func (a *App) RunDoctor(include []string) (int, error) {
 	if warningCount > 0 {
 		a.logf("doctor: found %d warning(s)", warningCount)
 	}
-	if unsyncable {
-		a.logf("doctor: found unsyncable repos")
+	if blocked {
+		a.logf("doctor: found blocked repos")
 		return 1, nil
 	}
-	a.logf("doctor: all checked repos are syncable")
+	a.logf("doctor: no blocked repos")
 	return 0, nil
 }
 

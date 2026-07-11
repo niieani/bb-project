@@ -40,7 +40,7 @@ func TestRunFixTargetedSkipsGlobalRiskAndPushAccessCollection(t *testing.T) {
 		Catalog:   "software",
 		Path:      apiPath,
 		OriginURL: "https://github.com/you/api.git",
-		Syncable:  true,
+		State:     domain.RepoStateSynced,
 	}
 	apiRecord.StateHash = domain.ComputeStateHash(apiRecord)
 	webRecord := domain.MachineRepoRecord{
@@ -49,7 +49,7 @@ func TestRunFixTargetedSkipsGlobalRiskAndPushAccessCollection(t *testing.T) {
 		Catalog:   "software",
 		Path:      webPath,
 		OriginURL: "https://github.com/you/web.git",
-		Syncable:  true,
+		State:     domain.RepoStateSynced,
 	}
 	webRecord.StateHash = domain.ComputeStateHash(webRecord)
 

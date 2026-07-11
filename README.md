@@ -6,8 +6,8 @@ It automates:
 
 - repository bootstrap (`git init`, remote setup, metadata registration)
 - discovery of repos under configured catalog roots
-- safe cross-machine convergence (branch/fast-forward when syncable)
-- unsyncable state reporting and notifications
+- safe cross-machine convergence from `synced` observations
+- tiered repository state reporting (`synced`, `pending`, `wip`, `blocked`)
 
 State replication is intentionally externalized (Syncthing, Dropbox, iCloud, rsync, etc.). `bb` reads and writes YAML state files; your sync tool moves them between machines.
 
@@ -24,10 +24,12 @@ Known hardening work planned for v1.1 is documented in `docs/PLAN-V1.1.md`.
 - `catalog`: named local root where repos live
 - `machine file`: one YAML per machine (catalogs + observed repo states)
 - `repo metadata`: shared per-repo YAML (name, visibility, policy)
-- `syncable`: safe for automation
-- `unsyncable`: requires manual intervention first
+- `synced`: clean and eligible for winner selection/convergence
+- `pending`: known policy/config remediation is available
+- `wip`: normal local work; never makes sync or doctor fail
+- `blocked`: requires a human decision and makes sync/doctor exit non-zero
 
-For each `repo_key`, `bb` picks the newest syncable observation as winner and tries to converge local copies when safe.
+For each `repo_key`, `bb` picks the newest `synced` observation as winner and tries to converge local copies when safe. Machine observations use breaking schema v2; v1 files are skipped with a warning naming the machine that must be upgraded.
 
 ## Requirements
 
@@ -245,7 +247,7 @@ Behavior:
 
 - Repositories with cached `push_access=unknown` (or unset legacy values) are re-probed during scan, even when the local branch is not ahead.
 
-Exit code is `1` when at least one observed repo is unsyncable.
+Exit code is `1` only when at least one observed repo is `blocked`.
 
 ### `bb sync [flags]`
 
@@ -273,24 +275,23 @@ Additional behavior:
 - `--include-catalog` for a catalog known on other machines but missing locally returns a hint to map catalogs via `bb config`.
 - Clone during sync is controlled per catalog by `auto_clone_on_sync` (default off).
 
-Exit code is `1` only when selected catalogs still contain **blocking** unsyncable repos after sync.
-Non-blocking reasons (`clone_required`, `catalog_not_mapped`) do not force exit code `1`.
+Exit code is `1` only when selected catalogs still contain `blocked` repos after sync. `pending` and `wip` do not force exit code `1`.
 
 ### `bb status [--json] [--include-catalog <name> ...]`
 
 Shows last recorded machine repo state.
 
-- plain mode: one line per repo
-- `--json`: machine + repo list JSON output
+- plain mode: one line per repo with tier/reasons, followed by a tier summary
+- `--json`: machine + schema-v2 repo observations, including state, reasons, warnings, and last activity
 
 ### `bb doctor [--include-catalog <name> ...]`
 
-Prints unsyncable repos and reasons from machine file.
+Prints non-synced tiers, reasons, and warnings from the machine file.
 
 - refreshes local observations only when the last scan snapshot is stale (default threshold: 60 seconds; configurable via `sync.scan_freshness_seconds`)
 - when GitHub is configured or selected repos use GitHub remotes, also reports warnings if `gh` is missing or not authenticated, with remediation commands
 
-Returns `1` if any unsyncable repo is present in selected catalogs.
+Returns `1` only if a blocked repo is present in selected catalogs.
 
 ### `bb ensure [--include-catalog <name> ...]`
 
@@ -549,38 +550,14 @@ Write ownership convention:
 - each machine writes only its own `machines/<machine-id>.yaml`
 - repo metadata files are shared, low churn, last-writer-wins
 
-## Syncability Rules
+## Repository State Rules
 
-A repo is syncable only if all are true:
+- `wip`: `missing_origin`, `operation_in_progress`, dirty files, `missing_upstream`, or `push_policy_blocked`.
+- `pending`: `clone_required`, `catalog_not_mapped`, or `catalog_mismatch`.
+- `blocked`: divergence, push-access/action failures, sync conflicts/probe failures, or target-path conflicts.
+- `synced`: no state reasons. Only this tier participates in winner selection or convergence writes.
 
-- has `origin`
-- no operation in progress (`merge`, `rebase`, `cherry-pick`, `bisect`)
-- no dirty tracked files
-- no untracked files when `include_untracked_as_dirty=true`
-- current branch has upstream
-- branch is not diverged
-- if ahead commits exist, push is allowed by policy or `--push`
-
-Unsyncable reasons include:
-
-- `missing_origin`
-- `operation_in_progress`
-- `dirty_tracked`
-- `dirty_untracked`
-- `missing_upstream`
-- `diverged`
-- `push_policy_blocked`
-- `push_failed`
-- `sync_conflict_requires_manual_resolution`
-- `sync_feasibility_probe_failed`
-- `pull_failed`
-- `checkout_failed`
-- `target_path_nonempty_not_repo`
-- `target_path_repo_mismatch`
-- `clone_required` (non-blocking)
-- `catalog_mismatch` (non-blocking)
-- `catalog_not_mapped` (non-blocking)
-- `remote_format_mismatch` (non-blocking)
+Precedence is `blocked` > `pending` > `wip` > `synced`. Unknown reasons fail explicitly until assigned a tier. `last_activity_at` records the newest Git HEAD/index/dirty-path mtime but is excluded from `state_hash`, preventing observation churn.
 
 ## Notification Behavior
 

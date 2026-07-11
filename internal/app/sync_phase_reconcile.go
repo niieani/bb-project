@@ -15,7 +15,7 @@ func (a *App) ensureFromWinners(
 	allMachines []domain.MachineFile,
 	repoMetas []domain.RepoMetadataFile,
 	selectedCatalogMap map[string]domain.Catalog,
-	transitionedToSyncable map[string]bool,
+	transitionedToSynced map[string]bool,
 	opts SyncOptions,
 ) error {
 	a.logf("sync: reconciling %d repo metadata entries", len(repoMetas))
@@ -89,7 +89,7 @@ func (a *App) ensureFromWinners(
 		if winner.MachineID == machine.MachineID && len(matches) == 1 {
 			if remoteWinner, ok := selectWinnerForRepoExcluding(allMachines, meta.RepoKey, machine.MachineID); ok {
 				key := repoRecordIdentityKey(machine.Repos[matches[0]])
-				if transitionedToSyncable[key] && machine.Repos[matches[0]].Branch != remoteWinner.Record.Branch {
+				if transitionedToSynced[key] && machine.Repos[matches[0]].Branch != remoteWinner.Record.Branch {
 					winner = remoteWinner
 				}
 			}
@@ -110,7 +110,7 @@ func (a *App) ensureFromWinners(
 		if len(matches) == 1 {
 			idx := matches[0]
 			local := machine.Repos[idx]
-			if !local.Syncable {
+			if local.State != domain.RepoStateSynced {
 				continue
 			}
 			if opts.DryRun {
@@ -120,8 +120,8 @@ func (a *App) ensureFromWinners(
 			if local.Branch != winner.Record.Branch {
 				a.logf("sync: checking out branch %s in %s", winner.Record.Branch, local.Path)
 				if err := a.Git.CheckoutWithPreferredRemote(local.Path, winner.Record.Branch, meta.PreferredRemote); err != nil {
-					machine.Repos[idx].Syncable = false
-					machine.Repos[idx].UnsyncableReasons = appendUniqueReasons(machine.Repos[idx].UnsyncableReasons, domain.ReasonCheckoutFailed)
+					machine.Repos[idx].State = domain.RepoStateBlocked
+					machine.Repos[idx].Reasons = appendUniqueReasons(machine.Repos[idx].Reasons, domain.ReasonCheckoutFailed)
 					machine.Repos[idx].StateHash = domain.ComputeStateHash(machine.Repos[idx])
 					continue
 				}
@@ -133,8 +133,8 @@ func (a *App) ensureFromWinners(
 			}
 			a.logf("sync: pull --ff-only %s", local.Path)
 			if err := a.Git.PullFFOnly(local.Path); err != nil {
-				machine.Repos[idx].Syncable = false
-				machine.Repos[idx].UnsyncableReasons = appendUniqueReasons(machine.Repos[idx].UnsyncableReasons, domain.ReasonPullFailed)
+				machine.Repos[idx].State = domain.RepoStateBlocked
+				machine.Repos[idx].Reasons = appendUniqueReasons(machine.Repos[idx].Reasons, domain.ReasonPullFailed)
 				machine.Repos[idx].StateHash = domain.ComputeStateHash(machine.Repos[idx])
 				continue
 			}
@@ -373,8 +373,8 @@ func (a *App) ensureLocalCopy(
 func (a *App) addOrUpdateSyntheticUnsyncable(machine *domain.MachineFile, meta domain.RepoMetadataFile, catalog, targetPath string, repoName string, reason domain.UnsyncableReason) {
 	for i := range machine.Repos {
 		if machine.Repos[i].RepoKey == meta.RepoKey && machine.Repos[i].Path == targetPath {
-			machine.Repos[i].Syncable = false
-			machine.Repos[i].UnsyncableReasons = []domain.UnsyncableReason{reason}
+			machine.Repos[i].Reasons = []domain.UnsyncableReason{reason}
+			machine.Repos[i].State = domain.DeriveRepoState(machine.Repos[i].Reasons)
 			machine.Repos[i].StateHash = domain.ComputeStateHash(machine.Repos[i])
 			return
 		}
@@ -384,13 +384,13 @@ func (a *App) addOrUpdateSyntheticUnsyncable(machine *domain.MachineFile, meta d
 		name = strings.TrimSpace(meta.Name)
 	}
 	rec := domain.MachineRepoRecord{
-		RepoKey:           meta.RepoKey,
-		Name:              name,
-		Catalog:           catalog,
-		Path:              targetPath,
-		OriginURL:         meta.OriginURL,
-		Syncable:          false,
-		UnsyncableReasons: []domain.UnsyncableReason{reason},
+		RepoKey:   meta.RepoKey,
+		Name:      name,
+		Catalog:   catalog,
+		Path:      targetPath,
+		OriginURL: meta.OriginURL,
+		State:     domain.ReasonTier(reason),
+		Reasons:   []domain.UnsyncableReason{reason},
 	}
 	rec.StateHash = domain.ComputeStateHash(rec)
 	machine.Repos = append(machine.Repos, rec)
@@ -406,12 +406,12 @@ func (a *App) markCatalogMismatch(
 	if rec == nil {
 		return
 	}
-	rec.Syncable = false
 	reasons := []domain.UnsyncableReason{domain.ReasonCatalogMismatch}
 	if catalogNotMapped {
 		reasons = append(reasons, domain.ReasonCatalogNotMapped)
 	}
-	rec.UnsyncableReasons = reasons
+	rec.Reasons = reasons
+	rec.State = domain.DeriveRepoState(reasons)
 	rec.ExpectedRepoKey = strings.TrimSpace(expectedRepoKey)
 	rec.ExpectedCatalog = strings.TrimSpace(expectedCatalog)
 	rec.ExpectedPath = strings.TrimSpace(expectedPath)

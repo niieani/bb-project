@@ -109,6 +109,30 @@ func TestAcquireLock(t *testing.T) {
 	})
 }
 
+func TestLoadAllMachineFilesSkipsOldSchemaWithNamedWarning(t *testing.T) {
+	t.Parallel()
+	paths := NewPaths(t.TempDir())
+	old := BootstrapMachine("old-mac", "old-mac", time.Now())
+	old.Version = 1
+	if err := SaveYAML(paths.MachinePath(old.MachineID), old); err != nil {
+		t.Fatal(err)
+	}
+	current := BootstrapMachine("new-mac", "new-mac", time.Now())
+	if err := SaveMachine(paths, current); err != nil {
+		t.Fatal(err)
+	}
+	files, warnings, err := LoadAllMachineFilesWithWarnings(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].MachineID != "new-mac" {
+		t.Fatalf("files = %+v", files)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "old-mac") || !strings.Contains(warnings[0], "old-format state") {
+		t.Fatalf("warnings = %v", warnings)
+	}
+}
+
 func TestLockFilePayload(t *testing.T) {
 	t.Parallel()
 

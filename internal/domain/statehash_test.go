@@ -19,8 +19,9 @@ func TestComputeStateHashStable(t *testing.T) {
 		HasDirtyTracked:     false,
 		HasUntracked:        false,
 		OperationInProgress: OperationNone,
-		Syncable:            true,
-		UnsyncableReasons:   nil,
+		State:               RepoStateSynced,
+		Reasons:             nil,
+		Warnings:            nil,
 	}
 	b := a
 
@@ -36,6 +37,11 @@ func TestComputeStateHashStable(t *testing.T) {
 	b.Behind = 1
 	if ComputeStateHash(a) == ComputeStateHash(b) {
 		t.Fatal("expected hash to change when state fields change")
+	}
+	b = a
+	b.LastActivityAt = b.LastActivityAt.Add(time.Hour)
+	if ComputeStateHash(a) != ComputeStateHash(b) {
+		t.Fatal("last_activity_at must not affect state hash")
 	}
 }
 

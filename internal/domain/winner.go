@@ -7,7 +7,7 @@ func SelectWinner(records []MachineRepoRecordWithMachine) (MachineRepoRecordWith
 	var found bool
 
 	for _, rec := range records {
-		if !rec.Record.Syncable {
+		if rec.Record.State != RepoStateSynced {
 			continue
 		}
 		if !found {

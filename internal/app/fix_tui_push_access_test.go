@@ -56,9 +56,9 @@ func TestNewFixTUIModelReprobesUnknownPushAccessOnStartup(t *testing.T) {
 		OriginURL:       "git@niieani.github.com:acme/demo.git",
 		Branch:          "main",
 		Upstream:        "origin/main",
-		Syncable:        false,
+		State:           domain.RepoStateBlocked,
 		HasDirtyTracked: true,
-		UnsyncableReasons: []domain.UnsyncableReason{
+		Reasons: []domain.UnsyncableReason{
 			domain.ReasonDirtyTracked,
 		},
 	}

@@ -20,20 +20,20 @@ func (a *App) observePhase(
 	a.logf("sync: discovered %d local repo(s)", len(discovered))
 
 	localRecords := make([]domain.MachineRepoRecord, 0, len(discovered))
-	transitionedToSyncable := map[string]bool{}
+	transitionedToSynced := map[string]bool{}
 	for _, repo := range discovered {
 		rec, err := a.observeAndApplyLocalSync(cfg, repo, opts)
 		if err != nil {
 			return nil, nil, err
 		}
 		key := repoRecordIdentityKey(rec)
-		if old, ok := previous[key]; ok && !old.Syncable && rec.Syncable {
-			transitionedToSyncable[key] = true
+		if old, ok := previous[key]; ok && old.State != domain.RepoStateSynced && rec.State == domain.RepoStateSynced {
+			transitionedToSynced[key] = true
 		}
 		localRecords = append(localRecords, rec)
 	}
 
-	return localRecords, transitionedToSyncable, nil
+	return localRecords, transitionedToSynced, nil
 }
 
 func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRepo, opts SyncOptions) (domain.MachineRepoRecord, error) {
@@ -46,8 +46,8 @@ func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRep
 	if cfg.Sync.FetchPrune && !opts.DryRun {
 		a.logf("sync: fetch --prune %s", repo.Path)
 		if err := a.Git.FetchPrune(repo.Path); err != nil {
-			rec.Syncable = false
-			rec.UnsyncableReasons = appendUniqueReasons(rec.UnsyncableReasons, domain.ReasonPullFailed)
+			rec.State = domain.RepoStateBlocked
+			rec.Reasons = appendUniqueReasons(rec.Reasons, domain.ReasonPullFailed)
 			rec.StateHash = domain.ComputeStateHash(rec)
 			return rec, nil
 		}
@@ -57,15 +57,15 @@ func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRep
 		}
 	}
 
-	if !rec.Syncable || opts.DryRun {
+	if rec.State != domain.RepoStateSynced || opts.DryRun {
 		return rec, nil
 	}
 
 	if rec.Behind > 0 && rec.Ahead == 0 {
 		a.logf("sync: pulling ff-only for %s", repo.Path)
 		if err := a.Git.PullFFOnly(repo.Path); err != nil {
-			rec.Syncable = false
-			rec.UnsyncableReasons = appendUniqueReasons(rec.UnsyncableReasons, domain.ReasonPullFailed)
+			rec.State = domain.RepoStateBlocked
+			rec.Reasons = appendUniqueReasons(rec.Reasons, domain.ReasonPullFailed)
 			rec.StateHash = domain.ComputeStateHash(rec)
 			return rec, nil
 		}
@@ -81,8 +81,8 @@ func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRep
 		if autoPushMode != domain.AutoPushModeDisabled || opts.Push {
 			a.logf("sync: pushing ahead commits for %s", repo.Path)
 			if err := a.Git.Push(repo.Path); err != nil {
-				rec.Syncable = false
-				rec.UnsyncableReasons = appendUniqueReasons(rec.UnsyncableReasons, domain.ReasonPushFailed)
+				rec.State = domain.RepoStateBlocked
+				rec.Reasons = appendUniqueReasons(rec.Reasons, domain.ReasonPushFailed)
 				rec.StateHash = domain.ComputeStateHash(rec)
 				return rec, nil
 			}

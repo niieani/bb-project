@@ -90,7 +90,7 @@ func TestRunDoctorSkipsGitHubCLIWarningWhenGitHubNotNeeded(t *testing.T) {
 			Catalog:   "software",
 			Path:      filepath.Join(t.TempDir(), "software", "demo"),
 			OriginURL: "https://gitlab.com/acme/demo.git",
-			Syncable:  true,
+			State:     domain.RepoStateSynced,
 		},
 	}
 	a, stdout := newDoctorGitHubPrereqTestApp(t, now, "", repos)

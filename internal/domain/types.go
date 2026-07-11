@@ -2,7 +2,16 @@ package domain
 
 import "time"
 
-const Version = 1
+const Version = 2
+
+type RepoSyncState string
+
+const (
+	RepoStateSynced  RepoSyncState = "synced"
+	RepoStatePending RepoSyncState = "pending"
+	RepoStateWip     RepoSyncState = "wip"
+	RepoStateBlocked RepoSyncState = "blocked"
+)
 
 type Visibility string
 
@@ -177,28 +186,30 @@ type MachineFile struct {
 }
 
 type MachineRepoRecord struct {
-	RepoKey             string             `yaml:"repo_key"`
-	ExpectedRepoKey     string             `yaml:"expected_repo_key,omitempty"`
-	ExpectedCatalog     string             `yaml:"expected_catalog,omitempty"`
-	ExpectedPath        string             `yaml:"expected_path,omitempty"`
-	Name                string             `yaml:"name"`
-	Catalog             string             `yaml:"catalog"`
-	Path                string             `yaml:"path"`
-	OriginURL           string             `yaml:"origin_url"`
-	Branch              string             `yaml:"branch"`
-	HeadSHA             string             `yaml:"head_sha"`
-	Upstream            string             `yaml:"upstream"`
-	RemoteHeadSHA       string             `yaml:"remote_head_sha"`
-	Ahead               int                `yaml:"ahead"`
-	Behind              int                `yaml:"behind"`
-	Diverged            bool               `yaml:"diverged"`
-	HasDirtyTracked     bool               `yaml:"has_dirty_tracked"`
-	HasUntracked        bool               `yaml:"has_untracked"`
-	OperationInProgress Operation          `yaml:"operation_in_progress"`
-	Syncable            bool               `yaml:"syncable"`
-	UnsyncableReasons   []UnsyncableReason `yaml:"unsyncable_reasons"`
-	StateHash           string             `yaml:"state_hash"`
-	ObservedAt          time.Time          `yaml:"observed_at"`
+	RepoKey             string             `yaml:"repo_key" json:"repo_key"`
+	ExpectedRepoKey     string             `yaml:"expected_repo_key,omitempty" json:"expected_repo_key,omitempty"`
+	ExpectedCatalog     string             `yaml:"expected_catalog,omitempty" json:"expected_catalog,omitempty"`
+	ExpectedPath        string             `yaml:"expected_path,omitempty" json:"expected_path,omitempty"`
+	Name                string             `yaml:"name" json:"name"`
+	Catalog             string             `yaml:"catalog" json:"catalog"`
+	Path                string             `yaml:"path" json:"path"`
+	OriginURL           string             `yaml:"origin_url" json:"origin_url"`
+	Branch              string             `yaml:"branch" json:"branch"`
+	HeadSHA             string             `yaml:"head_sha" json:"head_sha"`
+	Upstream            string             `yaml:"upstream" json:"upstream"`
+	RemoteHeadSHA       string             `yaml:"remote_head_sha" json:"remote_head_sha"`
+	Ahead               int                `yaml:"ahead" json:"ahead"`
+	Behind              int                `yaml:"behind" json:"behind"`
+	Diverged            bool               `yaml:"diverged" json:"diverged"`
+	HasDirtyTracked     bool               `yaml:"has_dirty_tracked" json:"has_dirty_tracked"`
+	HasUntracked        bool               `yaml:"has_untracked" json:"has_untracked"`
+	OperationInProgress Operation          `yaml:"operation_in_progress" json:"operation_in_progress"`
+	State               RepoSyncState      `yaml:"state" json:"state"`
+	Reasons             []UnsyncableReason `yaml:"reasons,omitempty" json:"reasons"`
+	Warnings            []UnsyncableReason `yaml:"warnings,omitempty" json:"warnings"`
+	LastActivityAt      time.Time          `yaml:"last_activity_at" json:"last_activity_at"`
+	StateHash           string             `yaml:"state_hash" json:"state_hash"`
+	ObservedAt          time.Time          `yaml:"observed_at" json:"observed_at"`
 }
 
 type MachineRepoRecordWithMachine struct {

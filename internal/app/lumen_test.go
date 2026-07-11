@@ -300,7 +300,7 @@ func newLumenTestApp(t *testing.T) (*App, state.Paths, string) {
 		Path:      repoPath,
 		OriginURL: "https://github.com/alice/api.git",
 		Branch:    "main",
-		Syncable:  true,
+		State:     domain.RepoStateSynced,
 	}
 	rec.StateHash = domain.ComputeStateHash(rec)
 	machine.Repos = []domain.MachineRepoRecord{rec}
