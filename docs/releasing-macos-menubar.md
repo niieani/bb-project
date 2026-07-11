@@ -39,7 +39,7 @@ open -a BBMenuBar
 
 The release job bounds its synchronous notarization wait at 30 minutes. Apple continues processing a timed-out submission, while the job fails promptly instead of occupying the hosted runner for GitHub's six-hour maximum. Retry the tagged recovery workflow after the Notary service recovers; do not publish an unstapled app.
 
-Swift tests, the universal build, and timestamped codesigning also have explicit stage names and 10/15/5-minute bounds. A manual tagged recovery checks out the immutable release source, then overlays only the current packaging harness from `main`; release recovery fixes therefore do not require moving an existing tag.
+Swift tests, the universal build, and timestamped codesigning also have explicit stage names and 10/15/5-minute bounds. A manual tagged recovery skips GoReleaser, checks out the immutable release source, then overlays only the current packaging harness from `main`; existing CLI assets cannot block app recovery, and release recovery fixes do not require moving an existing tag.
 
 Then verify the menu reports no notification or launch-at-login error, trigger an eligible attention snapshot, confirm the banner is attributed to BBMenuBar, click it to open the exact digest list, and confirm interval/wake refresh can deliver without a terminal process.
 

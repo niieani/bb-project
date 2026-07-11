@@ -670,7 +670,7 @@ Release flow:
 2. `release-please` opens/updates a release PR with version bump + changelog.
 3. Merge that PR to create a `vX.Y.Z` tag and GitHub release.
 4. `Release Please` then calls the shared publish workflow, which runs GoReleaser plus the native app build, Developer ID signing, notarization, release-asset upload, and Homebrew tap cask updates.
-5. The standalone `Release` workflow exists only as a manual recovery path for republishing an existing tag through that same shared publish workflow.
+5. The standalone `Release` workflow is a manual recovery path for republishing the menubar app for an existing tag. It skips GoReleaser so existing CLI assets cannot block app recovery.
 
 Required GitHub secret:
 

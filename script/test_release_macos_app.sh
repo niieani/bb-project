@@ -34,6 +34,10 @@ grep -F 'run_with_timeout 600 swift test' "$package_script" >/dev/null
 grep -F 'run_with_timeout 900 swift build' "$package_script" >/dev/null
 grep -F 'run_with_timeout 300 codesign' "$package_script" >/dev/null
 grep -F 'packaging_ref: refs/heads/main' "$ROOT_DIR/.github/workflows/release.yml" >/dev/null
+grep -F "publish_cli: \${{ github.event_name != 'workflow_dispatch' }}" "$ROOT_DIR/.github/workflows/release.yml" >/dev/null
+grep -F 'publish_cli:' "$workflow" >/dev/null
+grep -F 'if: ${{ inputs.publish_cli }}' "$workflow" >/dev/null
+grep -F "needs.goreleaser.result == 'skipped'" "$workflow" >/dev/null
 grep -F 'Use current recovery packaging harness' "$workflow" >/dev/null
 for step in \
   'Test Swift app' \

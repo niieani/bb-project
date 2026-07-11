@@ -12,6 +12,11 @@ on:
         required: false
         type: string
         default: ""
+      publish_cli:
+        description: Publish CLI artifacts before the menubar app.
+        required: false
+        type: boolean
+        default: true
     secrets:
       OP_SERVICE_ACCOUNT_TOKEN:
         required: true
@@ -21,6 +26,7 @@ permissions:
 
 jobs:
   goreleaser:
+    if: ${{ inputs.publish_cli }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -83,6 +89,7 @@ jobs:
 
   menubar-app:
     needs: goreleaser
+    if: ${{ always() && (needs.goreleaser.result == 'success' || needs.goreleaser.result == 'skipped') }}
     runs-on: macos-26
     timeout-minutes: 75
     steps:

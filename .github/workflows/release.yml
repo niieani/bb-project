@@ -35,4 +35,5 @@ jobs:
     with:
       ref: ${{ needs.resolve-ref.outputs.ref }}
       packaging_ref: refs/heads/main
+      publish_cli: ${{ github.event_name != 'workflow_dispatch' }}
     secrets: inherit
