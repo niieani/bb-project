@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0](https://github.com/niieani/bb-project/compare/v0.7.0...v0.8.0) (2026-07-11)
+
+
+### Features
+
+* **journal:** add fleet sync history ([d1715bb](https://github.com/niieani/bb-project/commit/d1715bbdbadd0b05b90854fef7c7ba4a84fb8a56))
+* **journal:** record repair and notification events ([921c189](https://github.com/niieani/bb-project/commit/921c18962039d47f212a2e7ac549180e621cebff))
+* **menubar:** add fleet dropdown and refresh (BB-oqeftwks) ([abd5c14](https://github.com/niieani/bb-project/commit/abd5c14523df94986108145b5bf756084485fa43))
+* **menubar:** add native fleet title app (BB-qdcoxizm) ([57a6d86](https://github.com/niieani/bb-project/commit/57a6d862d3a196e1e00d260d9d4c5d74f252bb3f))
+* **overview:** add cross-machine state matrix (BB-bmtjwuyh) ([b97f978](https://github.com/niieani/bb-project/commit/b97f9789965e073ec148c627283670ca5821a0cc))
+* **release:** ship signed menubar app (BB-krezgwel) ([7b81564](https://github.com/niieani/bb-project/commit/7b81564cd83b11153cbfa629b6206a7c528d81a9))
+* **status:** freeze fleet attention contract (BB-qiqmeetv) ([2de09bb](https://github.com/niieani/bb-project/commit/2de09bb37f169f31772af6917784b14004f60bf2))
+
 ## [0.7.0](https://github.com/niieani/bb-project/compare/v0.6.4...v0.7.0) (2026-07-11)
 
 
