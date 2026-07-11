@@ -52,6 +52,9 @@ func (a *App) notifyUnsyncable(cfg domain.ConfigFile, repos []domain.MachineRepo
 		cache.DeliveryFailures[backend] = domain.NotifyDeliveryFailure{Backend: backend, Fingerprint: fingerprint, Error: err.Error(), FailedAt: now}
 		return state.SaveNotifyCache(a.Paths, cache)
 	}
+	for _, repo := range attention {
+		a.appendJournal("notified", repo.RepoKey, "backend="+backend)
+	}
 	cache.LastSent = domain.NotifyCacheEntry{Fingerprint: fingerprint, SentAt: now}
 	delete(cache.DeliveryFailures, backend)
 	return state.SaveNotifyCache(a.Paths, cache)

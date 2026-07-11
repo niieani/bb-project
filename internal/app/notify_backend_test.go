@@ -83,6 +83,12 @@ func TestNotifyAttentionSetDedupe(t *testing.T) {
 	paths := state.NewPaths(t.TempDir())
 	sender := &fakeNotifySender{}
 	a := New(paths, &bytes.Buffer{}, &bytes.Buffer{})
+	a.Getenv = func(key string) string {
+		if key == "BB_MACHINE_ID" {
+			return "machine-a"
+		}
+		return ""
+	}
 	a.NewNotifySender = func(string) (notifySender, error) { return sender, nil }
 	now := time.Now()
 	a.Now = func() time.Time { return now }
@@ -96,6 +102,13 @@ func TestNotifyAttentionSetDedupe(t *testing.T) {
 	}
 	if len(sender.sent) != 1 {
 		t.Fatalf("sent = %d", len(sender.sent))
+	}
+	events, err := state.LoadJournalFile(paths.JournalPath("machine-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Event != "notified" || events[0].RepoKey != "software/api" {
+		t.Fatalf("journal events = %+v", events)
 	}
 }
 

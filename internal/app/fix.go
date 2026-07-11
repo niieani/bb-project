@@ -1081,6 +1081,7 @@ func (a *App) applyFixActionWithObserver(
 	if err := a.executeFixAction(cfg, target, action, opts, observer); err != nil {
 		return fixRepoState{}, err
 	}
+	a.appendJournal("fix_applied", target.Record.RepoKey, action)
 
 	refreshedPath := strings.TrimSpace(target.Record.Path)
 	if action == FixActionMoveToCatalog {
@@ -1897,7 +1898,7 @@ func (a *App) executeFixAction(
 			Command: true,
 			Summary: fmt.Sprintf("git remote set-url %s %s", remoteName, expectedOriginURL),
 		}, func() error {
-			return a.alignRemoteFormatVerified(path, remoteName, previousOriginURL, expectedOriginURL)
+			return a.alignRemoteFormatVerified(target.Record.RepoKey, path, remoteName, previousOriginURL, expectedOriginURL)
 		}); err != nil {
 			return err
 		}

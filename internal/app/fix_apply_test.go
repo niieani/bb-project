@@ -73,6 +73,13 @@ func TestApplyFixActionWithObserverSkipsWholeCatalogRefreshForStaleSnapshot(t *t
 	if meta.AutoPush != domain.AutoPushModeIncludeDefaultBranch {
 		t.Fatalf("auto_push = %q, want %q", meta.AutoPush, domain.AutoPushModeIncludeDefaultBranch)
 	}
+	events, err := state.LoadJournalFile(paths.JournalPath("fix-apply-host"))
+	if err != nil {
+		t.Fatalf("load journal: %v", err)
+	}
+	if len(events) != 1 || events[0].Event != "fix_applied" || events[0].RepoKey != apiRecord.RepoKey || events[0].Detail != FixActionEnableAutoPush {
+		t.Fatalf("journal events = %+v", events)
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -254,6 +261,12 @@ func newFixApplyTestApp(t *testing.T, now time.Time) (*App, state.Paths) {
 	app.SetVerbose(false)
 	app.Now = func() time.Time { return now }
 	app.Hostname = func() (string, error) { return "fix-apply-host", nil }
+	app.Getenv = func(key string) string {
+		if key == "BB_MACHINE_ID" {
+			return "fix-apply-host"
+		}
+		return ""
+	}
 	return app, paths
 }
 

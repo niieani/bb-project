@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,10 +21,11 @@ func TestRunSyncAutomaticRemoteAlignment(t *testing.T) {
 		enabled     bool
 		verifyOK    bool
 		wantAligned bool
+		wantEvent   string
 	}{
-		{"success_persists_before_observation", true, true, true},
-		{"verification_failure_reverts_and_continues", true, false, false},
-		{"disabled_gate_does_not_mutate", false, true, false},
+		{"success_persists_before_observation", true, true, true, "remote_aligned"},
+		{"verification_failure_reverts_and_continues", true, false, false, "remote_align_reverted"},
+		{"disabled_gate_does_not_mutate", false, true, false, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -102,6 +104,22 @@ func TestRunSyncAutomaticRemoteAlignment(t *testing.T) {
 			hasWarning := slices.Contains(mf.Repos[0].Warnings, domain.ReasonRemoteFormatMismatch)
 			if hasWarning == tt.wantAligned {
 				t.Fatalf("warning present = %t, aligned = %t", hasWarning, tt.wantAligned)
+			}
+			events, err := state.LoadJournalFile(paths.JournalPath("test-machine"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, event := range events {
+				if event.Event == tt.wantEvent && event.RepoKey == "software/demo" {
+					found = true
+					if tt.wantEvent == "remote_align_reverted" && !strings.Contains(event.Detail, "verification") {
+						t.Fatalf("revert detail = %q", event.Detail)
+					}
+				}
+			}
+			if tt.wantEvent != "" && !found {
+				t.Fatalf("missing %s in %+v", tt.wantEvent, events)
 			}
 		})
 	}
@@ -183,7 +201,7 @@ func TestAlignRemoteFormatVerifiedRevertsOnVerificationFailure(t *testing.T) {
 	if err := app.Git.AddOrigin(repo, previous); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.alignRemoteFormatVerified(repo, "origin", previous, filepath.Join(t.TempDir(), "missing.git")); err == nil {
+	if err := app.alignRemoteFormatVerified("software/demo", repo, "origin", previous, filepath.Join(t.TempDir(), "missing.git")); err == nil {
 		t.Fatal("expected verification failure")
 	}
 	got, err := app.Git.RemoteURLRaw(repo, "origin")

@@ -294,7 +294,7 @@ In JSON, machines expose `id`, `here`, `published`, optional `updated_at`, and `
 
 ### `bb log [--repo <selector>] [--machine <id>] [--limit N] [--json]`
 
-Shows the merged newest-first fleet sync journal. Sync records run summaries plus converged, cloned, and pushed actions. Per-machine JSONL journals live in the shared state directory and prune to `journal.max_entries`. Journal write failures are logged without changing sync outcomes.
+Shows the merged newest-first fleet sync journal. It records sync summaries, convergence, clones, pushes, notifications, verified remote alignment or rollback, and applied fix actions. Per-machine JSONL journals live in the shared state directory and prune to `journal.max_entries`. Journal write failures are logged without changing sync or fix outcomes.
 
 ### `bb doctor [--include-catalog <name> ...]`
 

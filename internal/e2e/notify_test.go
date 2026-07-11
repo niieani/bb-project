@@ -48,4 +48,11 @@ func TestStaleWipEntersSingleDigest(t *testing.T) {
 	if !strings.Contains(out, "notify 1 repo(s) need attention:") || !strings.Contains(out, "api: dirty_tracked") {
 		t.Fatalf("digest = %s", out)
 	}
+	logOut, err := m.RunBB(now.Add(49*time.Hour), "log", "--repo", "api", "--json")
+	if err != nil {
+		t.Fatalf("log: %v\n%s", err, logOut)
+	}
+	if !strings.Contains(logOut, `"event": "notified"`) || !strings.Contains(logOut, `"repo_key": "software/api"`) {
+		t.Fatalf("filtered log missing notified event: %s", logOut)
+	}
 }

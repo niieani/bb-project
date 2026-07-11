@@ -74,3 +74,46 @@ func TestJournalMergesMachinesAndWriteFailureDoesNotFailSync(t *testing.T) {
 		t.Fatalf("missing journal failure log: %s", out)
 	}
 }
+
+func TestRemoteAlignmentEventsAppearInFilteredLog(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 2, 18, 10, 0, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		name      string
+		template  string
+		wantEvent string
+		wantError bool
+	}{
+		{name: "verified", wantEvent: "remote_aligned"},
+		{name: "reverted", template: "/definitely-missing/${repo}.git", wantEvent: "remote_align_reverted", wantError: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, m, root := setupSingleMachine(t)
+			repo, remote := createRepoWithOrigin(t, m, root, "demo", now)
+			githubURL := "https://github.com/you/demo.git"
+			m.MustRunGit(now, repo, "remote", "set-url", "origin", githubURL)
+			template := tt.template
+			if tt.wantError {
+				m.MustRunGit(now, repo, "config", "url."+remote+".insteadOf", githubURL)
+			} else {
+				template = remote
+			}
+			cfg := strings.Replace(m.MustReadFile(m.ConfigPath()), "  remote_protocol: ssh", "  remote_protocol: ssh\n  preferred_remote_url_template: \""+template+"\"", 1)
+			m.MustWriteFile(m.ConfigPath(), cfg)
+			if out, err := m.RunBB(now.Add(time.Minute), "sync"); err != nil && !tt.wantError {
+				t.Fatalf("sync: %v\n%s", err, out)
+			}
+			out, err := m.RunBB(now.Add(2*time.Minute), "log", "--repo", "demo", "--json")
+			if err != nil {
+				t.Fatalf("log: %v\n%s", err, out)
+			}
+			if !strings.Contains(out, `"event": "`+tt.wantEvent+`"`) {
+				t.Fatalf("filtered log missing %s: %s", tt.wantEvent, out)
+			}
+			if tt.wantError && !strings.Contains(out, "verification failed") {
+				t.Fatalf("revert event missing verification error: %s", out)
+			}
+		})
+	}
+}

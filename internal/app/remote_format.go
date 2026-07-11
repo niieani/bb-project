@@ -10,7 +10,7 @@ import (
 
 const remoteFormatVerifyTimeout = 15 * time.Second
 
-func (a *App) alignRemoteFormatVerified(path, remoteName, previousURL, preferredURL string) error {
+func (a *App) alignRemoteFormatVerified(repoKey, path, remoteName, previousURL, preferredURL string) error {
 	if strings.TrimSpace(remoteName) == "" {
 		remoteName = "origin"
 	}
@@ -19,10 +19,15 @@ func (a *App) alignRemoteFormatVerified(path, remoteName, previousURL, preferred
 	}
 	if err := a.Git.VerifyRemoteHeads(path, remoteName, remoteFormatVerifyTimeout); err != nil {
 		if revertErr := a.Git.SetRemoteURL(path, remoteName, previousURL); revertErr != nil {
-			return fmt.Errorf("remote format verification failed: %w; revert failed: %v", err, revertErr)
+			failure := fmt.Errorf("remote format verification failed: %w; revert failed: %v", err, revertErr)
+			a.appendJournal("remote_align_reverted", repoKey, failure.Error())
+			return failure
 		}
-		return fmt.Errorf("remote format verification failed; previous URL restored: %w", err)
+		failure := fmt.Errorf("remote format verification failed; previous URL restored: %w", err)
+		a.appendJournal("remote_align_reverted", repoKey, failure.Error())
+		return failure
 	}
+	a.appendJournal("remote_aligned", repoKey, fmt.Sprintf("%s remote updated", remoteName))
 	return nil
 }
 
@@ -46,7 +51,7 @@ func (a *App) alignRemoteFormatsBeforeObservation(cfg domain.ConfigFile, catalog
 		if !isGitHub || strings.TrimSpace(expected) == "" || strings.TrimSpace(expected) == strings.TrimSpace(origin) {
 			continue
 		}
-		if err := a.alignRemoteFormatVerified(repo.Path, "origin", origin, expected); err != nil {
+		if err := a.alignRemoteFormatVerified(repo.RepoKey, repo.Path, "origin", origin, expected); err != nil {
 			a.logf("sync: remote format alignment reverted for %s: %v", repo.Path, err)
 		}
 	}

@@ -438,6 +438,13 @@ func TestFixCases(t *testing.T) {
 		if !strings.Contains(meta, "auto_push: include-default-branch") {
 			t.Fatalf("expected auto_push=include-default-branch in repo metadata, got:\n%s", meta)
 		}
+		logOut, err := m.RunBB(now.Add(4*time.Minute), "log", "--repo", "demo", "--json")
+		if err != nil {
+			t.Fatalf("log failed: %v\n%s", err, logOut)
+		}
+		if !strings.Contains(logOut, `"event": "fix_applied"`) || !strings.Contains(logOut, `"detail": "enable-auto-push"`) {
+			t.Fatalf("filtered log missing fix event: %s", logOut)
+		}
 	})
 
 	t.Run("fork and retarget action for read-only remote", func(t *testing.T) {
