@@ -457,6 +457,16 @@ func TestRunScanAndSyncForwardOptions(t *testing.T) {
 		}
 		mustEqualSlices(t, fake.syncOpts.IncludeCatalogs, []string{"software"})
 	})
+	t.Run("targeted sync event flags", func(t *testing.T) {
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"sync", "--repo", "software/api", "--events-json"})
+		if code != 0 {
+			t.Fatalf("code=%d stderr=%s", code, stderr)
+		}
+		if fake.syncOpts.Repository != "software/api" || !fake.syncOpts.EventsJSON {
+			t.Fatalf("opts=%#v", fake.syncOpts)
+		}
+	})
 
 	t.Run("removed notification flags fail explicitly", func(t *testing.T) {
 		t.Parallel()

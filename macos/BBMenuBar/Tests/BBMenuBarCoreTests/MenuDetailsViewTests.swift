@@ -6,6 +6,20 @@ import Testing
 
 @Suite("menu details scrolling")
 struct MenuDetailsViewTests {
+  @Test("repository row renders supplied action label and attributed failure")
+  @MainActor
+  func actionAndFailure() {
+    let item = MenuItem(
+      attention: AttentionItem(
+        machineID: "machine-a", repoKey: "software/api", name: "api", state: .pending,
+        dominantReason: "clone_required", reasons: ["clone_required"],
+        lastActivityAt: .distantPast, eligible: false),
+      actions: [ProjectAction(kind: "sync", id: "sync", label: "Update")])
+    let row = MenuItemOperationPresentation(item: item, failure: "pull failed")
+    #expect(row.actionLabel == "Update")
+    #expect(row.failure == "pull failed")
+  }
+
   @Test("long popup content is hosted in a vertical scroll view")
   @MainActor
   func longContentScrolls() {

@@ -8,7 +8,8 @@
     "state": "synced",
     "reasons": [],
     "warnings": [],
-    "last_activity_at": "2026-07-10T12:00:00Z"
+    "last_activity_at": "2026-07-10T12:00:00Z",
+    "actions": []
   }],
   "summary": {"total": 1, "synced": 1, "pending": 0, "wip": 0, "blocked": 0, "warnings": 0},
   "last_sync": null,

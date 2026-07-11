@@ -2,9 +2,21 @@ import SwiftUI
 
 public struct MenuDetailsView: View {
   private let presentation: MenuPresentation
+  private let activeRepository: String?
+  private let mutationsDisabled: Bool
+  private let onSync: @MainActor (String) -> Void
+  private let repositoryFailures: [String: String]
 
-  public init(presentation: MenuPresentation) {
+  public init(
+    presentation: MenuPresentation, activeRepository: String? = nil,
+    mutationsDisabled: Bool = false, repositoryFailures: [String: String] = [:],
+    onSync: @escaping @MainActor (String) -> Void = { _ in }
+  ) {
     self.presentation = presentation
+    self.activeRepository = activeRepository
+    self.mutationsDisabled = mutationsDisabled
+    self.onSync = onSync
+    self.repositoryFailures = repositoryFailures
   }
 
   public var body: some View {
@@ -14,7 +26,10 @@ public struct MenuDetailsView: View {
           VStack(alignment: .leading, spacing: 4) {
             Text(section.title).font(.headline)
             ForEach(section.items) { item in
-              MenuItemRow(item: item)
+              MenuItemRow(
+                item: item, isActive: activeRepository == item.repoKey,
+                mutationsDisabled: mutationsDisabled, failure: repositoryFailures[item.repoKey],
+                onSync: onSync)
             }
           }
           Divider()
@@ -46,7 +61,15 @@ enum MenuDetailsLayout {
 
 private struct MenuItemRow: View {
   let item: MenuItem
+  let isActive: Bool
+  let mutationsDisabled: Bool
+  let failure: String?
+  let onSync: @MainActor (String) -> Void
   @Environment(\.colorScheme) private var colorScheme
+
+  private var operation: MenuItemOperationPresentation {
+    MenuItemOperationPresentation(item: item, failure: failure)
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 1) {
@@ -58,11 +81,30 @@ private struct MenuItemRow: View {
           .frame(width: 8, height: 8)
           .accessibilityHidden(true)
         Text(item.title)
+        Spacer()
+        if isActive { ProgressView().controlSize(.small) }
+        if let actionLabel = operation.actionLabel {
+          Button(actionLabel) { onSync(item.repoKey) }.controlSize(.small).disabled(
+            mutationsDisabled)
+        }
       }
       Text(item.detail).font(.caption).foregroundStyle(.secondary).padding(.leading, 15)
+      if let failure {
+        Text(failure).font(.caption).foregroundStyle(.red).padding(.leading, 15).lineLimit(1)
+      }
     }
-    .accessibilityElement(children: .combine)
+    .accessibilityElement(children: item.actions.isEmpty ? .combine : .contain)
     .accessibilityLabel("\(item.title), \(item.statusTone.accessibilityName), \(item.detail)")
+  }
+}
+
+struct MenuItemOperationPresentation: Equatable {
+  let actionLabel: String?
+  let failure: String?
+
+  init(item: MenuItem, failure: String?) {
+    actionLabel = item.actions.first(where: { $0.kind == "sync" })?.label
+    self.failure = failure
   }
 }
 

@@ -3,7 +3,17 @@ import Foundation
 public protocol BBClient: Sendable {
   func statusJSON() async throws -> Data
   func overviewJSON() async throws -> Data
-  func sync() async throws
+  func sync(repository: String?) async -> AsyncThrowingStream<OperationEvent, Error>
+}
+
+public struct OperationEvent: Decodable, Equatable, Sendable {
+  public let event: String
+  public let operation: String
+  public let repository: String?
+  public let phase: String?
+  public let message: String
+  public let result: String?
+  public let error: String?
 }
 
 public struct ProcessBBClient: BBClient {
@@ -21,8 +31,56 @@ public struct ProcessBBClient: BBClient {
     try await run(arguments: ["overview", "--json"])
   }
 
-  public func sync() async throws {
-    _ = try await run(arguments: ["sync", "--quiet"])
+  public func sync(repository: String?) async -> AsyncThrowingStream<OperationEvent, Error> {
+    var arguments = ["sync", "--quiet", "--events-json"]
+    if let repository { arguments += ["--repo", repository] }
+    return eventStream(arguments: arguments)
+  }
+
+  private func eventStream(arguments: [String]) -> AsyncThrowingStream<OperationEvent, Error> {
+    AsyncThrowingStream { continuation in
+      let lifetime = ProcessLifetime()
+      let task = Task.detached {
+        do {
+          let executable = try executableURL ?? Self.resolveExecutable()
+          let process = Process()
+          let stdout = Pipe()
+          let stderr = Pipe()
+          process.executableURL = executable
+          process.arguments = arguments
+          process.standardOutput = stdout
+          process.standardError = stderr
+          try process.run()
+          lifetime.register(process)
+          defer { lifetime.clear() }
+          async let errorData = stderr.fileHandleForReading.readToEnd() ?? Data()
+          var buffer = Data()
+          while true {
+            try Task.checkCancellation()
+            let chunk = stdout.fileHandleForReading.availableData
+            if chunk.isEmpty { break }
+            buffer.append(chunk)
+            while let newline = buffer.firstIndex(of: 0x0A) {
+              let line = Data(buffer[..<newline])
+              buffer.removeSubrange(...newline)
+              if !line.isEmpty {
+                continuation.yield(try JSONDecoder().decode(OperationEvent.self, from: line))
+              }
+            }
+          }
+          process.waitUntilExit()
+          let detail = String(decoding: try await errorData, as: UTF8.self)
+          guard process.terminationStatus == 0 else {
+            throw BBClientError.commandFailed(code: process.terminationStatus, detail: detail)
+          }
+          continuation.finish()
+        } catch { continuation.finish(throwing: error) }
+      }
+      continuation.onTermination = { _ in
+        task.cancel()
+        lifetime.cancel()
+      }
+    }
   }
 
   private func run(arguments: [String]) async throws -> Data {
@@ -66,6 +124,32 @@ public struct ProcessBBClient: BBClient {
       throw BBClientError.binaryNotFound
     }
     return executable
+  }
+}
+
+private final class ProcessLifetime: @unchecked Sendable {
+  private let lock = NSLock()
+  private var process: Process?
+  private var canceled = false
+
+  func register(_ process: Process) {
+    let shouldTerminate = lock.withLock {
+      self.process = process
+      return canceled
+    }
+    if shouldTerminate, process.isRunning { process.terminate() }
+  }
+
+  func clear() {
+    lock.withLock { process = nil }
+  }
+
+  func cancel() {
+    lock.withLock {
+      canceled = true
+      guard let process, process.isRunning else { return }
+      process.terminate()
+    }
   }
 }
 

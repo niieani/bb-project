@@ -43,7 +43,16 @@ struct BBMenuBarApp: App {
   var body: some Scene {
     MenuBarExtra {
       VStack(alignment: .leading, spacing: 10) {
-        MenuDetailsView(presentation: model.presentation)
+        MenuDetailsView(
+          presentation: model.presentation, activeRepository: model.activeRepository,
+          mutationsDisabled: model.isSyncing, repositoryFailures: model.repositoryFailures
+        ) { repository in
+          Task { await model.sync(repository: repository) }
+        }
+
+        if let status = model.operationStatus {
+          Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
 
         Text(model.presentation.lastSync).font(.caption).foregroundStyle(.secondary)
 

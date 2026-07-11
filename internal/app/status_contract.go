@@ -39,6 +39,13 @@ type StatusRepo struct {
 	Reasons        []domain.UnsyncableReason `json:"reasons"`
 	Warnings       []domain.UnsyncableReason `json:"warnings"`
 	LastActivityAt time.Time                 `json:"last_activity_at"`
+	Actions        []ProjectAction           `json:"actions"`
+}
+
+type ProjectAction struct {
+	Kind  string `json:"kind"`
+	ID    string `json:"id"`
+	Label string `json:"label"`
 }
 
 type StatusSummary struct {
@@ -87,18 +94,36 @@ func buildStatusSummary(repos []domain.MachineRepoRecord) StatusSummary {
 	return summary
 }
 
-func buildStatusRepos(repos []domain.MachineRepoRecord) []StatusRepo {
+func buildStatusRepos(repos []domain.MachineRepoRecord, catalogs []domain.Catalog) []StatusRepo {
+	catalogByName := make(map[string]domain.Catalog, len(catalogs))
+	for _, catalog := range catalogs {
+		catalogByName[catalog.Name] = catalog
+	}
 	out := make([]StatusRepo, 0, len(repos))
 	for _, repo := range repos {
+		actions := []ProjectAction{}
+		if catalog, ok := catalogByName[repo.Catalog]; ok && syncActionable(repo, catalog) {
+			actions = append(actions, ProjectAction{Kind: "sync", ID: "sync", Label: "Sync"})
+		}
 		out = append(out, StatusRepo{
 			RepoKey: repo.RepoKey, Name: repo.Name, Catalog: repo.Catalog, Path: repo.Path,
 			State:          repo.State,
 			Reasons:        append([]domain.UnsyncableReason{}, repo.Reasons...),
 			Warnings:       append([]domain.UnsyncableReason{}, repo.Warnings...),
 			LastActivityAt: repo.LastActivityAt,
+			Actions:        actions,
 		})
 	}
 	return out
+}
+
+func syncActionable(repo domain.MachineRepoRecord, catalog domain.Catalog) bool {
+	if repo.State == domain.RepoStateSynced && repo.Behind > 0 && repo.Ahead == 0 &&
+		!repo.HasDirtyTracked && !repo.HasUntracked && !repo.Diverged {
+		return true
+	}
+	return repo.State == domain.RepoStatePending && len(repo.Reasons) == 1 &&
+		repo.Reasons[0] == domain.ReasonCloneRequired && catalog.AllowsAutoCloneOnSync()
 }
 
 func latestSyncRun(paths state.Paths, machineID string) (*StatusLastSync, error) {

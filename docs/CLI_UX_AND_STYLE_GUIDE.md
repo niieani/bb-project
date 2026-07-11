@@ -10,6 +10,7 @@ Applies to:
 ## Principles
 
 - Calm by default: structured chrome, no log spam, stable layout.
+- Long-running mutations identify the active repository and current concise phase; never leave users with only a generic busy label.
 - Keyboard-first: predictable keys and obvious focus.
 - Safe by default: mutating actions require explicit intent.
 - Vertical space is precious: prefer 1-line chrome and compact field headers.

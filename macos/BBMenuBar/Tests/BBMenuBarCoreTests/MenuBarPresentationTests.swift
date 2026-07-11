@@ -19,10 +19,15 @@ struct MenuBarPresentationTests {
 
     await model.refresh()
 
-    #expect(model.presentation.sections.map(\.title) == ["Blocked", "Stale WIP", "Other machines"])
+    #expect(
+      model.presentation.sections.map(\.title) == [
+        "Blocked", "Ready to sync", "Stale WIP", "Other machines",
+      ])
     #expect(model.presentation.sections[0].items.map(\.title) == ["blocked", "recent"])
-    #expect(model.presentation.sections[1].items.map(\.title) == ["stale"])
-    #expect(model.presentation.sections[2].items.map(\.title) == ["remote-only", "remote"])
+    #expect(model.presentation.sections[1].items.map(\.title) == ["synced"])
+    #expect(model.presentation.sections[1].items[0].actions[0].label == "Sync")
+    #expect(model.presentation.sections[2].items.map(\.title) == ["stale"])
+    #expect(model.presentation.sections[3].items.map(\.title) == ["remote-only", "remote"])
     #expect(model.presentation.lastSync == "Last sync 30m ago")
   }
 
@@ -133,6 +138,35 @@ struct MenuBarPresentationTests {
     #expect(model.presentation.errors.contains("Sync failed: sync"))
   }
 
+  @Test("repository failure is attributed, competing sync is rejected, and completion refreshes")
+  @MainActor
+  func repositoryFailureAndSerialization() async {
+    let client = EventMenuClient(
+      status: try! fixtureData(area: "status", name: "mixed"),
+      overview: try! fixtureData(area: "overview", name: "mixed"))
+    let model = MenuBarModel(client: client)
+    let operation = Task { await model.sync(repository: "software/synced") }
+    await eventually { await client.syncCalls() == 1 }
+    #expect(model.activeRepository == "software/synced")
+    await model.sync(repository: "software/other")
+    #expect(await client.syncCalls() == 1)
+    await client.send(
+      OperationEvent(
+        event: "repository_finished", operation: "sync", repository: "software/synced",
+        phase: "complete", message: "Repository needs attention", result: "failure",
+        error: "pull failed"))
+    await client.send(
+      OperationEvent(
+        event: "operation_finished", operation: "sync", repository: "software/synced",
+        phase: nil, message: "Sync failed", result: "failure", error: nil))
+    await client.fail(MenuTestFailure.sync)
+    await operation.value
+    #expect(model.repositoryFailures["software/synced"] == "pull failed")
+    #expect(model.operationStatus == "pull failed")
+    #expect(model.activeRepository == nil)
+    #expect(await client.refreshCalls() == 2)
+  }
+
   @Test("interval and wake events each refresh")
   @MainActor
   func refreshEvents() async {
@@ -206,7 +240,9 @@ private struct MenuStubClient: BBClient {
 
   func statusJSON() async throws -> Data { try status.get() }
   func overviewJSON() async throws -> Data { try overview.get() }
-  func sync() async throws {}
+  func sync(repository: String?) async -> AsyncThrowingStream<OperationEvent, Error> {
+    AsyncThrowingStream { $0.finish() }
+  }
 }
 
 private actor RecordingMenuClient: BBClient {
@@ -231,11 +267,45 @@ private actor RecordingMenuClient: BBClient {
     return overview
   }
 
-  func sync() async throws {
-    recorded.append("sync")
-    if let syncError { throw syncError }
+  func sync(repository: String?) async -> AsyncThrowingStream<OperationEvent, Error> {
+    recorded.append(repository.map { "sync:\($0)" } ?? "sync")
+    return AsyncThrowingStream { continuation in
+      if let syncError { continuation.finish(throwing: syncError) } else { continuation.finish() }
+    }
   }
   func calls() -> [String] { recorded }
+}
+
+private actor EventMenuClient: BBClient {
+  let status: Data
+  let overview: Data
+  private var syncCount = 0
+  private var refreshCount = 0
+  private let stream: AsyncThrowingStream<OperationEvent, Error>
+  private let continuation: AsyncThrowingStream<OperationEvent, Error>.Continuation
+
+  init(status: Data, overview: Data) {
+    self.status = status
+    self.overview = overview
+    (stream, continuation) = AsyncThrowingStream.makeStream()
+  }
+  func statusJSON() async throws -> Data {
+    refreshCount += 1
+    return status
+  }
+  func overviewJSON() async throws -> Data {
+    refreshCount += 1
+    return overview
+  }
+  func sync(repository: String?) async -> AsyncThrowingStream<OperationEvent, Error> {
+    syncCount += 1
+    return stream
+  }
+  func syncCalls() -> Int { syncCount }
+  func refreshCalls() -> Int { refreshCount }
+  func send(_ event: OperationEvent) { continuation.yield(event) }
+  func finish() { continuation.finish() }
+  func fail(_ error: MenuTestFailure) { continuation.finish(throwing: error) }
 }
 
 @MainActor

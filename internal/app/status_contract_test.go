@@ -29,6 +29,7 @@ func TestStatusJSONStableContract(t *testing.T) {
 		statusContractRepo("software/stale", "stale", domain.RepoStateWip, []domain.UnsyncableReason{domain.ReasonDirtyTracked}, nil, now.Add(-25*time.Hour)),
 		statusContractRepo("software/pending", "pending", domain.RepoStatePending, []domain.UnsyncableReason{domain.ReasonCloneRequired}, nil, time.Time{}),
 	})
+	local.Repos[0].Behind = 1
 	remoteOnly := statusContractRepo("references/remote-only", "remote-only", domain.RepoStateBlocked, []domain.UnsyncableReason{domain.ReasonDiverged}, nil, now.Add(-48*time.Hour))
 	remoteOnly.Catalog = "references"
 	remote := statusContractMachine(now, "machine-b", []domain.MachineRepoRecord{
@@ -51,6 +52,25 @@ func TestStatusJSONStableContract(t *testing.T) {
 		gotJSON, _ := json.MarshalIndent(got, "", "  ")
 		wantJSON, _ := json.MarshalIndent(want, "", "  ")
 		t.Fatalf("status contract mismatch\ngot:\n%s\nwant:\n%s", gotJSON, wantJSON)
+	}
+}
+
+func TestBuildStatusReposExposesSyncOnlyForActionableLocalRepository(t *testing.T) {
+	t.Parallel()
+	repos := []domain.MachineRepoRecord{
+		{RepoKey: "software/clone", Catalog: "software", State: domain.RepoStatePending, Reasons: []domain.UnsyncableReason{domain.ReasonCloneRequired}},
+		{RepoKey: "software/dirty", Catalog: "software", State: domain.RepoStateWip, Reasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked}},
+		{RepoKey: "software/behind", Catalog: "software", State: domain.RepoStateSynced, Behind: 2},
+	}
+	got := buildStatusRepos(repos, []domain.Catalog{{Name: "software", AutoCloneOnSync: boolPtr(true)}})
+	if len(got[0].Actions) != 1 || got[0].Actions[0].Kind != "sync" {
+		t.Fatalf("actionable actions = %#v", got[0].Actions)
+	}
+	if len(got[1].Actions) != 0 {
+		t.Fatalf("unsafe actions = %#v", got[1].Actions)
+	}
+	if len(got[2].Actions) != 1 || got[2].Actions[0].Label != "Sync" {
+		t.Fatalf("behind actions = %#v", got[2].Actions)
 	}
 }
 

@@ -25,6 +25,9 @@ func (a *App) ensureFromWinners(
 	}
 	warnedUnmappedCatalogs := map[string]bool{}
 	for _, meta := range repoMetas {
+		if opts.Repository != "" && meta.RepoKey != opts.Repository {
+			continue
+		}
 		if _, historical := moveIndex[strings.TrimSpace(meta.RepoKey)]; historical {
 			continue
 		}

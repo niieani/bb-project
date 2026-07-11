@@ -18,6 +18,9 @@ public final class MenuBarModel {
   public private(set) var presentation = MenuPresentation(
     sections: [], lastSync: "No successful sync yet", errors: [])
   public private(set) var isSyncing = false
+  public private(set) var activeRepository: String?
+  public private(set) var operationStatus: String?
+  public private(set) var repositoryFailures: [String: String] = [:]
 
   private let client: any BBClient
   private let notifications: NotificationCoordinator?
@@ -84,14 +87,55 @@ public final class MenuBarModel {
   }
 
   public func syncNow() async {
+    await sync(repository: nil)
+  }
+
+  public func sync(repository: String?) async {
+    guard !isSyncing else { return }
     isSyncing = true
-    defer { isSyncing = false }
+    activeRepository = repository
+    defer {
+      isSyncing = false
+      activeRepository = nil
+    }
     let syncError: String?
+    var reportedFailure = false
     do {
-      try await client.sync()
+      for try await event in await client.sync(repository: repository) {
+        if let eventRepository = event.repository,
+          event.event == "repository_started" || event.event == "progress"
+        {
+          activeRepository = eventRepository
+        }
+        if event.result == "failure" {
+          reportedFailure = true
+          let detail = event.error.flatMap { $0.isEmpty ? nil : $0 } ?? event.message
+          if let eventRepository = event.repository {
+            if event.event == "repository_finished" || repositoryFailures[eventRepository] == nil {
+              repositoryFailures[eventRepository] = detail
+            }
+            operationStatus = repositoryFailures[eventRepository] ?? detail
+          } else {
+            operationStatus = detail
+          }
+          continue
+        }
+        if event.event == "operation_finished", reportedFailure { continue }
+        operationStatus = event.message
+      }
       syncError = nil
     } catch {
       syncError = String(describing: error)
+      if let failedRepository = activeRepository ?? repository {
+        if let specificFailure = repositoryFailures[failedRepository] {
+          operationStatus = specificFailure
+        } else {
+          repositoryFailures[failedRepository] = syncError
+          operationStatus = "Sync failed: \(syncError!)"
+        }
+      } else {
+        operationStatus = "Sync failed: \(syncError!)"
+      }
     }
     await refresh()
     if let syncError {
@@ -100,6 +144,9 @@ public final class MenuBarModel {
         lastSync: basePresentation.lastSync,
         errors: basePresentation.errors + ["Sync failed: \(syncError)"])
       applyPlatformState()
+    } else if !reportedFailure {
+      operationStatus = "Sync completed"
+      if let repository { repositoryFailures[repository] = nil }
     }
   }
 

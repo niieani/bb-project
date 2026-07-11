@@ -18,6 +18,10 @@ Run observe, publish, and reconcile flow.
 	Show reconcile decisions without write-side sync actions.
 
 .PP
+\fB--events-json\fP[=false]
+	Stream machine-readable operation events as JSON lines.
+
+.PP
 \fB-h\fP, \fB--help\fP[=false]
 	help for sync
 
@@ -28,6 +32,10 @@ Run observe, publish, and reconcile flow.
 .PP
 \fB--push\fP[=false]
 	Allow pushing ahead commits when policy blocks by default.
+
+.PP
+\fB--repo\fP=""
+	Limit synchronization to one local repository.
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

@@ -26,12 +26,20 @@ public struct StatusRepo: Decodable, Sendable {
   public let reasons: [String]
   public let warnings: [String]
   public let lastActivityAt: Date
+  public let actions: [ProjectAction]
 
   enum CodingKeys: String, CodingKey {
     case repoKey = "repo_key"
     case name, catalog, path, state, reasons, warnings
     case lastActivityAt = "last_activity_at"
+    case actions
   }
+}
+
+public struct ProjectAction: Decodable, Equatable, Sendable {
+  public let kind: String
+  public let id: String
+  public let label: String
 }
 
 public enum RepoState: String, Decodable, Sendable {

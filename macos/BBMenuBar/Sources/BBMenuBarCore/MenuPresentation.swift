@@ -14,12 +14,17 @@ public struct MenuPresentation: Equatable, Sendable {
   ) -> Self {
     var sections: [MenuSection] = []
     if let status {
+      let actionMap = Dictionary(
+        uniqueKeysWithValues: status.repos.map { ($0.repoKey, $0.actions) })
       let blocked = status.attention.items
         .filter { $0.machineID == status.machineID && $0.state == .blocked }
-        .map(MenuItem.init)
+        .map { MenuItem(attention: $0, actions: actionMap[$0.repoKey] ?? []) }
+      let actionable = status.repos
+        .filter { !$0.actions.isEmpty }
+        .map { MenuItem(repo: $0, machineID: status.machineID) }
       let staleWIP = status.attention.items
         .filter { $0.machineID == status.machineID && $0.state == .wip && $0.eligible }
-        .map(MenuItem.init)
+        .map { MenuItem(attention: $0) }
       let overviewIdentities = Set(
         overview?.repos.flatMap { repo in
           repo.cells.filter(\.present).map { "\($0.machineID)\u{0}\(repo.repoKey)" }
@@ -29,8 +34,11 @@ public struct MenuPresentation: Equatable, Sendable {
           $0.machineID != status.machineID && $0.eligible
             && overviewIdentities.contains("\($0.machineID)\u{0}\($0.repoKey)")
         }
-        .map(MenuItem.init)
+        .map { MenuItem(attention: $0) }
       if !blocked.isEmpty { sections.append(MenuSection(title: "Blocked", items: blocked)) }
+      if !actionable.isEmpty {
+        sections.append(MenuSection(title: "Ready to sync", items: actionable))
+      }
       if !staleWIP.isEmpty { sections.append(MenuSection(title: "Stale WIP", items: staleWIP)) }
       if !remote.isEmpty { sections.append(MenuSection(title: "Other machines", items: remote)) }
     }
@@ -59,15 +67,28 @@ public struct MenuItem: Equatable, Identifiable, Sendable {
   public let title: String
   public let detail: String
   public let statusTone: RepoStatusTone
+  public let repoKey: String
+  public let actions: [ProjectAction]
 
-  init(attention: AttentionItem) {
+  init(attention: AttentionItem, actions: [ProjectAction] = []) {
     id = "\(attention.machineID)\u{0}\(attention.repoKey)"
+    repoKey = attention.repoKey
+    self.actions = actions
     title =
       attention.name.count <= 30
       ? attention.name : String(attention.name.prefix(27)) + "..."
     let reason = attention.dominantReason.replacingOccurrences(of: "_", with: " ")
     detail = attention.machineID + " · " + reason
     statusTone = RepoStatusTone(state: attention.state)
+  }
+
+  init(repo: StatusRepo, machineID: String) {
+    id = "\(machineID)\u{0}\(repo.repoKey)"
+    repoKey = repo.repoKey
+    actions = repo.actions
+    title = repo.name.count <= 30 ? repo.name : String(repo.name.prefix(27)) + "..."
+    detail = machineID + " · ready to sync"
+    statusTone = RepoStatusTone(state: repo.state)
   }
 }
 

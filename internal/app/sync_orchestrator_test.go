@@ -71,6 +71,39 @@ func TestAnyUnsyncableInSelectedCatalogsIgnoresWipReasons(t *testing.T) {
 	}
 }
 
+func TestAnyUnsyncableInScopeOnlyChecksSelectedRepository(t *testing.T) {
+	t.Parallel()
+	catalogs := map[string]domain.Catalog{"software": {Name: "software"}}
+	repos := []domain.MachineRepoRecord{
+		{RepoKey: "software/blocked", Catalog: "software", State: domain.RepoStateBlocked},
+		{RepoKey: "software/ready", Catalog: "software", State: domain.RepoStatePending},
+	}
+	if anyUnsyncableInScope(repos, catalogs, "software/ready") {
+		t.Fatal("unselected blocked repository affected targeted result")
+	}
+	if !anyUnsyncableInScope(repos, catalogs, "software/blocked") {
+		t.Fatal("selected blocked repository was ignored")
+	}
+}
+
+func TestOperationEventsAreJSONLines(t *testing.T) {
+	t.Parallel()
+	stdout := &bytes.Buffer{}
+	a := New(state.NewPaths(t.TempDir()), stdout, &bytes.Buffer{})
+	a.emitOperationEvent(true, OperationEvent{Event: "progress", Operation: "sync", Repository: "software/api", Phase: "fetch", Message: "Fetching origin"})
+	if got := stdout.String(); !strings.HasSuffix(got, "\n") || !strings.Contains(got, `"repository":"software/api"`) || !strings.Contains(got, `"phase":"fetch"`) {
+		t.Fatalf("event = %q", got)
+	}
+}
+
+func TestRepositoryFailureDetailIncludesReasons(t *testing.T) {
+	t.Parallel()
+	got := repositoryFailureDetail([]domain.MachineRepoRecord{{RepoKey: "software/api", Reasons: []domain.UnsyncableReason{domain.ReasonPullFailed}}}, "software/api")
+	if got != "repository remains blocked: pull_failed" {
+		t.Fatalf("detail = %q", got)
+	}
+}
+
 func TestRunSyncIncludeCatalogWarnsWhenCatalogOnlyExistsRemotely(t *testing.T) {
 	home := t.TempDir()
 	paths := state.NewPaths(home)

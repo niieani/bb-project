@@ -421,6 +421,8 @@ func newSyncCommand(runtime *runtimeState) *cobra.Command {
 	var includeCatalogs []string
 	var push bool
 	var dryRun bool
+	var repository string
+	var eventsJSON bool
 
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -435,6 +437,8 @@ func newSyncCommand(runtime *runtimeState) *cobra.Command {
 				IncludeCatalogs: includeCatalogs,
 				Push:            push,
 				DryRun:          dryRun,
+				Repository:      repository,
+				EventsJSON:      eventsJSON,
 			})
 			return withExitCode(code, err)
 		},
@@ -443,6 +447,8 @@ func newSyncCommand(runtime *runtimeState) *cobra.Command {
 	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
 	cmd.Flags().BoolVar(&push, "push", false, "Allow pushing ahead commits when policy blocks by default.")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show reconcile decisions without write-side sync actions.")
+	cmd.Flags().StringVar(&repository, "repo", "", "Limit synchronization to one local repository.")
+	cmd.Flags().BoolVar(&eventsJSON, "events-json", false, "Stream machine-readable operation events as JSON lines.")
 
 	return cmd
 }

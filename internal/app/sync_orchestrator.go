@@ -10,8 +10,20 @@ import (
 	"bb-project/internal/state"
 )
 
-func (a *App) runSync(opts SyncOptions) (int, error) {
+func (a *App) runSync(opts SyncOptions) (code int, runErr error) {
 	started := a.Now()
+	a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "operation_started", Operation: "sync", Repository: opts.Repository, Message: "Starting sync"})
+	defer func() {
+		event := OperationEvent{Event: "operation_finished", Operation: "sync", Repository: opts.Repository, Message: "Sync completed", Result: "success"}
+		if runErr != nil || code != 0 {
+			event.Message = "Sync failed"
+			event.Result = "failure"
+			if runErr != nil {
+				event.Error = runErr.Error()
+			}
+		}
+		a.emitOperationEvent(opts.EventsJSON, event)
+	}()
 	a.logf("sync: acquiring global lock")
 	lock, err := state.AcquireLock(a.Paths, "sync")
 	if err != nil {
@@ -35,13 +47,29 @@ func (a *App) runSync(opts SyncOptions) (int, error) {
 	}()
 	a.logf("sync: start push=%t dry-run=%t", opts.Push, opts.DryRun)
 
+	if strings.TrimSpace(opts.Repository) != "" {
+		target, found, resolveErr := resolveLocalProjectSelector(machine.Repos, opts.Repository)
+		if resolveErr != nil {
+			return 2, resolveErr
+		}
+		if !found {
+			return 2, fmt.Errorf("repository %q not found locally", opts.Repository)
+		}
+		opts.Repository = target.RepoKey
+		opts.IncludeCatalogs = []string{target.Catalog}
+	}
 	selectedCatalogs, selectedCatalogMap, err := selectSyncCatalogs(a.Paths, machine, opts.IncludeCatalogs)
 	if err != nil {
 		return 2, err
 	}
 	a.logf("sync: selected %d catalog(s)", len(selectedCatalogs))
-	if err := a.alignRemoteFormatsBeforeObservation(cfg, selectedCatalogs, opts.DryRun); err != nil {
-		return 2, err
+	if opts.Repository == "" {
+		if err := a.alignRemoteFormatsBeforeObservation(cfg, selectedCatalogs, opts.DryRun); err != nil {
+			return 2, err
+		}
+	}
+	if opts.Repository != "" {
+		a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "repository_started", Operation: "sync", Repository: opts.Repository, Phase: "observe", Message: "Checking repository"})
 	}
 
 	previous := previousRepoRecords(machine.Repos)
@@ -69,13 +97,52 @@ func (a *App) runSync(opts SyncOptions) (int, error) {
 		return 2, err
 	}
 	a.logf("sync: published post-reconciliation observations")
+	blocked := anyUnsyncableInScope(machine.Repos, selectedCatalogMap, opts.Repository)
+	if opts.Repository != "" {
+		event := OperationEvent{Event: "repository_finished", Operation: "sync", Repository: opts.Repository, Phase: "complete", Message: "Repository sync completed", Result: "success"}
+		if blocked {
+			event.Message = "Repository needs attention"
+			event.Result = "failure"
+			event.Error = repositoryFailureDetail(machine.Repos, opts.Repository)
+		}
+		a.emitOperationEvent(opts.EventsJSON, event)
+	}
 
-	if anyUnsyncableInSelectedCatalogs(machine.Repos, selectedCatalogMap) {
+	if blocked {
 		a.logf("sync: completed with blocked repos")
 		return 1, nil
 	}
 	a.logf("sync: completed successfully")
 	return 0, nil
+}
+
+func repositoryFailureDetail(repos []domain.MachineRepoRecord, repository string) string {
+	for _, repo := range repos {
+		if repo.RepoKey != repository {
+			continue
+		}
+		if len(repo.Reasons) == 0 {
+			return "repository remains blocked"
+		}
+		parts := make([]string, len(repo.Reasons))
+		for i, reason := range repo.Reasons {
+			parts[i] = string(reason)
+		}
+		return "repository remains blocked: " + strings.Join(parts, ", ")
+	}
+	return "repository result unavailable"
+}
+
+func anyUnsyncableInScope(repos []domain.MachineRepoRecord, catalogs map[string]domain.Catalog, repository string) bool {
+	for _, repo := range repos {
+		if repository != "" && repo.RepoKey != repository {
+			continue
+		}
+		if _, ok := catalogs[repo.Catalog]; ok && repo.State == domain.RepoStateBlocked {
+			return true
+		}
+	}
+	return false
 }
 
 func selectSyncCatalogs(paths state.Paths, machine domain.MachineFile, include []string) ([]domain.Catalog, map[string]domain.Catalog, error) {

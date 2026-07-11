@@ -69,5 +69,7 @@ private struct StubStatusClient: BBClient {
     Data(#"{"machines":[],"repos":[],"synced_everywhere":0,"warnings":[]}"#.utf8)
   }
 
-  func sync() async throws {}
+  func sync(repository: String?) async -> AsyncThrowingStream<OperationEvent, Error> {
+    AsyncThrowingStream { $0.finish() }
+  }
 }

@@ -62,6 +62,8 @@ type ScanOptions struct {
 
 type SyncOptions struct {
 	IncludeCatalogs []string
+	Repository      string
+	EventsJSON      bool
 	Push            bool
 	DryRun          bool
 }
@@ -1411,7 +1413,7 @@ func (a *App) RunStatus(jsonOut bool, include []string) (int, error) {
 		}
 		payload := StatusContract{
 			MachineID:      machine.MachineID,
-			Repos:          buildStatusRepos(filtered),
+			Repos:          buildStatusRepos(filtered, selected),
 			Summary:        buildStatusSummary(filtered),
 			LastSync:       lastSync,
 			Attention:      buildFleetAttention(fleet, a.Now(), cfg.Attention),
