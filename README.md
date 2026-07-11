@@ -672,6 +672,8 @@ Release flow:
 4. `Release Please` then calls the shared publish workflow, which runs GoReleaser plus the native app build, Developer ID signing, notarization, release-asset upload, and Homebrew tap cask updates.
 5. The standalone `Release` workflow is a manual recovery path for republishing the menubar app for an existing tag. It skips GoReleaser so existing CLI assets cannot block app recovery.
 
+The app release suite runs with a constrained Swift cooperative executor so blocking process I/O cannot be masked by a high-core development machine.
+
 Required GitHub secret:
 
 - `OP_SERVICE_ACCOUNT_TOKEN`: 1Password service account token with read access to the Apple release-signing items.

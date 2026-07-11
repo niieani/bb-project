@@ -68,7 +68,7 @@ public struct ProcessBBClient: BBClient {
   private func eventStream(arguments: [String]) -> AsyncThrowingStream<OperationEvent, Error> {
     AsyncThrowingStream { continuation in
       let lifetime = ProcessLifetime()
-      let task = Task.detached {
+      DispatchQueue.global(qos: .userInitiated).async {
         do {
           let executable = try executableURL ?? Self.resolveExecutable()
           let process = Process()
@@ -81,10 +81,15 @@ public struct ProcessBBClient: BBClient {
           try process.run()
           lifetime.register(process)
           defer { lifetime.clear() }
-          async let errorData = stderr.fileHandleForReading.readToEnd() ?? Data()
+          let errorData = LockedData()
+          let errorRead = DispatchGroup()
+          errorRead.enter()
+          DispatchQueue.global(qos: .userInitiated).async {
+            errorData.set((try? stderr.fileHandleForReading.readToEnd()) ?? Data())
+            errorRead.leave()
+          }
           var buffer = Data()
           while true {
-            try Task.checkCancellation()
             let chunk = stdout.fileHandleForReading.availableData
             if chunk.isEmpty { break }
             buffer.append(chunk)
@@ -97,7 +102,8 @@ public struct ProcessBBClient: BBClient {
             }
           }
           process.waitUntilExit()
-          let detail = String(decoding: try await errorData, as: UTF8.self)
+          errorRead.wait()
+          let detail = String(decoding: errorData.value(), as: UTF8.self)
           guard process.terminationStatus == 0 else {
             throw BBClientError.commandFailed(code: process.terminationStatus, detail: detail)
           }
@@ -105,7 +111,6 @@ public struct ProcessBBClient: BBClient {
         } catch { continuation.finish(throwing: error) }
       }
       continuation.onTermination = { _ in
-        task.cancel()
         lifetime.cancel()
       }
     }
@@ -113,25 +118,43 @@ public struct ProcessBBClient: BBClient {
 
   private func run(arguments: [String]) async throws -> Data {
     let executable = try executableURL ?? Self.resolveExecutable()
-    return try await Task.detached {
-      let process = Process()
-      let stdout = Pipe()
-      let stderr = Pipe()
-      process.executableURL = executable
-      process.arguments = arguments
-      process.standardOutput = stdout
-      process.standardError = stderr
-      try process.run()
-      async let output = stdout.fileHandleForReading.readToEnd() ?? Data()
-      async let errorOutput = stderr.fileHandleForReading.readToEnd() ?? Data()
-      process.waitUntilExit()
-      let (statusData, errorData) = try await (output, errorOutput)
-      guard process.terminationStatus == 0 else {
-        let detail = String(decoding: errorData, as: UTF8.self)
-        throw BBClientError.commandFailed(code: process.terminationStatus, detail: detail)
+    return try await withCheckedThrowingContinuation { continuation in
+      DispatchQueue.global(qos: .userInitiated).async {
+        do {
+          let process = Process()
+          let stdout = Pipe()
+          let stderr = Pipe()
+          process.executableURL = executable
+          process.arguments = arguments
+          process.standardOutput = stdout
+          process.standardError = stderr
+          try process.run()
+          let output = LockedData()
+          let errorOutput = LockedData()
+          let reads = DispatchGroup()
+          for (handle, destination) in [
+            (stdout.fileHandleForReading, output),
+            (stderr.fileHandleForReading, errorOutput),
+          ] {
+            reads.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+              destination.set((try? handle.readToEnd()) ?? Data())
+              reads.leave()
+            }
+          }
+          process.waitUntilExit()
+          reads.wait()
+          guard process.terminationStatus == 0 else {
+            throw BBClientError.commandFailed(
+              code: process.terminationStatus,
+              detail: String(decoding: errorOutput.value(), as: UTF8.self))
+          }
+          continuation.resume(returning: output.value())
+        } catch {
+          continuation.resume(throwing: error)
+        }
       }
-      return statusData
-    }.value
+    }
   }
 
   private static func resolveExecutable() throws -> URL {
@@ -153,6 +176,15 @@ public struct ProcessBBClient: BBClient {
     }
     return executable
   }
+}
+
+private final class LockedData: @unchecked Sendable {
+  private let lock = NSLock()
+  private var data = Data()
+
+  func set(_ data: Data) { lock.withLock { self.data = data } }
+
+  func value() -> Data { lock.withLock { data } }
 }
 
 private final class ProcessLifetime: @unchecked Sendable {

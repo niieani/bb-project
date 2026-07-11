@@ -53,7 +53,8 @@ archive="$output_dir/${APP_NAME}_${version}_macOS.zip"
 
 run_tests() {
   echo "release: running Swift tests (10m timeout)" >&2
-  run_with_timeout 600 swift test --package-path "$PACKAGE_DIR" >&2
+  LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 \
+    run_with_timeout 600 swift test --package-path "$PACKAGE_DIR" >&2
 }
 
 build_bundle() {
