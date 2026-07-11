@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.10.0](https://github.com/niieani/bb-project/compare/v0.9.0...v0.10.0) (2026-07-11)
+
+
+### Features
+
+* **macos:** add CLI-matched repository status dots (BB-gcpevkel) ([8b9ba35](https://github.com/niieani/bb-project/commit/8b9ba3577cb4641ecff2f19f0c5059f1d2e41561))
+* **macos:** add safe project fixes (BB-hnmjxggc) ([f529e04](https://github.com/niieani/bb-project/commit/f529e042f202a36feee62b2f7da64685cbd3ed6b))
+* **macos:** add targeted project sync (BB-lmwqykdw) ([fc67f29](https://github.com/niieani/bb-project/commit/fc67f291ef8d5c7c8e387f68554843d8761dc94a))
+* **macos:** show global sync progress (BB-tscswtll) ([5d191a8](https://github.com/niieani/bb-project/commit/5d191a8fab852c39f9edcce0aaf13bba2e006c83))
+
+
+### Bug Fixes
+
+* **macos:** prevent menu details from collapsing (BB-gcpevkel) ([09a5124](https://github.com/niieani/bb-project/commit/09a5124e4bb55c691b64795bf062cf07c0005e52))
+* **macos:** scroll long menu bar attention lists (BB-gcpevkel) ([e5cc468](https://github.com/niieani/bb-project/commit/e5cc4680f18dea955b17384c09d9ed791e9a961e))
+* **macos:** stabilize overview decoding and menu scrolling (BB-gcpevkel) ([67931d6](https://github.com/niieani/bb-project/commit/67931d6831abee759f40046b1ac75f3bf5062537))
+* **release:** bound notarization wait (BB-krezgwel) ([8c2d754](https://github.com/niieani/bb-project/commit/8c2d7540bf517c12f35bdbc1a007be797cc9e380))
+* **sync:** track reconciliation progress (BB-tscswtll) ([8affcab](https://github.com/niieani/bb-project/commit/8affcabef6d055badfa9313f130a0bc0a9b08ca1))
+
 ## [0.9.0](https://github.com/niieani/bb-project/compare/v0.8.1...v0.9.0) (2026-07-11)
 
 
