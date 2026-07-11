@@ -212,16 +212,16 @@ Plain output, one line per repo (repos where all machines are `synced` are colla
 into a count unless `--all`):
 
 ```
-projects/gpt-tokenizer   here: wip (dirty 2h ago)   MiniPC: synced   MBPAir: — (not cloned)
-projects/scaffold        here: blocked (diverged)   MiniPC: wip (dirty 6d ago)
+projects/gpt-tokenizer   here: wip (dirty 2h ago)   macstudio: synced
+projects/scaffold        here: blocked (diverged)   macstudio: wip (dirty 6d ago)
 synced everywhere: 61 repos (--all to list)
 ```
 
 - `here` column first, then other machines by id.
 - Each cell: state + dominant reason + humanized `last_activity_at` for wip/blocked.
 - Machine-level staleness banner when a machine file's `updated_at` is older than
-  `overview.machine_stale_days` (default 3): "MiniPC last published 5d ago — its data
-  may be stale."
+  `overview.machine_stale_days` (default 3): "macstudio last published 5d ago — its
+  data may be stale."
 - `--json` emits the full matrix (all repos, all machines, reasons, warnings,
   timestamps) — this JSON is the menubar plugin's data source.
 - Flags: `--include-catalog` (repeatable), `--all`.
@@ -239,18 +239,17 @@ synced everywhere: 61 repos (--all to list)
   (previously: any blocking unsyncable reason). Stale-wip and warnings exit `0`.
 - `sync`/`ensure`: exit `1` only for remaining `blocked` repos.
 
-## Menubar plugin (SwiftBar/xbar)
+## Menubar: native macOS app (separate plan)
 
-`contrib/bb-menubar/bb.10m.sh` — shell + `jq` over `bb status --json` and
-`bb overview --json`:
+The menubar surface is a native Swift menubar app (no SwiftBar/xbar dependency),
+specced and tracked in its own plan/PRD. This spec only guarantees its data
+contract:
 
-- title: `✓ 87` when nothing blocked/stale; `⚠ 2` otherwise
-- dropdown: blocked repos, stale-wip repos, other machines' dirty repos, last sync
-  time, `bb sync` trigger line
-- README section documents installation (copy/symlink into SwiftBar plugins dir)
-
-Shipped as contrib script; no Go code, no test harness beyond shellcheck in CI if
-already present (do not add new CI infra for this).
+- `bb status --json` and `bb overview --json` are stable, documented interfaces
+  (fields per the sections above); the app shells out to `bb` and parses these.
+- title: `✓ 87` when nothing blocked/stale; `⚠ 2` otherwise; dropdown: blocked
+  repos, stale-wip repos, other machines' dirty repos, last sync time, manual sync
+  trigger — detailed UX belongs to the app's own PRD.
 
 ## `bb fix` adaptation (minimal)
 
@@ -319,17 +318,32 @@ before the next.
 8. **`bb overview`**: matrix assembly, collapse rule, machine-staleness banner,
    `--json`, selector flags. Tests: multi-machine fixtures (existing e2e harness has
    multi-machine setup), not-cloned cells, stale machine banner.
-9. **`bb fix` adaptation + config wizard fields + contrib menubar script + docs.**
+9. **`bb fix` adaptation + config wizard fields + docs.**
    Tests: fix list grouping golden, wizard field round-trip.
+   (Menubar app is its own plan/PRD, not a slice here.)
 
 Slices 1–3 land together as one PR-sized unit if intermediate states won't compile
 cleanly (schema and evaluation are coupled); 4–9 are independent after that.
 
+## Rollout (schema v2 fleet update)
+
+Schema v2 requires all machines to update `bb` around the same time. Procedure once
+the work is merged:
+
+1. Push/merge to `main`; wait for the release-please PR; merge it.
+2. Wait for the release build to publish (brew formula updated).
+3. Update both machines:
+   - locally: `brew upgrade bb`
+   - `ssh macstudio 'brew upgrade bb'`
+4. Verify: `bb version` on both machines reports the new release (not `dev`).
+5. Run `bb sync` on both; confirm `bb doctor` shows no "old-format state" machine
+   warnings and `bb overview` shows both machines publishing v2 state.
+
 ## Risks / notes
 
-- All machines must update `bb` near-simultaneously after schema v2 lands (v1
-  machine files are skipped, so an un-updated machine silently stops participating
-  in reconcile until updated — the named warning in sync/doctor output mitigates).
+- Between step 1 and step 5, an un-updated machine silently stops participating in
+  reconcile (its v1 file is skipped) — the named warning in sync/doctor output
+  surfaces this; the rollout procedure above bounds the window.
 - `ls-remote` verification needs network; offline sync runs leave the warning in
   place and retry next run (acceptable — align is idempotent).
 - `last_activity_at` from mtimes is a heuristic (build tools touching files count as
