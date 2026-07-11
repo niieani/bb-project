@@ -204,7 +204,11 @@ func overviewCellText(c OverviewCell, now time.Time) string {
 		if dominant, ok := dominantAttentionReason(c.Reasons); ok {
 			reason = string(dominant)
 		}
-		s += " (" + reason + ")"
+		activity := "activity unknown"
+		if !c.LastActivityAt.IsZero() {
+			activity = humanAge(now.Sub(c.LastActivityAt)) + " ago"
+		}
+		s += " (" + reason + " · " + activity + ")"
 	}
 	return s
 }

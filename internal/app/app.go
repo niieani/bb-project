@@ -940,7 +940,7 @@ func (a *App) scanAndPublish(cfg domain.ConfigFile, machine *domain.MachineFile,
 	}
 
 	records := make([]domain.MachineRepoRecord, len(discovered))
-	unsyncable := false
+	blocked := false
 	workerCount := scanWorkerCount(len(discovered))
 	jobs := make(chan int)
 	results := make(chan observedResult, len(discovered))
@@ -983,8 +983,8 @@ func (a *App) scanAndPublish(cfg domain.ConfigFile, machine *domain.MachineFile,
 		}
 		old := prev[repoRecordIdentityKey(result.Record)]
 		result.Record = domain.UpdateObservedAt(old, result.Record, observationTime)
-		if result.Record.State != domain.RepoStateSynced {
-			unsyncable = true
+		if result.Record.State == domain.RepoStateBlocked {
+			blocked = true
 		}
 		records[result.Index] = result.Record
 	}
@@ -1008,7 +1008,7 @@ func (a *App) scanAndPublish(cfg domain.ConfigFile, machine *domain.MachineFile,
 		return false, err
 	}
 	a.logf("state: wrote machine file %s with %d repo record(s)", a.Paths.MachinePath(machine.MachineID), len(machine.Repos))
-	return unsyncable, nil
+	return blocked, nil
 }
 
 func (a *App) observeRepoForScan(cfg domain.ConfigFile, repo discoveredRepo, allowPush bool) (domain.MachineRepoRecord, error) {
@@ -1362,11 +1362,11 @@ func (a *App) RunScan(opts ScanOptions) (int, error) {
 		return 2, err
 	}
 	a.logf("scan: start")
-	unsyncable, err := a.scanAndPublish(cfg, &machine, opts)
+	blocked, err := a.scanAndPublish(cfg, &machine, opts)
 	if err != nil {
 		return 2, err
 	}
-	if unsyncable {
+	if blocked {
 		a.logf("scan: completed with blocked repos")
 		return 1, nil
 	}
