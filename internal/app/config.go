@@ -257,6 +257,9 @@ func validateConfigForSave(cfg domain.ConfigFile) error {
 	if cfg.Overview.MachineStaleDays < 1 {
 		return fmt.Errorf("overview.machine_stale_days must be >= 1")
 	}
+	if cfg.Journal.MaxEntries < 1 {
+		return fmt.Errorf("journal.max_entries must be >= 1")
+	}
 	if cfg.Scheduler.IntervalMinutes < 1 {
 		return fmt.Errorf("scheduler.interval_minutes must be >= 1")
 	}

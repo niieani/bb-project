@@ -291,6 +291,7 @@ func (h *Harness) ExternalSync(order ...string) {
 		copyFileIfExists(h.t, filepath.Join(m.ConfigRoot(), "config.yaml"), filepath.Join(sharedConfig, "config.yaml"))
 		// repos metadata is shared.
 		copyTree(h.t, filepath.Join(m.ConfigRoot(), "repos"), filepath.Join(sharedConfig, "repos"))
+		copyFileIfExists(h.t, filepath.Join(m.ConfigRoot(), "journal", m.ID+".jsonl"), filepath.Join(sharedConfig, "journal", m.ID+".jsonl"))
 		// each machine writes only its own machine file.
 		copyFileIfExists(
 			h.t,

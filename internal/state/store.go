@@ -72,6 +72,11 @@ func (p Paths) NotifyCachePath() string {
 	return filepath.Join(p.LocalStateRoot(), NotifyCacheName)
 }
 
+func (p Paths) JournalDir() string { return filepath.Join(p.ConfigRoot(), "journal") }
+func (p Paths) JournalPath(machine string) string {
+	return filepath.Join(p.JournalDir(), machine+".jsonl")
+}
+
 func EnsureDir(path string) error {
 	return os.MkdirAll(path, 0o755)
 }
@@ -119,6 +124,7 @@ func DefaultConfig() domain.ConfigFile {
 		},
 		Notify:   domain.NotifyConfig{Enabled: true, ThrottleMinutes: 60, QuietHours: 2, WIPStaleHours: 24},
 		Overview: domain.OverviewConfig{MachineStaleDays: 3},
+		Journal:  domain.JournalConfig{MaxEntries: 500},
 		Integrations: domain.Integrations{
 			Lumen: domain.LumenIntegrationConfig{
 				Enabled:                            true,
@@ -177,6 +183,9 @@ func LoadConfig(paths Paths) (domain.ConfigFile, error) {
 	}
 	if cfg.Move.PostHooks == nil {
 		cfg.Move.PostHooks = []string{}
+	}
+	if cfg.Journal.MaxEntries < 1 {
+		return domain.ConfigFile{}, fmt.Errorf("journal.max_entries must be >= 1")
 	}
 	return cfg, nil
 }

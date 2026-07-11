@@ -292,6 +292,10 @@ Shows a read-only cross-machine matrix with the local machine first. Non-synced 
 
 In JSON, machines expose `id`, `here`, `published`, optional `updated_at`, and `stale`; unpublished local columns omit `updated_at` rather than fabricating an age. Repository rows expose `repo_key`, `synced_everywhere`, and ordered `cells`; each cell exposes machine identity, presence, optional state, reasons, warnings, and last activity.
 
+### `bb log [--repo <selector>] [--machine <id>] [--limit N] [--json]`
+
+Shows the merged newest-first fleet sync journal. Sync records run summaries plus converged, cloned, and pushed actions. Per-machine JSONL journals live in the shared state directory and prune to `journal.max_entries`. Journal write failures are logged without changing sync outcomes.
+
 ### `bb doctor [--include-catalog <name> ...]`
 
 Prints non-synced tiers, reasons, and warnings from the machine file.
@@ -518,6 +522,8 @@ notify:
   wip_stale_hours: 24
 overview:
   machine_stale_days: 3
+journal:
+  max_entries: 500
 integrations:
   lumen:
     enabled: true

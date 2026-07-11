@@ -69,6 +69,7 @@ func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRep
 			rec.StateHash = domain.ComputeStateHash(rec)
 			return rec, nil
 		}
+		a.appendJournal("converged", rec.RepoKey, "pulled fast-forward")
 	}
 
 	if rec.Ahead > 0 {
@@ -86,6 +87,7 @@ func (a *App) observeAndApplyLocalSync(cfg domain.ConfigFile, repo discoveredRep
 				rec.StateHash = domain.ComputeStateHash(rec)
 				return rec, nil
 			}
+			a.appendJournal("pushed", rec.RepoKey, "pushed ahead commits")
 		}
 	}
 

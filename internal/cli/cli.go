@@ -32,6 +32,7 @@ type appRunner interface {
 	RunOperate(project string, args []string) (int, error)
 	RunStatus(jsonOut bool, include []string) (int, error)
 	RunOverview(opts app.OverviewOptions) (int, error)
+	RunLog(opts app.LogOptions) (int, error)
 	RunDoctor(include []string) (int, error)
 	RunEnsure(include []string) (int, error)
 	RunSchedulerInstall(opts app.SchedulerInstallOptions) (int, error)
@@ -186,6 +187,7 @@ func newRootCommand(runtime *runtimeState) *cobra.Command {
 		newFixCommand(runtime),
 		newStatusCommand(runtime),
 		newOverviewCommand(runtime),
+		newLogCommand(runtime),
 		newDoctorCommand(runtime),
 		newEnsureCommand(runtime),
 		newSchedulerCommand(runtime),
@@ -489,6 +491,24 @@ func newOverviewCommand(runtime *runtimeState) *cobra.Command {
 	cmd.Flags().StringArrayVar(&include, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
 	cmd.Flags().BoolVar(&all, "all", false, "Show repositories synced on every machine.")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit the stable JSON matrix contract.")
+	return cmd
+}
+func newLogCommand(runtime *runtimeState) *cobra.Command {
+	var repo, machine string
+	var limit int
+	var jsonOut bool
+	cmd := &cobra.Command{Use: "log", Short: "Show the fleet sync journal.", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+		runner, err := runtime.appRunner()
+		if err != nil {
+			return withExitCode(2, err)
+		}
+		code, err := runner.RunLog(app.LogOptions{Repo: repo, Machine: machine, Limit: limit, JSON: jsonOut})
+		return withExitCode(code, err)
+	}}
+	cmd.Flags().StringVar(&repo, "repo", "", "Filter by repository key or name.")
+	cmd.Flags().StringVar(&machine, "machine", "", "Filter by machine ID.")
+	cmd.Flags().IntVar(&limit, "limit", 50, "Maximum events.")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit JSON events.")
 	return cmd
 }
 

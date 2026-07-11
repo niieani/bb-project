@@ -11,6 +11,7 @@ import (
 )
 
 func (a *App) runSync(opts SyncOptions) (int, error) {
+	started := a.Now()
 	a.logf("sync: acquiring global lock")
 	lock, err := state.AcquireLock(a.Paths, "sync")
 	if err != nil {
@@ -25,6 +26,13 @@ func (a *App) runSync(opts SyncOptions) (int, error) {
 	if err != nil {
 		return 2, err
 	}
+	defer func() {
+		counts := map[domain.RepoSyncState]int{}
+		for _, r := range machine.Repos {
+			counts[r.State]++
+		}
+		a.appendJournal("sync_run", "", fmt.Sprintf("synced=%d pending=%d wip=%d blocked=%d duration=%s", counts[domain.RepoStateSynced], counts[domain.RepoStatePending], counts[domain.RepoStateWip], counts[domain.RepoStateBlocked], a.Now().Sub(started)))
+	}()
 	a.logf("sync: start push=%t notify=%t dry-run=%t", opts.Push, opts.Notify, opts.DryRun)
 
 	selectedCatalogs, selectedCatalogMap, err := selectSyncCatalogs(a.Paths, machine, opts.IncludeCatalogs)

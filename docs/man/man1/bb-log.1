@@ -1,0 +1,43 @@
+.nh
+.TH "BB" "1" "Jul 2026" "bb" ""
+
+.SH NAME
+bb-log - Show the fleet sync journal.
+
+
+.SH SYNOPSIS
+\fBbb log [flags]\fP
+
+
+.SH DESCRIPTION
+Show the fleet sync journal.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for log
+
+.PP
+\fB--json\fP[=false]
+	Emit JSON events.
+
+.PP
+\fB--limit\fP=50
+	Maximum events.
+
+.PP
+\fB--machine\fP=""
+	Filter by machine ID.
+
+.PP
+\fB--repo\fP=""
+	Filter by repository key or name.
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB-q\fP, \fB--quiet\fP[=false]
+	Suppress verbose bb logs.
+
+
+.SH SEE ALSO
+\fBbb(1)\fP

@@ -117,6 +117,7 @@ func (a *App) ensureFromWinners(
 				continue
 			}
 
+			changed := local.Branch != winner.Record.Branch || local.Behind > 0
 			if local.Branch != winner.Record.Branch {
 				a.logf("sync: checking out branch %s in %s", winner.Record.Branch, local.Path)
 				if err := a.Git.CheckoutWithPreferredRemote(local.Path, winner.Record.Branch, meta.PreferredRemote); err != nil {
@@ -137,6 +138,9 @@ func (a *App) ensureFromWinners(
 				machine.Repos[idx].Reasons = appendUniqueReasons(machine.Repos[idx].Reasons, domain.ReasonPullFailed)
 				machine.Repos[idx].StateHash = domain.ComputeStateHash(machine.Repos[idx])
 				continue
+			}
+			if changed {
+				a.appendJournal("converged", local.RepoKey, "checkout/pull convergence")
 			}
 
 			catalog := domain.Catalog{Name: local.Catalog}
@@ -304,6 +308,7 @@ func (a *App) ensureLocalCopy(
 			a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCheckoutFailed)
 			return nil
 		}
+		a.appendJournal("cloned", meta.RepoKey, "cloned repository")
 		if err := a.Git.EnsureBranchWithPreferredRemote(targetPath, winner.Record.Branch, meta.PreferredRemote); err != nil {
 			a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCheckoutFailed)
 			return nil
@@ -325,6 +330,7 @@ func (a *App) ensureLocalCopy(
 				a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCheckoutFailed)
 				return nil
 			}
+			a.appendJournal("cloned", meta.RepoKey, "cloned repository")
 			if err := a.Git.EnsureBranchWithPreferredRemote(targetPath, winner.Record.Branch, meta.PreferredRemote); err != nil {
 				a.addOrUpdateSyntheticUnsyncable(machine, meta, targetCatalog.Name, targetPath, repoName, domain.ReasonCheckoutFailed)
 				return nil

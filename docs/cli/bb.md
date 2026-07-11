@@ -30,6 +30,7 @@ bb [flags]
 * [bb info](bb_info.md)	 - Show resolved local project information.
 * [bb init](bb_init.md)	 - Initialize or adopt a repository and register metadata.
 * [bb link](bb_link.md)	 - Create local reference symlink to a project or repository.
+* [bb log](bb_log.md)	 - Show the fleet sync journal.
 * [bb operate](bb_operate.md)	 - Launch Lumen operate flow in repository context.
 * [bb overview](bb_overview.md)	 - Show repository state across machines.
 * [bb repo](bb_repo.md)	 - Manage repository metadata and policy settings.

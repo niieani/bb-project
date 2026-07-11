@@ -91,6 +91,7 @@ type ConfigFile struct {
 	Scheduler      SchedulerConfig `yaml:"scheduler"`
 	Notify         NotifyConfig    `yaml:"notify"`
 	Overview       OverviewConfig  `yaml:"overview"`
+	Journal        JournalConfig   `yaml:"journal"`
 	Integrations   Integrations    `yaml:"integrations"`
 }
 
@@ -150,6 +151,16 @@ type NotifyConfig struct {
 }
 type OverviewConfig struct {
 	MachineStaleDays int `yaml:"machine_stale_days"`
+}
+type JournalConfig struct {
+	MaxEntries int `yaml:"max_entries"`
+}
+type JournalEvent struct {
+	At      time.Time `json:"at"`
+	Machine string    `json:"machine"`
+	Event   string    `json:"event"`
+	RepoKey string    `json:"repo_key,omitempty"`
+	Detail  string    `json:"detail,omitempty"`
 }
 
 type Integrations struct {

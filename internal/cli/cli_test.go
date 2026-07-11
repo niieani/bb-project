@@ -69,6 +69,9 @@ type fakeApp struct {
 	overviewCode    int
 	overviewErr     error
 	overviewOpts    app.OverviewOptions
+	logCode         int
+	logErr          error
+	logOpts         app.LogOptions
 	doctorCode      int
 	doctorErr       error
 	ensureCode      int
@@ -152,6 +155,10 @@ func (f *fakeApp) RunStatus(jsonOut bool, include []string) (int, error) {
 func (f *fakeApp) RunOverview(opts app.OverviewOptions) (int, error) {
 	f.overviewOpts = opts
 	return f.overviewCode, f.overviewErr
+}
+func (f *fakeApp) RunLog(opts app.LogOptions) (int, error) {
+	f.logOpts = opts
+	return f.logCode, f.logErr
 }
 
 func (f *fakeApp) RunDoctor(include []string) (int, error) {
@@ -479,6 +486,14 @@ func TestRunStatusDoctorEnsureForwardOptions(t *testing.T) {
 		t.Fatalf("overview opts=%+v", fake.overviewOpts)
 	}
 	mustEqualSlices(t, fake.overviewOpts.IncludeCatalogs, []string{"software", "references"})
+	fake = &fakeApp{}
+	code, _, stderr, _, _ = runCLI(t, fake, []string{"log", "--repo", "api", "--machine", "m", "--limit", "7", "--json"})
+	if code != 0 || stderr != "" {
+		t.Fatalf("log code=%d stderr=%q", code, stderr)
+	}
+	if fake.logOpts.Repo != "api" || fake.logOpts.Machine != "m" || fake.logOpts.Limit != 7 || !fake.logOpts.JSON {
+		t.Fatalf("log opts=%+v", fake.logOpts)
+	}
 
 	fake = &fakeApp{}
 	code, _, stderr, _, _ = runCLI(t, fake, []string{"doctor", "--include-catalog", "software"})

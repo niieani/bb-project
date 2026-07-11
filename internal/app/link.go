@@ -163,6 +163,7 @@ func resolveLocalProjectSelector(records []domain.MachineRepoRecord, selector st
 			byPath = append(byPath, rec)
 		}
 	}
+	byPath = collapseLogicalRepoMatches(byPath)
 	if len(byPath) == 1 {
 		return byPath[0], true, nil
 	}
@@ -181,6 +182,7 @@ func resolveLocalProjectSelector(records []domain.MachineRepoRecord, selector st
 			byRepoKey = append(byRepoKey, rec)
 		}
 	}
+	byRepoKey = collapseLogicalRepoMatches(byRepoKey)
 	if len(byRepoKey) == 1 {
 		return byRepoKey[0], true, nil
 	}
@@ -196,6 +198,7 @@ func resolveLocalProjectSelector(records []domain.MachineRepoRecord, selector st
 				matches = append(matches, rec)
 			}
 		}
+		matches = collapseLogicalRepoMatches(matches)
 		if len(matches) == 1 {
 			return matches[0], true, nil
 		}
@@ -210,6 +213,7 @@ func resolveLocalProjectSelector(records []domain.MachineRepoRecord, selector st
 			byName = append(byName, rec)
 		}
 	}
+	byName = collapseLogicalRepoMatches(byName)
 	if len(byName) == 1 {
 		return byName[0], true, nil
 	}
@@ -223,6 +227,22 @@ func resolveLocalProjectSelector(records []domain.MachineRepoRecord, selector st
 	}
 
 	return domain.MachineRepoRecord{}, false, nil
+}
+
+func collapseLogicalRepoMatches(records []domain.MachineRepoRecord) []domain.MachineRepoRecord {
+	unique := make([]domain.MachineRepoRecord, 0, len(records))
+	seen := make(map[string]bool, len(records))
+	for _, record := range records {
+		key := strings.TrimSpace(record.RepoKey)
+		if key != "" && seen[key] {
+			continue
+		}
+		if key != "" {
+			seen[key] = true
+		}
+		unique = append(unique, record)
+	}
+	return unique
 }
 
 func splitCatalogProjectSelector(selector string) (catalog string, project string, ok bool) {
