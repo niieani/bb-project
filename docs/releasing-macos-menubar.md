@@ -17,6 +17,8 @@ open -a BBMenuBar
 
 The app requires macOS 14 or later. Its cask depends on the tap's `bb` cask, so a first install provides the CLI that the app invokes; future upgrades remain independent and explicit. On first launch it requests notification permission and registers with macOS launch-at-login; verify both against the installed signed bundle, not a SwiftPM development executable.
 
+Service Management may initially report the installed main-app service as `notFound`; this is an unregistered state for a newly installed bundle, so the app attempts registration and only reports failure if registration does not produce an enabled or approval-required service.
+
 ## Release verification
 
 Download the app ZIP from the GitHub release, expand it, then verify the exact distributed bundle:

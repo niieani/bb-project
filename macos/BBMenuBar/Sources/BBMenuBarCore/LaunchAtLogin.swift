@@ -12,6 +12,28 @@ public enum LaunchAtLoginState: Equatable, Sendable {
   }
 }
 
+public enum LaunchAtLoginRegistrationStatus: Equatable, Sendable {
+  case notRegistered
+  case enabled
+  case requiresApproval
+  case notFound
+}
+
+public enum LaunchAtLoginRegistrationDecision: Equatable, Sendable {
+  case register
+  case complete(LaunchAtLoginState)
+
+  public static func decide(
+    _ status: LaunchAtLoginRegistrationStatus
+  ) -> LaunchAtLoginRegistrationDecision {
+    switch status {
+    case .notRegistered, .notFound: .register
+    case .enabled: .complete(.enabled)
+    case .requiresApproval: .complete(.requiresApproval)
+    }
+  }
+}
+
 public protocol LaunchAtLoginService: Sendable {
   func ensureEnabled() async -> LaunchAtLoginState
 }

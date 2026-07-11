@@ -324,6 +324,8 @@ brew upgrade --cask bb-menubar
 open -a BBMenuBar
 ```
 
+Existing installations should upgrade both casks together because Homebrew considers an older installed `bb` sufficient for the app dependency: `brew upgrade --cask bb bb-menubar`.
+
 Release, signing, and Gatekeeper verification details are in `docs/releasing-macos-menubar.md`.
 
 ### `bb overview [--all] [--json] [--include-catalog <name> ...]`
