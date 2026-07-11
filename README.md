@@ -298,6 +298,19 @@ The JSON contract exposes:
 
 Consumers must use `eligible` rather than reproduce quiet-period, stale-WIP, or tier policy. Pending and recently active blocked repositories remain visible in the snapshot but are ineligible. Shared contract fixtures live in `fixtures/status/` and are decoded by both Go and Swift tests.
 
+### Native macOS menubar app
+
+The dependency-free Swift app lives in `macos/BBMenuBar/`. It is intentionally menu-bar-only (no Dock icon) and treats the installed `bb` CLI JSON as its sole data source; it does not read state files, inspect Git, or implement sync policy. The title shows `✅` with the local repository count when the Go-provided fleet attention count is zero, `⚠️` with the eligible attention count otherwise, and an explicit `⛔ Error` state when `bb` is missing or returns an incompatible/malformed contract. Emoji preserve the intended color semantics even when macOS applies template rendering to menu-bar symbols.
+
+For local development:
+
+```bash
+swift test --package-path macos/BBMenuBar
+./script/build_and_run.sh --verify
+```
+
+The Codex Run action uses the same build-and-run script. Development launches pass the just-built repository `bb` binary explicitly; installed builds resolve `bb` from `PATH`, Homebrew, or `~/bin`.
+
 ### `bb overview [--all] [--json] [--include-catalog <name> ...]`
 
 Shows a read-only cross-machine matrix with the local machine first. Non-synced cells include the dominant reason and last-activity age; missing copies show as not cloned. Repositories synced everywhere collapse into one count unless `--all` is used. Stale machine publications are called out explicitly. `--json` is a stable full-matrix contract for tooling and always includes collapsed repositories, every machine, states, reasons, warnings, and timestamps. Overview always exits `0`, including when blocked repositories exist.

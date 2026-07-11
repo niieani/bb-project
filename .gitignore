@@ -6,6 +6,8 @@ references/
 /bb
 .bin/
 .dist/
+/dist/
+/macos/BBMenuBar/.build/
 
 *.local
 *.local.*
