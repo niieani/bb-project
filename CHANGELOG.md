@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/niieani/bb-project/compare/v0.8.1...v0.9.0) (2026-07-11)
+
+
+### Features
+
+* **macos:** move attention notifications into menu app (BB-gcpevkel) ([542945c](https://github.com/niieani/bb-project/commit/542945cdd038562d1cd39d205a80401a4f3b413a))
+
+
+### Bug Fixes
+
+* **macos:** isolate production services from fixture launches (BB-gcpevkel) ([0fe27ee](https://github.com/niieani/bb-project/commit/0fe27eeddc4dd041a489a7a2aecab499af233154))
+
 ## [0.8.1](https://github.com/niieani/bb-project/compare/v0.8.0...v0.8.1) (2026-07-11)
 
 
