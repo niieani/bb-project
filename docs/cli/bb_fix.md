@@ -10,6 +10,7 @@ bb fix [project] [action] [flags]
 
 ```
       --ai-message                    Generate commit message with Lumen for commit-producing fix actions.
+      --events-json                   Emit newline-delimited machine-readable operation events.
   -h, --help                          help for fix
       --include-catalog stringArray   Limit scope to selected catalogs (repeatable).
       --message string                Commit message for stage-commit-push/publish-new-branch/checkpoint-then-sync actions (or 'auto' for configured empty-message behavior).

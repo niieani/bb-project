@@ -81,6 +81,20 @@ func TestFixActionRiskUsesSharedSpec(t *testing.T) {
 	}
 }
 
+func TestMenubarSafeFixActionsUseSharedSpec(t *testing.T) {
+	t.Parallel()
+	for _, action := range []string{FixActionEnableAutoPush, FixActionMoveToCatalog, FixActionAlignRemoteFormat} {
+		if !isMenubarSafeFixAction(action) {
+			t.Errorf("%s should be menubar safe", action)
+		}
+	}
+	for _, action := range []string{FixActionPush, FixActionStash, FixActionClone, FixActionPullFFOnly, FixActionIgnore} {
+		if isMenubarSafeFixAction(action) {
+			t.Errorf("%s must not be menubar safe", action)
+		}
+	}
+}
+
 func TestFixActionPlanStageCommitPushIncludesCommandsAndEffects(t *testing.T) {
 	t.Parallel()
 

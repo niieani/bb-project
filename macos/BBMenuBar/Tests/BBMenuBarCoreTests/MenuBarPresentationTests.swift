@@ -21,14 +21,33 @@ struct MenuBarPresentationTests {
 
     #expect(
       model.presentation.sections.map(\.title) == [
-        "Blocked", "Ready to sync", "Stale WIP", "Other machines",
+        "Blocked", "Actions available", "Stale WIP", "Other machines",
       ])
     #expect(model.presentation.sections[0].items.map(\.title) == ["blocked", "recent"])
-    #expect(model.presentation.sections[1].items.map(\.title) == ["synced"])
+    #expect(model.presentation.sections[1].items.map(\.title) == ["synced", "warning"])
     #expect(model.presentation.sections[1].items[0].actions[0].label == "Sync")
     #expect(model.presentation.sections[2].items.map(\.title) == ["stale"])
     #expect(model.presentation.sections[3].items.map(\.title) == ["remote-only", "remote"])
     #expect(model.presentation.lastSync == "Last sync 30m ago")
+  }
+
+  @Test("pending and stale WIP safe actions remain visible exactly once")
+  @MainActor
+  func pendingAndWIPActions() async {
+    let status = Data(
+      #"{"machine_id":"machine-a","repos":[{"repo_key":"software/move","name":"move","catalog":"software","path":"/repos/move","state":"pending","reasons":["catalog_mismatch"],"warnings":[],"last_activity_at":"2026-07-10T10:00:00Z","actions":[{"kind":"fix","id":"move-to-catalog","label":"Move to expected catalog"}]},{"repo_key":"software/policy","name":"policy","catalog":"software","path":"/repos/policy","state":"wip","reasons":["push_policy_blocked"],"warnings":[],"last_activity_at":"2026-07-09T10:00:00Z","actions":[{"kind":"fix","id":"enable-auto-push","label":"Allow auto-push in sync"}]}],"summary":{"total":2,"synced":0,"pending":1,"wip":1,"blocked":0,"warnings":0},"last_sync":null,"attention":{"throttle_minutes":60,"items":[{"machine_id":"machine-a","repo_key":"software/move","name":"move","state":"pending","dominant_reason":"catalog_mismatch","reasons":["catalog_mismatch"],"last_activity_at":"2026-07-10T10:00:00Z","eligible":false},{"machine_id":"machine-a","repo_key":"software/policy","name":"policy","state":"wip","dominant_reason":"push_policy_blocked","reasons":["push_policy_blocked"],"last_activity_at":"2026-07-09T10:00:00Z","eligible":true}],"eligible_count":1,"fingerprint":"test"},"source_warnings":[]}"#.utf8)
+    let model = MenuBarModel(
+      client: MenuStubClient(
+        status: .success(status),
+        overview: .success(Data(#"{"machines":[],"repos":[],"synced_everywhere":0,"warnings":[]}"#.utf8))))
+
+    await model.refresh()
+
+    let items = model.presentation.sections.flatMap(\.items)
+    #expect(items.filter { $0.repoKey == "software/move" }.count == 1)
+    #expect(items.first { $0.repoKey == "software/move" }?.actions.map(\.id) == ["move-to-catalog"])
+    #expect(items.filter { $0.repoKey == "software/policy" }.count == 1)
+    #expect(items.first { $0.repoKey == "software/policy" }?.actions.map(\.id) == ["enable-auto-push"])
   }
 
   @Test("caps visible repository titles at thirty characters")
@@ -167,6 +186,22 @@ struct MenuBarPresentationTests {
     #expect(await client.refreshCalls() == 2)
   }
 
+  @Test("safe fix streams row progress and refreshes")
+  @MainActor
+  func safeFixProgress() async {
+    let client = EventMenuClient(status: try! fixtureData(area: "status", name: "mixed"), overview: try! fixtureData(area: "overview", name: "mixed"))
+    let model = MenuBarModel(client: client)
+    let operation = Task { await model.fix(repository: "software/warning", action: "align-remote-format") }
+    await eventually { await client.fixCalls() == 1 }
+    await client.send(OperationEvent(event: "progress", operation: "fix", repository: "software/warning", phase: "remote-format-set-url", message: "Aligning remote URL", result: nil, error: nil))
+    await eventually { await MainActor.run { model.operationStatus == "Aligning remote URL" } }
+    #expect(model.activeRepository == "software/warning")
+    await client.finish()
+    await operation.value
+    #expect(model.operationStatus == "Fix completed")
+    #expect(await client.refreshCalls() == 2)
+  }
+
   @Test("interval and wake events each refresh")
   @MainActor
   func refreshEvents() async {
@@ -280,6 +315,7 @@ private actor EventMenuClient: BBClient {
   let status: Data
   let overview: Data
   private var syncCount = 0
+  private var fixCount = 0
   private var refreshCount = 0
   private let stream: AsyncThrowingStream<OperationEvent, Error>
   private let continuation: AsyncThrowingStream<OperationEvent, Error>.Continuation
@@ -301,7 +337,12 @@ private actor EventMenuClient: BBClient {
     syncCount += 1
     return stream
   }
+  func fix(repository: String, action: String) async -> AsyncThrowingStream<OperationEvent, Error> {
+    fixCount += 1
+    return stream
+  }
   func syncCalls() -> Int { syncCount }
+  func fixCalls() -> Int { fixCount }
   func refreshCalls() -> Int { refreshCount }
   func send(_ event: OperationEvent) { continuation.yield(event) }
   func finish() { continuation.finish() }

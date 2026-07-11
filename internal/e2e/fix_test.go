@@ -430,13 +430,24 @@ func TestFixCases(t *testing.T) {
 			t.Fatalf("expected enable-auto-push action in output, got: %s", out)
 		}
 
-		if out, err := m.RunBB(now.Add(3*time.Minute), "fix", "demo", "enable-auto-push"); err != nil {
+		if out, err := m.RunBB(now.Add(3*time.Minute), "fix", "software/demo", "enable-auto-push", "--events-json", "--no-refresh"); err != nil {
 			t.Fatalf("enable-auto-push failed: %v\n%s", err, out)
+		} else if !strings.Contains(out, `"event":"repository_started"`) || !strings.Contains(out, `"operation":"fix"`) || !strings.Contains(out, `"repository":"software/demo"`) || !strings.Contains(out, `"result":"success"`) {
+			t.Fatalf("fix event stream missing attributable lifecycle: %s", out)
 		}
 
 		meta := m.MustReadFile(firstRepoMetadataPath(t, m))
 		if !strings.Contains(meta, "auto_push: include-default-branch") {
 			t.Fatalf("expected auto_push=include-default-branch in repo metadata, got:\n%s", meta)
+		}
+		staleOut, staleErr := m.RunBB(now.Add(210*time.Second), "fix", "software/demo", "enable-auto-push", "--events-json", "--no-refresh")
+		if staleErr == nil {
+			t.Fatalf("stale advertised action should fail: %s", staleOut)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(staleOut), "\n") {
+			if !strings.HasPrefix(line, "{") || !strings.Contains(line, `"result":"failure"`) {
+				t.Fatalf("stale action output must remain failure JSONL: %q", line)
+			}
 		}
 		logOut, err := m.RunBB(now.Add(4*time.Minute), "log", "--repo", "demo", "--json")
 		if err != nil {

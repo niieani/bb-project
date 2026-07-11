@@ -91,6 +91,21 @@ public final class MenuBarModel {
   }
 
   public func sync(repository: String?) async {
+    await runOperation(repository: repository, name: "Sync") {
+      await self.client.sync(repository: repository)
+    }
+  }
+
+  public func fix(repository: String, action: String) async {
+    await runOperation(repository: repository, name: "Fix") {
+      await self.client.fix(repository: repository, action: action)
+    }
+  }
+
+  private func runOperation(
+    repository: String?, name: String,
+    makeStream: @escaping @Sendable () async -> AsyncThrowingStream<OperationEvent, Error>
+  ) async {
     guard !isSyncing else { return }
     isSyncing = true
     activeRepository = repository
@@ -101,7 +116,8 @@ public final class MenuBarModel {
     let syncError: String?
     var reportedFailure = false
     do {
-      for try await event in await client.sync(repository: repository) {
+      let stream = await makeStream()
+      for try await event in stream {
         if let eventRepository = event.repository,
           event.event == "repository_started" || event.event == "progress"
         {
@@ -131,10 +147,10 @@ public final class MenuBarModel {
           operationStatus = specificFailure
         } else {
           repositoryFailures[failedRepository] = syncError
-          operationStatus = "Sync failed: \(syncError!)"
+          operationStatus = "\(name) failed: \(syncError!)"
         }
       } else {
-        operationStatus = "Sync failed: \(syncError!)"
+        operationStatus = "\(name) failed: \(syncError!)"
       }
     }
     await refresh()
@@ -142,10 +158,10 @@ public final class MenuBarModel {
       basePresentation = MenuPresentation(
         sections: basePresentation.sections,
         lastSync: basePresentation.lastSync,
-        errors: basePresentation.errors + ["Sync failed: \(syncError)"])
+        errors: basePresentation.errors + ["\(name) failed: \(syncError)"])
       applyPlatformState()
     } else if !reportedFailure {
-      operationStatus = "Sync completed"
+      operationStatus = "\(name) completed"
       if let repository { repositoryFailures[repository] = nil }
     }
   }

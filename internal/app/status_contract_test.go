@@ -30,6 +30,7 @@ func TestStatusJSONStableContract(t *testing.T) {
 		statusContractRepo("software/pending", "pending", domain.RepoStatePending, []domain.UnsyncableReason{domain.ReasonCloneRequired}, nil, time.Time{}),
 	})
 	local.Repos[0].Behind = 1
+	local.Repos[1].OriginURL = "git@github.com:you/warning.git"
 	remoteOnly := statusContractRepo("references/remote-only", "remote-only", domain.RepoStateBlocked, []domain.UnsyncableReason{domain.ReasonDiverged}, nil, now.Add(-48*time.Hour))
 	remoteOnly.Catalog = "references"
 	remote := statusContractMachine(now, "machine-b", []domain.MachineRepoRecord{
@@ -55,14 +56,19 @@ func TestStatusJSONStableContract(t *testing.T) {
 	}
 }
 
-func TestBuildStatusReposExposesSyncOnlyForActionableLocalRepository(t *testing.T) {
+func TestBuildStatusReposExposesSafeEligibleFixesAndSync(t *testing.T) {
 	t.Parallel()
 	repos := []domain.MachineRepoRecord{
 		{RepoKey: "software/clone", Catalog: "software", State: domain.RepoStatePending, Reasons: []domain.UnsyncableReason{domain.ReasonCloneRequired}},
 		{RepoKey: "software/dirty", Catalog: "software", State: domain.RepoStateWip, Reasons: []domain.UnsyncableReason{domain.ReasonDirtyTracked}},
 		{RepoKey: "software/behind", Catalog: "software", State: domain.RepoStateSynced, Behind: 2},
+		{RepoKey: "software/format", Catalog: "software", State: domain.RepoStateSynced, OriginURL: "git@github.com:you/format.git", Warnings: []domain.UnsyncableReason{domain.ReasonRemoteFormatMismatch}},
+		{RepoKey: "software/move", Catalog: "software", State: domain.RepoStatePending, Reasons: []domain.UnsyncableReason{domain.ReasonCatalogMismatch}, ExpectedRepoKey: "references/move", ExpectedCatalog: "references", ExpectedPath: "/references/move"},
+		{RepoKey: "software/risky", Catalog: "software", State: domain.RepoStateWip, OriginURL: "git@github.com:you/risky.git", Upstream: "origin/main", Ahead: 1, HasDirtyTracked: true},
+		{RepoKey: "software/policy", Catalog: "software", State: domain.RepoStateWip, OriginURL: "git@github.com:you/policy.git", Reasons: []domain.UnsyncableReason{domain.ReasonPushPolicyBlocked}},
 	}
-	got := buildStatusRepos(repos, []domain.Catalog{{Name: "software", AutoCloneOnSync: boolPtr(true)}})
+	metadata := map[string]*domain.RepoMetadataFile{"software/policy": {RepoKey: "software/policy", PushAccess: domain.PushAccessReadWrite, AutoPush: domain.AutoPushModeEnabled}}
+	got := buildStatusRepos(repos, []domain.Catalog{{Name: "software", AutoCloneOnSync: boolPtr(true)}}, metadata)
 	if len(got[0].Actions) != 1 || got[0].Actions[0].Kind != "sync" {
 		t.Fatalf("actionable actions = %#v", got[0].Actions)
 	}
@@ -71,6 +77,18 @@ func TestBuildStatusReposExposesSyncOnlyForActionableLocalRepository(t *testing.
 	}
 	if len(got[2].Actions) != 1 || got[2].Actions[0].Label != "Sync" {
 		t.Fatalf("behind actions = %#v", got[2].Actions)
+	}
+	if len(got[3].Actions) != 1 || got[3].Actions[0] != (ProjectAction{Kind: "fix", ID: FixActionAlignRemoteFormat, Label: "Align remote URL format"}) {
+		t.Fatalf("format actions = %#v", got[3].Actions)
+	}
+	if len(got[4].Actions) != 1 || got[4].Actions[0].ID != FixActionMoveToCatalog {
+		t.Fatalf("move actions = %#v", got[4].Actions)
+	}
+	if len(got[5].Actions) != 0 {
+		t.Fatalf("risky actions = %#v", got[5].Actions)
+	}
+	if len(got[6].Actions) != 1 || got[6].Actions[0].ID != FixActionEnableAutoPush {
+		t.Fatalf("push policy actions = %#v", got[6].Actions)
 	}
 }
 

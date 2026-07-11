@@ -2,7 +2,7 @@
   "machine_id": "machine-a",
   "repos": [
     {"repo_key":"software/synced","name":"synced","catalog":"software","path":"/repos/synced","state":"synced","reasons":[],"warnings":[],"last_activity_at":"2026-07-10T11:00:00Z","actions":[{"kind":"sync","id":"sync","label":"Sync"}]},
-    {"repo_key":"software/warning","name":"warning","catalog":"software","path":"/repos/warning","state":"synced","reasons":[],"warnings":["remote_format_mismatch"],"last_activity_at":"2026-07-10T10:00:00Z","actions":[]},
+    {"repo_key":"software/warning","name":"warning","catalog":"software","path":"/repos/warning","state":"synced","reasons":[],"warnings":["remote_format_mismatch"],"last_activity_at":"2026-07-10T10:00:00Z","actions":[{"kind":"fix","id":"align-remote-format","label":"Align remote URL format"}]},
     {"repo_key":"software/blocked","name":"blocked","catalog":"software","path":"/repos/blocked","state":"blocked","reasons":["diverged"],"warnings":[],"last_activity_at":"2026-07-10T09:00:00Z","actions":[]},
     {"repo_key":"software/recent","name":"recent","catalog":"software","path":"/repos/recent","state":"blocked","reasons":["push_failed"],"warnings":[],"last_activity_at":"2026-07-10T11:00:00Z","actions":[]},
     {"repo_key":"software/stale","name":"stale","catalog":"software","path":"/repos/stale","state":"wip","reasons":["dirty_tracked"],"warnings":[],"last_activity_at":"2026-07-09T11:00:00Z","actions":[]},

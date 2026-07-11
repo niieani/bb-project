@@ -94,7 +94,7 @@ func buildStatusSummary(repos []domain.MachineRepoRecord) StatusSummary {
 	return summary
 }
 
-func buildStatusRepos(repos []domain.MachineRepoRecord, catalogs []domain.Catalog) []StatusRepo {
+func buildStatusRepos(repos []domain.MachineRepoRecord, catalogs []domain.Catalog, metadata map[string]*domain.RepoMetadataFile) []StatusRepo {
 	catalogByName := make(map[string]domain.Catalog, len(catalogs))
 	for _, catalog := range catalogs {
 		catalogByName[catalog.Name] = catalog
@@ -104,6 +104,14 @@ func buildStatusRepos(repos []domain.MachineRepoRecord, catalogs []domain.Catalo
 		actions := []ProjectAction{}
 		if catalog, ok := catalogByName[repo.Catalog]; ok && syncActionable(repo, catalog) {
 			actions = append(actions, ProjectAction{Kind: "sync", ID: "sync", Label: "Sync"})
+		}
+		eligible := eligibleFixActions(repo, metadata[repo.RepoKey], fixEligibilityContext{})
+		for _, action := range eligible {
+			spec, ok := fixActionSpecFor(action)
+			if !ok || !isMenubarSafeFixAction(action) {
+				continue
+			}
+			actions = append(actions, ProjectAction{Kind: "fix", ID: action, Label: spec.Label})
 		}
 		out = append(out, StatusRepo{
 			RepoKey: repo.RepoKey, Name: repo.Name, Catalog: repo.Catalog, Path: repo.Path,

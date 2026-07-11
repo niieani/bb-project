@@ -286,7 +286,7 @@ Shows last recorded machine repo state.
 The JSON contract exposes:
 
 - `machine_id`
-- selected local `repos`, each with `repo_key`, `name`, `catalog`, `path`, `state`, `reasons`, `warnings`, and `last_activity_at`
+- selected local `repos`, each with `repo_key`, `name`, `catalog`, `path`, `state`, `reasons`, `warnings`, `last_activity_at`, and Go-computed `actions`
 - `summary` counts for total/synced/pending/wip/blocked repositories and warnings
 - `last_sync`: the local machine's latest `sync_run` journal event, or explicit `null` before the first run
 - `attention.items`: fleet-wide non-synced repositories with machine/repository identity, state, reasons, dominant reason, activity time, and Go-computed notification `eligible` status
@@ -308,9 +308,11 @@ swift test --package-path macos/BBMenuBar
 
 The Codex Run action uses the same build-and-run script. Development launches pass the just-built repository `bb` binary explicitly; installed builds resolve `bb` from `PATH`, Homebrew, or `~/bin`.
 
-Opening the status item shows compact sections for local blocked repositories, stale local WIP, actionable local repositories, and eligible attention on other machines. Empty sections disappear. Go-owned action capabilities expose a compact `Sync` control only where synchronization can safely make progress. Row and global sync stream the active repository and concise phase into the popup; competing mutations remain disabled and completion refreshes status plus overview. The app refreshes every five minutes and after macOS wake.
+Opening the status item shows compact sections for local blocked repositories, stale local WIP, actionable local repositories, and eligible attention on other machines. Empty sections disappear. Go-owned action capabilities expose `Sync` only where synchronization can safely make progress and `Fix`/`Fix…` for deterministic non-interactive remedies; risky and remote actions remain unavailable. Row mutations stream the active repository and concise phase into the popup; competing mutations remain disabled and completion refreshes status plus overview. The app refreshes every five minutes and after macOS wake.
 
 Automation clients can run one repository with `bb sync --repo <repo-key> --events-json`. The JSON-lines stream reports operation/repository lifecycle, phase, message, result, and error without requiring clients to parse human logs.
+
+Machine clients may execute a status-advertised safe fix with `bb fix <repo-key> <action-id> --events-json --no-refresh`. Event mode rejects actions not explicitly classified safe for machine clients.
 
 The app is also the sole notification surface. It requests macOS notification permission explicitly, submits one fleet digest from the Go-computed eligible attention snapshot, persists whole-set fingerprint deduplication and throttling, and shows permission, persistence, or delivery failures in the menu. Clicking a digest opens its exact repository attention list. The distributed app registers itself with macOS launch-at-login; approval or registration failures remain visible rather than silently disabling background delivery.
 

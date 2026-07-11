@@ -4,6 +4,13 @@ public protocol BBClient: Sendable {
   func statusJSON() async throws -> Data
   func overviewJSON() async throws -> Data
   func sync(repository: String?) async -> AsyncThrowingStream<OperationEvent, Error>
+  func fix(repository: String, action: String) async -> AsyncThrowingStream<OperationEvent, Error>
+}
+
+extension BBClient {
+  public func fix(repository: String, action: String) async -> AsyncThrowingStream<OperationEvent, Error> {
+    AsyncThrowingStream { $0.finish(throwing: BBClientError.commandFailed(code: 2, detail: "fix is unavailable")) }
+  }
 }
 
 public struct OperationEvent: Decodable, Equatable, Sendable {
@@ -35,6 +42,10 @@ public struct ProcessBBClient: BBClient {
     var arguments = ["sync", "--quiet", "--events-json"]
     if let repository { arguments += ["--repo", repository] }
     return eventStream(arguments: arguments)
+  }
+
+  public func fix(repository: String, action: String) async -> AsyncThrowingStream<OperationEvent, Error> {
+    eventStream(arguments: ["fix", repository, action, "--events-json", "--no-refresh"])
   }
 
   private func eventStream(arguments: [String]) -> AsyncThrowingStream<OperationEvent, Error> {

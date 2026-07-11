@@ -468,6 +468,18 @@ func TestRunScanAndSyncForwardOptions(t *testing.T) {
 		}
 	})
 
+	t.Run("targeted fix event flag", func(t *testing.T) {
+		t.Parallel()
+		fake := &fakeApp{}
+		code, _, stderr, _, _ := runCLI(t, fake, []string{"fix", "software/api", "align-remote-format", "--events-json"})
+		if code != 0 || stderr != "" {
+			t.Fatalf("code=%d stderr=%q", code, stderr)
+		}
+		if !fake.fixOpts.EventsJSON {
+			t.Fatal("events-json was not forwarded")
+		}
+	})
+
 	t.Run("removed notification flags fail explicitly", func(t *testing.T) {
 		t.Parallel()
 		for _, flag := range []string{"--notify", "--notify-backend"} {

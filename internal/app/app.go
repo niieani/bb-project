@@ -80,6 +80,7 @@ type FixOptions struct {
 	ReturnToOriginalBranchAndSync bool
 	SyncStrategy                  FixSyncStrategy
 	NoRefresh                     bool
+	EventsJSON                    bool
 }
 
 type CloneOptions struct {
@@ -1411,9 +1412,13 @@ func (a *App) RunStatus(jsonOut bool, include []string) (int, error) {
 		if err != nil {
 			return 2, err
 		}
+		metas, err := state.LoadAllRepoMetadata(a.Paths)
+		if err != nil {
+			return 2, err
+		}
 		payload := StatusContract{
 			MachineID:      machine.MachineID,
-			Repos:          buildStatusRepos(filtered, selected),
+			Repos:          buildStatusRepos(filtered, selected, repoMetadataByKey(metas)),
 			Summary:        buildStatusSummary(filtered),
 			LastSync:       lastSync,
 			Attention:      buildFleetAttention(fleet, a.Now(), cfg.Attention),

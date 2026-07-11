@@ -99,6 +99,14 @@ func (e *fixIneligibleError) Unwrap() error {
 }
 
 func (a *App) runFix(opts FixOptions) (int, error) {
+	if opts.EventsJSON && (strings.TrimSpace(opts.Project) == "" || strings.TrimSpace(opts.Action) == "") {
+		return 2, errors.New("--events-json requires a project and action")
+	}
+	if opts.EventsJSON {
+		previousVerbose := a.isVerbose()
+		a.SetVerbose(false)
+		defer a.SetVerbose(previousVerbose)
+	}
 	if strings.TrimSpace(opts.Project) == "" && strings.TrimSpace(opts.Action) == "" {
 		if opts.AIMessage {
 			return 2, errors.New("--ai-message requires an explicit action")
@@ -113,7 +121,9 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 	}
 
 	originalGitRunner := a.Git
-	a.Git = a.Git.WithIOMode(gitx.GitIOModeAttached)
+	if !opts.EventsJSON {
+		a.Git = a.Git.WithIOMode(gitx.GitIOModeAttached)
+	}
 	defer func() {
 		a.Git = originalGitRunner
 	}()
@@ -144,6 +154,9 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 	}
 
 	action := strings.TrimSpace(opts.Action)
+	if opts.EventsJSON && !isMenubarSafeFixAction(action) {
+		return 2, fmt.Errorf("fix action %q is not available for machine clients", action)
+	}
 	if opts.AIMessage {
 		if !isCommitProducingFixAction(action) {
 			return 2, errors.New("--ai-message is only supported for stage-commit-push, publish-new-branch, and checkpoint-then-sync")
@@ -154,6 +167,15 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 	}
 
 	if !containsAction(eligible, action) {
+		if opts.EventsJSON {
+			reason := ineligibleFixReason(action, target.Record, eligibility)
+			if reason == "" {
+				reason = "fix action is no longer eligible"
+			}
+			a.emitOperationEvent(true, OperationEvent{Event: "repository_finished", Operation: "fix", Repository: target.Record.RepoKey, Phase: action, Message: "Fix unavailable", Result: "failure", Error: reason})
+			a.emitOperationEvent(true, OperationEvent{Event: "operation_finished", Operation: "fix", Repository: target.Record.RepoKey, Message: "Fix unavailable", Result: "failure", Error: reason})
+			return 1, nil
+		}
 		a.renderFixStatus(target.Record, eligible)
 		fmt.Fprintf(a.Stdout, "action %q is not eligible for %s\n", action, target.Record.Name)
 		if reason := ineligibleFixReason(action, target.Record, eligibility); reason != "" {
@@ -170,31 +192,56 @@ func (a *App) runFix(opts FixOptions) (int, error) {
 		opts.CommitMessage = message
 	}
 
-	updated, err := a.applyFixAction(opts.IncludeCatalogs, target.Record.Path, action, fixApplyOptions{
+	repository := target.Record.RepoKey
+	a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "operation_started", Operation: "fix", Repository: repository, Message: "Starting " + action})
+	a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "repository_started", Operation: "fix", Repository: repository, Phase: action, Message: "Applying " + action})
+	observer := fixApplyStepObserver(nil)
+	if opts.EventsJSON {
+		observer = func(event fixApplyStepEvent) {
+			if event.Status != fixApplyStepRunning {
+				return
+			}
+			a.emitOperationEvent(true, OperationEvent{Event: "progress", Operation: "fix", Repository: repository, Phase: event.Entry.ID, Message: event.Entry.Summary})
+		}
+	}
+	updated, err := a.applyFixActionWithObserver(opts.IncludeCatalogs, target.Record.Path, action, fixApplyOptions{
 		Interactive:                   false,
 		CommitMessage:                 opts.CommitMessage,
 		ForkBranchRenameTo:            opts.PublishBranch,
 		ReturnToOriginalBranchAndSync: opts.ReturnToOriginalBranchAndSync,
 		SyncStrategy:                  strategy,
-	})
+	}, observer)
 	if errors.Is(err, errFixActionNotEligible) {
 		var ineligibleErr *fixIneligibleError
+		reason := "fix action is no longer eligible"
 		if errors.As(err, &ineligibleErr) && strings.TrimSpace(ineligibleErr.Reason) != "" {
-			fmt.Fprintln(a.Stdout, ineligibleErr.Reason)
+			reason = ineligibleErr.Reason
+		}
+		if opts.EventsJSON {
+			a.emitOperationEvent(true, OperationEvent{Event: "repository_finished", Operation: "fix", Repository: repository, Phase: action, Message: "Fix unavailable", Result: "failure", Error: reason})
+			a.emitOperationEvent(true, OperationEvent{Event: "operation_finished", Operation: "fix", Repository: repository, Message: "Fix unavailable", Result: "failure", Error: reason})
+		} else {
+			fmt.Fprintln(a.Stdout, reason)
 		}
 		return 1, nil
 	}
 	if err != nil {
+		a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "repository_finished", Operation: "fix", Repository: repository, Phase: action, Message: "Fix failed", Result: "failure", Error: err.Error()})
+		a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "operation_finished", Operation: "fix", Repository: repository, Message: "Fix failed", Result: "failure", Error: err.Error()})
 		return 2, err
 	}
+	a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "repository_finished", Operation: "fix", Repository: repository, Phase: action, Message: "Fix completed", Result: "success"})
+	a.emitOperationEvent(opts.EventsJSON, OperationEvent{Event: "operation_finished", Operation: "fix", Repository: repository, Message: "Fix completed", Result: "success"})
 
-	fmt.Fprintf(a.Stdout, "applied %s to %s\n", action, updated.Record.Name)
-	a.renderFixStatus(updated.Record, eligibleFixActions(updated.Record, updated.Meta, fixEligibilityContext{
-		Interactive:     false,
-		Risk:            updated.Risk,
-		SyncStrategy:    strategy,
-		SyncFeasibility: updated.SyncFeasibility,
-	}))
+	if !opts.EventsJSON {
+		fmt.Fprintf(a.Stdout, "applied %s to %s\n", action, updated.Record.Name)
+		a.renderFixStatus(updated.Record, eligibleFixActions(updated.Record, updated.Meta, fixEligibilityContext{
+			Interactive:     false,
+			Risk:            updated.Risk,
+			SyncStrategy:    strategy,
+			SyncFeasibility: updated.SyncFeasibility,
+		}))
+	}
 	if updated.Record.State == domain.RepoStateSynced {
 		return 0, nil
 	}

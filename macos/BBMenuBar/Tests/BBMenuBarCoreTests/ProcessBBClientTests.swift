@@ -114,6 +114,17 @@ struct ProcessBBClientTests {
     #expect(error == .commandFailed(code: 7, detail: ""))
     #expect(try String(contentsOf: log, encoding: .utf8) == "sync\n--quiet\n--events-json\n")
   }
+
+  @Test("fix uses stable repository and action identifiers")
+  func fixInvocation() async throws {
+    let directory = FileManager.default.temporaryDirectory.appending(path: "bb-fix-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let log = directory.appending(path: "arguments")
+    let executable = try makeExecutable("printf '%s\\n' \"$@\" > '\(log.path)'", directory: directory)
+    for try await _ in await ProcessBBClient(executableURL: executable).fix(repository: "software/api", action: "align-remote-format") {}
+    #expect(try String(contentsOf: log, encoding: .utf8) == "fix\nsoftware/api\nalign-remote-format\n--events-json\n--no-refresh\n")
+  }
 }
 
 private func makeExecutable(_ body: String, directory: URL? = nil) throws -> URL {

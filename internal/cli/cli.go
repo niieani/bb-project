@@ -520,6 +520,7 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 	var returnToOriginalSync bool
 	var syncStrategy string
 	var noRefresh bool
+	var eventsJSON bool
 
 	cmd := &cobra.Command{
 		Use:   "fix [project] [action]",
@@ -547,6 +548,7 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 				ReturnToOriginalBranchAndSync: returnToOriginalSync,
 				SyncStrategy:                  strategy,
 				NoRefresh:                     noRefresh,
+				EventsJSON:                    eventsJSON,
 			}
 			if len(args) > 0 {
 				opts.Project = args[0]
@@ -566,6 +568,7 @@ func newFixCommand(runtime *runtimeState) *cobra.Command {
 	cmd.Flags().BoolVar(&returnToOriginalSync, "return-to-original-sync", false, "After publish-new-branch, switch back to the original branch and run pull --ff-only.")
 	cmd.Flags().StringVar(&syncStrategy, "sync-strategy", string(app.FixSyncStrategyRebase), "Sync strategy for sync-with-upstream and pre-push validation (rebase|merge).")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Use current machine snapshot without running a refresh scan first.")
+	cmd.Flags().BoolVar(&eventsJSON, "events-json", false, "Emit newline-delimited machine-readable operation events.")
 
 	return cmd
 }

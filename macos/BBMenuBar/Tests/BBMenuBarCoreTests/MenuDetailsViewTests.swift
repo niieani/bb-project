@@ -20,6 +20,15 @@ struct MenuDetailsViewTests {
     #expect(row.failure == "pull failed")
   }
 
+  @Test("one fix is direct and several fixes use a selection label")
+  func fixLabels() {
+    let attention = AttentionItem(machineID: "machine-a", repoKey: "software/api", name: "api", state: .blocked, dominantReason: "catalog_mismatch", reasons: ["catalog_mismatch"], lastActivityAt: .distantPast, eligible: true)
+    let one = MenuItem(attention: attention, actions: [ProjectAction(kind: "fix", id: "move-to-catalog", label: "Move to expected catalog")])
+    #expect(MenuItemOperationPresentation(item: one, failure: nil).actionLabel == "Fix")
+    let many = MenuItem(attention: attention, actions: [ProjectAction(kind: "fix", id: "move-to-catalog", label: "Move"), ProjectAction(kind: "fix", id: "align-remote-format", label: "Align")])
+    #expect(MenuItemOperationPresentation(item: many, failure: nil).actionLabel == "Fix…")
+  }
+
   @Test("long popup content is hosted in a vertical scroll view")
   @MainActor
   func longContentScrolls() {

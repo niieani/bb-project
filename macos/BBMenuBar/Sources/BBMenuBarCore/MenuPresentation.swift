@@ -19,12 +19,13 @@ public struct MenuPresentation: Equatable, Sendable {
       let blocked = status.attention.items
         .filter { $0.machineID == status.machineID && $0.state == .blocked }
         .map { MenuItem(attention: $0, actions: actionMap[$0.repoKey] ?? []) }
-      let actionable = status.repos
-        .filter { !$0.actions.isEmpty }
-        .map { MenuItem(repo: $0, machineID: status.machineID) }
       let staleWIP = status.attention.items
         .filter { $0.machineID == status.machineID && $0.state == .wip && $0.eligible }
-        .map { MenuItem(attention: $0) }
+        .map { MenuItem(attention: $0, actions: actionMap[$0.repoKey] ?? []) }
+      let renderedAttentionKeys = Set((blocked + staleWIP).map(\.repoKey))
+      let actionable = status.repos
+        .filter { !$0.actions.isEmpty && !renderedAttentionKeys.contains($0.repoKey) }
+        .map { MenuItem(repo: $0, machineID: status.machineID) }
       let overviewIdentities = Set(
         overview?.repos.flatMap { repo in
           repo.cells.filter(\.present).map { "\($0.machineID)\u{0}\(repo.repoKey)" }
@@ -37,7 +38,7 @@ public struct MenuPresentation: Equatable, Sendable {
         .map { MenuItem(attention: $0) }
       if !blocked.isEmpty { sections.append(MenuSection(title: "Blocked", items: blocked)) }
       if !actionable.isEmpty {
-        sections.append(MenuSection(title: "Ready to sync", items: actionable))
+        sections.append(MenuSection(title: "Actions available", items: actionable))
       }
       if !staleWIP.isEmpty { sections.append(MenuSection(title: "Stale WIP", items: staleWIP)) }
       if !remote.isEmpty { sections.append(MenuSection(title: "Other machines", items: remote)) }

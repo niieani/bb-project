@@ -5,17 +5,20 @@ public struct MenuDetailsView: View {
   private let activeRepository: String?
   private let mutationsDisabled: Bool
   private let onSync: @MainActor (String) -> Void
+  private let onFix: @MainActor (String, String) -> Void
   private let repositoryFailures: [String: String]
 
   public init(
     presentation: MenuPresentation, activeRepository: String? = nil,
     mutationsDisabled: Bool = false, repositoryFailures: [String: String] = [:],
-    onSync: @escaping @MainActor (String) -> Void = { _ in }
+    onSync: @escaping @MainActor (String) -> Void = { _ in },
+    onFix: @escaping @MainActor (String, String) -> Void = { _, _ in }
   ) {
     self.presentation = presentation
     self.activeRepository = activeRepository
     self.mutationsDisabled = mutationsDisabled
     self.onSync = onSync
+    self.onFix = onFix
     self.repositoryFailures = repositoryFailures
   }
 
@@ -29,7 +32,7 @@ public struct MenuDetailsView: View {
               MenuItemRow(
                 item: item, isActive: activeRepository == item.repoKey,
                 mutationsDisabled: mutationsDisabled, failure: repositoryFailures[item.repoKey],
-                onSync: onSync)
+                onSync: onSync, onFix: onFix)
             }
           }
           Divider()
@@ -65,6 +68,7 @@ private struct MenuItemRow: View {
   let mutationsDisabled: Bool
   let failure: String?
   let onSync: @MainActor (String) -> Void
+  let onFix: @MainActor (String, String) -> Void
   @Environment(\.colorScheme) private var colorScheme
 
   private var operation: MenuItemOperationPresentation {
@@ -83,10 +87,7 @@ private struct MenuItemRow: View {
         Text(item.title)
         Spacer()
         if isActive { ProgressView().controlSize(.small) }
-        if let actionLabel = operation.actionLabel {
-          Button(actionLabel) { onSync(item.repoKey) }.controlSize(.small).disabled(
-            mutationsDisabled)
-        }
+        actionControls
       }
       Text(item.detail).font(.caption).foregroundStyle(.secondary).padding(.leading, 15)
       if let failure {
@@ -96,6 +97,22 @@ private struct MenuItemRow: View {
     .accessibilityElement(children: item.actions.isEmpty ? .combine : .contain)
     .accessibilityLabel("\(item.title), \(item.statusTone.accessibilityName), \(item.detail)")
   }
+
+  @ViewBuilder private var actionControls: some View {
+    if let sync = item.actions.first(where: { $0.kind == "sync" }) {
+      Button(sync.label) { onSync(item.repoKey) }.controlSize(.small).disabled(mutationsDisabled)
+    }
+    let fixes = item.actions.filter { $0.kind == "fix" }
+    if fixes.count == 1, let fix = fixes.first {
+      Button("Fix") { onFix(item.repoKey, fix.id) }.controlSize(.small).disabled(mutationsDisabled)
+    } else if fixes.count > 1 {
+      Menu("Fix…") {
+        ForEach(fixes, id: \.id) { fix in
+          Button(fix.label) { onFix(item.repoKey, fix.id) }
+        }
+      }.controlSize(.small).disabled(mutationsDisabled)
+    }
+  }
 }
 
 struct MenuItemOperationPresentation: Equatable {
@@ -103,7 +120,8 @@ struct MenuItemOperationPresentation: Equatable {
   let failure: String?
 
   init(item: MenuItem, failure: String?) {
-    actionLabel = item.actions.first(where: { $0.kind == "sync" })?.label
+    let fixes = item.actions.filter { $0.kind == "fix" }
+    actionLabel = fixes.count > 1 ? "Fix…" : (fixes.count == 1 ? "Fix" : item.actions.first(where: { $0.kind == "sync" })?.label)
     self.failure = failure
   }
 }

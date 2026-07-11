@@ -46,9 +46,11 @@ struct BBMenuBarApp: App {
         MenuDetailsView(
           presentation: model.presentation, activeRepository: model.activeRepository,
           mutationsDisabled: model.isSyncing, repositoryFailures: model.repositoryFailures
-        ) { repository in
+        , onSync: { repository in
           Task { await model.sync(repository: repository) }
-        }
+        }, onFix: { repository, action in
+          Task { await model.fix(repository: repository, action: action) }
+        })
 
         if let status = model.operationStatus {
           Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)

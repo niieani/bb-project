@@ -11,6 +11,7 @@ type fixActionSpec struct {
 	Label       string
 	Description string
 	Risky       bool
+	MenubarSafe bool
 	BuildPlan   func(ctx fixActionPlanContext) []fixActionPlanEntry
 }
 
@@ -138,20 +139,28 @@ var fixActionSpecs = map[string]fixActionSpec{
 		Label:       "Allow auto-push in sync",
 		Description: "Allow future bb sync runs to auto-push this repo by enabling its auto-push policy.",
 		Risky:       false,
+		MenubarSafe: true,
 		BuildPlan:   planFixActionEnableAutoPush,
 	},
 	FixActionMoveToCatalog: {
 		Label:       "Move to expected catalog",
 		Description: "Move this local repository to the expected catalog/path and update repository metadata history.",
 		Risky:       false,
+		MenubarSafe: true,
 		BuildPlan:   planFixActionMoveToCatalog,
 	},
 	FixActionAlignRemoteFormat: {
 		Label:       "Align remote URL format",
 		Description: "Rewrite the remote URL to your configured GitHub format template and reset push-access probe state.",
 		Risky:       false,
+		MenubarSafe: true,
 		BuildPlan:   planFixActionAlignRemoteFormat,
 	},
+}
+
+func isMenubarSafeFixAction(action string) bool {
+	spec, ok := fixActionSpecFor(action)
+	return ok && spec.MenubarSafe && !spec.Risky
 }
 
 func fixActionSpecFor(action string) (fixActionSpec, bool) {
