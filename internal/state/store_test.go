@@ -277,6 +277,9 @@ func TestDefaultConfigSetsSchedulerInterval(t *testing.T) {
 	if cfg.Scheduler.IntervalMinutes != 60 {
 		t.Fatalf("scheduler interval = %d, want 60", cfg.Scheduler.IntervalMinutes)
 	}
+	if cfg.Overview.MachineStaleDays != 3 {
+		t.Fatalf("machine stale days = %d", cfg.Overview.MachineStaleDays)
+	}
 }
 
 func TestDefaultConfigCloneLinkDefaults(t *testing.T) {

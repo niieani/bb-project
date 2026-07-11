@@ -254,6 +254,9 @@ func validateConfigForSave(cfg domain.ConfigFile) error {
 	if cfg.Notify.WIPStaleHours < 0 {
 		return fmt.Errorf("notify.wip_stale_hours must be >= 0")
 	}
+	if cfg.Overview.MachineStaleDays < 1 {
+		return fmt.Errorf("overview.machine_stale_days must be >= 1")
+	}
 	if cfg.Scheduler.IntervalMinutes < 1 {
 		return fmt.Errorf("scheduler.interval_minutes must be >= 1")
 	}

@@ -286,6 +286,12 @@ Shows last recorded machine repo state.
 - plain mode: one line per repo with tier/reasons, followed by a tier summary
 - `--json`: machine + schema-v2 repo observations, including state, reasons, warnings, and last activity
 
+### `bb overview [--all] [--json] [--include-catalog <name> ...]`
+
+Shows a read-only cross-machine matrix with the local machine first. Non-synced cells include the dominant reason and last-activity age; missing copies show as not cloned. Repositories synced everywhere collapse into one count unless `--all` is used. Stale machine publications are called out explicitly. `--json` is a stable full-matrix contract for tooling and always includes collapsed repositories, every machine, states, reasons, warnings, and timestamps. Overview always exits `0`, including when blocked repositories exist.
+
+In JSON, machines expose `id`, `here`, `published`, optional `updated_at`, and `stale`; unpublished local columns omit `updated_at` rather than fabricating an age. Repository rows expose `repo_key`, `synced_everywhere`, and ordered `cells`; each cell exposes machine identity, presence, optional state, reasons, warnings, and last activity.
+
 ### `bb doctor [--include-catalog <name> ...]`
 
 Prints non-synced tiers, reasons, and warnings from the machine file.
@@ -510,6 +516,8 @@ notify:
   throttle_minutes: 60
   quiet_hours: 2
   wip_stale_hours: 24
+overview:
+  machine_stale_days: 3
 integrations:
   lumen:
     enabled: true

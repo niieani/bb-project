@@ -117,7 +117,8 @@ func DefaultConfig() domain.ConfigFile {
 		Scheduler: domain.SchedulerConfig{
 			IntervalMinutes: 60,
 		},
-		Notify: domain.NotifyConfig{Enabled: true, ThrottleMinutes: 60, QuietHours: 2, WIPStaleHours: 24},
+		Notify:   domain.NotifyConfig{Enabled: true, ThrottleMinutes: 60, QuietHours: 2, WIPStaleHours: 24},
+		Overview: domain.OverviewConfig{MachineStaleDays: 3},
 		Integrations: domain.Integrations{
 			Lumen: domain.LumenIntegrationConfig{
 				Enabled:                            true,

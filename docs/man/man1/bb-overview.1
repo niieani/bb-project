@@ -1,0 +1,39 @@
+.nh
+.TH "BB" "1" "Jul 2026" "bb" ""
+
+.SH NAME
+bb-overview - Show repository state across machines.
+
+
+.SH SYNOPSIS
+\fBbb overview [flags]\fP
+
+
+.SH DESCRIPTION
+Show repository state across machines.
+
+
+.SH OPTIONS
+\fB--all\fP[=false]
+	Show repositories synced on every machine.
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for overview
+
+.PP
+\fB--include-catalog\fP=[]
+	Limit scope to selected catalogs (repeatable).
+
+.PP
+\fB--json\fP[=false]
+	Emit the stable JSON matrix contract.
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB-q\fP, \fB--quiet\fP[=false]
+	Suppress verbose bb logs.
+
+
+.SH SEE ALSO
+\fBbb(1)\fP

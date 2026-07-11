@@ -90,6 +90,7 @@ type ConfigFile struct {
 	Move           MoveConfig      `yaml:"move"`
 	Scheduler      SchedulerConfig `yaml:"scheduler"`
 	Notify         NotifyConfig    `yaml:"notify"`
+	Overview       OverviewConfig  `yaml:"overview"`
 	Integrations   Integrations    `yaml:"integrations"`
 }
 
@@ -146,6 +147,9 @@ type NotifyConfig struct {
 	ThrottleMinutes int  `yaml:"throttle_minutes"`
 	QuietHours      int  `yaml:"quiet_hours"`
 	WIPStaleHours   int  `yaml:"wip_stale_hours"`
+}
+type OverviewConfig struct {
+	MachineStaleDays int `yaml:"machine_stale_days"`
 }
 
 type Integrations struct {

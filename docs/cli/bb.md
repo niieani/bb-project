@@ -31,6 +31,7 @@ bb [flags]
 * [bb init](bb_init.md)	 - Initialize or adopt a repository and register metadata.
 * [bb link](bb_link.md)	 - Create local reference symlink to a project or repository.
 * [bb operate](bb_operate.md)	 - Launch Lumen operate flow in repository context.
+* [bb overview](bb_overview.md)	 - Show repository state across machines.
 * [bb repo](bb_repo.md)	 - Manage repository metadata and policy settings.
 * [bb scan](bb_scan.md)	 - Discover repositories under catalogs and publish machine state.
 * [bb scheduler](bb_scheduler.md)	 - Manage periodic sync scheduler integration.

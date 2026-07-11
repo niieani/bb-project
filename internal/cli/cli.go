@@ -31,6 +31,7 @@ type appRunner interface {
 	RunDiff(project string, args []string) (int, error)
 	RunOperate(project string, args []string) (int, error)
 	RunStatus(jsonOut bool, include []string) (int, error)
+	RunOverview(opts app.OverviewOptions) (int, error)
 	RunDoctor(include []string) (int, error)
 	RunEnsure(include []string) (int, error)
 	RunSchedulerInstall(opts app.SchedulerInstallOptions) (int, error)
@@ -184,6 +185,7 @@ func newRootCommand(runtime *runtimeState) *cobra.Command {
 		newSyncCommand(runtime),
 		newFixCommand(runtime),
 		newStatusCommand(runtime),
+		newOverviewCommand(runtime),
 		newDoctorCommand(runtime),
 		newEnsureCommand(runtime),
 		newSchedulerCommand(runtime),
@@ -470,6 +472,23 @@ func newStatusCommand(runtime *runtimeState) *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Print machine and repository state as JSON.")
 	cmd.Flags().StringArrayVar(&includeCatalogs, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
 
+	return cmd
+}
+
+func newOverviewCommand(runtime *runtimeState) *cobra.Command {
+	var include []string
+	var all, jsonOut bool
+	cmd := &cobra.Command{Use: "overview", Short: "Show repository state across machines.", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+		runner, err := runtime.appRunner()
+		if err != nil {
+			return withExitCode(2, err)
+		}
+		code, err := runner.RunOverview(app.OverviewOptions{IncludeCatalogs: include, All: all, JSON: jsonOut})
+		return withExitCode(code, err)
+	}}
+	cmd.Flags().StringArrayVar(&include, "include-catalog", nil, "Limit scope to selected catalogs (repeatable).")
+	cmd.Flags().BoolVar(&all, "all", false, "Show repositories synced on every machine.")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit the stable JSON matrix contract.")
 	return cmd
 }
 

@@ -66,6 +66,9 @@ type fakeApp struct {
 	infoErr         error
 	statusCode      int
 	statusErr       error
+	overviewCode    int
+	overviewErr     error
+	overviewOpts    app.OverviewOptions
 	doctorCode      int
 	doctorErr       error
 	ensureCode      int
@@ -145,6 +148,10 @@ func (f *fakeApp) RunStatus(jsonOut bool, include []string) (int, error) {
 	f.statusJSON = jsonOut
 	f.statusIncl = append([]string(nil), include...)
 	return f.statusCode, f.statusErr
+}
+func (f *fakeApp) RunOverview(opts app.OverviewOptions) (int, error) {
+	f.overviewOpts = opts
+	return f.overviewCode, f.overviewErr
 }
 
 func (f *fakeApp) RunDoctor(include []string) (int, error) {
@@ -463,6 +470,15 @@ func TestRunStatusDoctorEnsureForwardOptions(t *testing.T) {
 		t.Fatal("expected json output flag to be forwarded")
 	}
 	mustEqualSlices(t, fake.statusIncl, []string{"software", "references"})
+	fake = &fakeApp{}
+	code, _, stderr, _, _ = runCLI(t, fake, []string{"overview", "--all", "--json", "--include-catalog", "software", "--include-catalog", "references"})
+	if code != 0 || stderr != "" {
+		t.Fatalf("overview code=%d stderr=%q", code, stderr)
+	}
+	if !fake.overviewOpts.All || !fake.overviewOpts.JSON {
+		t.Fatalf("overview opts=%+v", fake.overviewOpts)
+	}
+	mustEqualSlices(t, fake.overviewOpts.IncludeCatalogs, []string{"software", "references"})
 
 	fake = &fakeApp{}
 	code, _, stderr, _, _ = runCLI(t, fake, []string{"doctor", "--include-catalog", "software"})
