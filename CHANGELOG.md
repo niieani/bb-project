@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/niieani/bb-project/compare/v0.8.0...v0.8.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **release:** unblock loaded macOS runners ([81f6c35](https://github.com/niieani/bb-project/commit/81f6c3515b2dba4570f439e48f0bf50e7d52042c))
+
 ## [0.8.0](https://github.com/niieani/bb-project/compare/v0.7.0...v0.8.0) (2026-07-11)
 
 
