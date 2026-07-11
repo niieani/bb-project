@@ -6,6 +6,7 @@ PACKAGE_DIR="$ROOT_DIR/macos/BBMenuBar"
 APP_NAME="BBMenuBar"
 BUNDLE_ID="dev.niieani.bb-menubar"
 MIN_SYSTEM_VERSION="14.0"
+NOTARY_WAIT_TIMEOUT="30m"
 
 version=""
 output_dir=""
@@ -74,7 +75,7 @@ if ((signing_requested)); then
   codesign --force --options runtime --timestamp --sign "$sign_identity" "$app_bundle"
   codesign --verify --deep --strict --verbose=2 "$app_bundle" >&2
   ditto --norsrc --noextattr -c -k --keepParent "$app_bundle" "$archive"
-  xcrun notarytool submit "$archive" --key "$notary_key" --key-id "$notary_key_id" --issuer "$notary_issuer_id" --wait >&2
+  xcrun notarytool submit "$archive" --key "$notary_key" --key-id "$notary_key_id" --issuer "$notary_issuer_id" --wait --timeout "$NOTARY_WAIT_TIMEOUT" >&2
   xcrun stapler staple "$app_bundle" >&2
   xcrun stapler validate "$app_bundle" >&2
   rm -f "$archive"

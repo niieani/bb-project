@@ -37,6 +37,8 @@ brew reinstall --cask niieani/tap/bb-menubar
 open -a BBMenuBar
 ```
 
+The release job bounds its synchronous notarization wait at 30 minutes. Apple continues processing a timed-out submission, while the job fails promptly instead of occupying the hosted runner for GitHub's six-hour maximum. Retry the tagged recovery workflow after the Notary service recovers; do not publish an unstapled app.
+
 Then verify the menu reports no notification or launch-at-login error, trigger an eligible attention snapshot, confirm the banner is attributed to BBMenuBar, click it to open the exact digest list, and confirm interval/wake refresh can deliver without a terminal process.
 
 Local unsigned packaging/config checks:
