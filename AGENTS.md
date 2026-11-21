@@ -61,9 +61,9 @@ If user gives you UI/UX feedback, update it with a generalized rule.
 
 ### Issue tracker
 
-Issues are tracked in `fp`. See `docs/agents/issue-tracker.md`.
-
-Brainstorms and other fp features see: FP_AGENTS.md
+Issues and planned work are Task notes in Bazyli's Vault, under the project note [[bb]].
+A Task handed to an agent arrives as the brief in its prompt, with context in `~/context/<Task note name>/`.
+Commits for a Task carry a `Vault-Task: <Task note name>` git trailer.
 
 ### Triage labels
 
